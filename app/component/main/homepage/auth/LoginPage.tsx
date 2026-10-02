@@ -1,4 +1,67 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+
 export default function LoginPage() {
+  const router = useRouter();
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setMessage("");
+
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error || !data.user) {
+      setMessage(error?.message ?? "Sign in failed. Please try again.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("user_profiles")
+      .select("role")
+      .eq("id", data.user.id)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      setMessage(profileError?.message ?? "Your account profile is not ready yet.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (profile.role === "pharmacy_user") {
+      const { data: pharmacy, error: pharmacyError } = await supabase
+        .from("pharmacies")
+        .select("id")
+        .eq("owner_user_id", data.user.id)
+        .maybeSingle();
+
+      if (pharmacyError) {
+        setMessage(pharmacyError.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!pharmacy) {
+        router.replace("/shop-setup");
+        return;
+      }
+    }
+
+    router.replace(profile.role === "admin" || profile.role === "superadmin"
+      ? "/admin-dashboard"
+      : "/dashboard");
+  }
+
   return (
     <div
       style={{
@@ -144,6 +207,7 @@ export default function LoginPage() {
               <div style={{ flex: 1, height: 1, background: "#e4e5e4" }} />
             </div>
 
+            <form onSubmit={handleLogin}>
             <div style={{ marginBottom: 18 }}>
               <label
                 style={{
@@ -154,10 +218,13 @@ export default function LoginPage() {
                   fontWeight: 500,
                 }}
               >
-                Email or phone
+                Email
               </label>
               <input
-                type="text"
+                type="email"
+                name="email"
+                required
+                autoComplete="email"
                 placeholder="you@example.com"
                 style={{
                   width: "100%",
@@ -197,6 +264,9 @@ export default function LoginPage() {
               <div style={{ position: "relative" }}>
                 <input
                   type="password"
+                  name="password"
+                  required
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   style={{
                     width: "100%",
@@ -226,6 +296,8 @@ export default function LoginPage() {
             </div>
 
             <button
+              type="submit"
+              disabled={isSubmitting}
               style={{
                 width: "100%",
                 border: "none",
@@ -235,13 +307,15 @@ export default function LoginPage() {
                 padding: "14px 18px",
                 fontSize: 14,
                 fontWeight: 500,
-                cursor: "pointer",
+                cursor: isSubmitting ? "wait" : "pointer",
                 boxShadow: "0 10px 18px rgba(42,212,154,0.25)",
                 marginBottom: 26,
               }}
             >
-              Sign in
+              {isSubmitting ? "Signing in..." : "Sign in"}
             </button>
+            {message && <p role="alert" style={{ margin: "-12px 0 18px", color: "#ad4b43", fontSize: 13 }}>{message}</p>}
+            </form>
 
             <div style={{ textAlign: "center", fontSize: 14, color: "#4b5563" }}>
               Don&apos;t have an account? <a href="/register" style={{ color: "#111827", fontWeight: 500, textDecoration: "none" }}>Sign up</a>

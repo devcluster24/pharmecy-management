@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Sidebar from "../components/Sidebar";
+import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 
 const metrics = [
   { label: "Today's Sales", value: "৳24,580", note: "+8.4% vs yesterday", icon: "↗", color: "#16865f", background: "#e8f7ef" },
@@ -114,7 +115,7 @@ export default function OverviewPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#66756d", fontSize: 12 }}>
           <span>Green Valley Pharmacy</span>
-          <span style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: "50%", background: "#e5f5ed", color: "#187553", fontWeight: 700 }}>PC</span>
+          <PharmacyProfileMenu />
         </div>
       </header>
 

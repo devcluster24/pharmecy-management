@@ -1,4 +1,54 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+
 export default function RegisterPage() {
+  const router = useRouter();
+  const [message, setMessage] = useState("");
+  const [hasError, setHasError] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSignup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    setIsSubmitting(true);
+    setMessage("");
+    setHasError(false);
+
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const metadata = {
+      username: String(formData.get("username") ?? "").trim(),
+      full_name: String(formData.get("full_name") ?? "").trim(),
+      phone: String(formData.get("phone") ?? "").trim(),
+      registration_type: "pharmacy_user",
+    };
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: metadata },
+    });
+
+    if (error) {
+      setMessage(error.message);
+      setHasError(true);
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (data.session) {
+      router.push("/shop-setup");
+    } else {
+      setMessage("Check your email to confirm your account. Then sign in to complete store setup.");
+    }
+    setIsSubmitting(false);
+    formElement.reset();
+  }
+
   return (
     <div
       style={{
@@ -82,14 +132,8 @@ export default function RegisterPage() {
               Create your account
             </h1>
 
-            <p
-              style={{
-                margin: "12px 0 26px",
-                fontSize: "16px",
-                color: "#525a63",
-              }}
-            >
-              Sign up to manage your pharmacy business
+            <p style={{ margin: "12px 0 26px", fontSize: 16, color: "#525a63" }}>
+              Step 1 of 2 · Create your account, then set up your store
             </p>
 
             <button
@@ -144,10 +188,11 @@ export default function RegisterPage() {
               <div style={{ flex: 1, height: 1, background: "#e4e5e4" }} />
             </div>
 
-            <div
+            <form
+              onSubmit={handleSignup}
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
                 gap: 16,
               }}
             >
@@ -165,6 +210,8 @@ export default function RegisterPage() {
               </label>
               <input
                 type="text"
+                name="full_name"
+                required
                 placeholder="Your Full Name"
                 autoComplete="name"
                 style={{
@@ -182,6 +229,11 @@ export default function RegisterPage() {
             </div>
 
               <div>
+              <label style={{ display: "block", marginBottom: 8, fontSize: 14, color: "#1f2937", fontWeight: 500 }}>Username</label>
+              <input type="text" name="username" required minLength={3} autoComplete="username" placeholder="yourname" style={{ width: "100%", background: "#fff", border: "1px solid #dfe4e2", borderRadius: 12, padding: "8px 16px", fontSize: 14, color: "#111827", outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+              <div>
               <label
                 style={{
                   display: "block",
@@ -195,6 +247,8 @@ export default function RegisterPage() {
               </label>
               <input
                 type="email"
+                name="email"
+                required
                 placeholder="you@example.com"
                 autoComplete="email"
                 style={{
@@ -225,6 +279,7 @@ export default function RegisterPage() {
               </label>
               <input
                 type="tel"
+                name="phone"
                 placeholder="+880 1XXX-XXXXXX"
                 autoComplete="tel"
                 style={{
@@ -264,6 +319,9 @@ export default function RegisterPage() {
               <div style={{ position: "relative" }}>
                 <input
                   type="password"
+                  name="password"
+                  required
+                  minLength={8}
                   placeholder="••••••••"
                   style={{
                     width: "100%",
@@ -291,11 +349,10 @@ export default function RegisterPage() {
                 </span>
               </div>
               </div>
-            </div>
 
-            <a
-              href="/shop-setup"
-              className="mt-5"
+            <button
+              type="submit"
+              disabled={isSubmitting}
               style={{
                 display: "block",
                 width: "100%",
@@ -306,18 +363,24 @@ export default function RegisterPage() {
                 padding: "8px 18px",
                 fontSize: 14,
                 fontWeight: 600,
-                cursor: "pointer",
+                cursor: isSubmitting ? "wait" : "pointer",
                 boxShadow: "0 10px 18px rgba(42,212,154,0.25)",
                 marginBottom: 26,
                 textAlign: "center",
-                textDecoration: "none",
+                opacity: isSubmitting ? 0.7 : 1,
+                gridColumn: "1 / -1",
               }}
             >
-              Sign up
-            </a>
+              {isSubmitting ? "Creating account..." : "Sign up"}
+            </button>
+            {message && <p role={hasError ? "alert" : "status"} style={{ gridColumn: "1 / -1", margin: "-14px 0 18px", color: hasError ? "#ad4b43" : "#276749", fontSize: 13 }}>{message}</p>}
+            </form>
 
             <div style={{ textAlign: "center", fontSize: 12, color: "#4b5563" }}>
               Already have an account? <a href="/login" style={{ color: "#111827", fontWeight: 500, textDecoration: "none" }}>Sign in</a>
+            </div>
+            <div style={{ marginTop: 12, textAlign: "center", fontSize: 12, color: "#4b5563" }}>
+              Have an admin invite? <a href="/admin-register" style={{ color: "#111827", fontWeight: 600, textDecoration: "none" }}>Register admin account</a>
             </div>
           </div>
         </section>

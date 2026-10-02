@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Sidebar from "./components/Sidebar";
+import PharmacyProfileMenu from "./components/PharmacyProfileMenu";
 import { dashboardNavItems } from "./navigation";
 
 export type SectionData = {
@@ -37,7 +38,7 @@ export default function DashboardSectionPage({ sectionSlug, data }: { sectionSlu
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
           <span>Green Valley Pharmacy</span>
-          <span style={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", background: "#e4f5ee", color: "#187553", fontWeight: 700 }}>PC</span>
+          <PharmacyProfileMenu />
         </div>
       </header>
 
@@ -55,17 +56,20 @@ export default function DashboardSectionPage({ sectionSlug, data }: { sectionSlu
             </button>
           </div>
 
-          <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
-            {data.metrics.map((metric) => (
-              <article key={metric.label} style={{ minHeight: 104, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", padding: "16px 18px" }}>
-                <div style={{ color: "#687871", fontSize: 12 }}>{metric.label}</div>
-                <div style={{ marginTop: 9, color: "#172622", fontSize: 24, fontWeight: 700 }}>{metric.value}</div>
-                <div style={{ marginTop: 5, color: "#85918c", fontSize: 11 }}>{metric.detail}</div>
-              </article>
-            ))}
-          </section>
+          {data.metrics.length > 0 && (
+            <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
+              {data.metrics.map((metric) => (
+                <article key={metric.label} style={{ minHeight: 104, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", padding: "16px 18px" }}>
+                  <div style={{ color: "#687871", fontSize: 12 }}>{metric.label}</div>
+                  <div style={{ marginTop: 9, color: "#172622", fontSize: 24, fontWeight: 700 }}>{metric.value}</div>
+                  <div style={{ marginTop: 5, color: "#85918c", fontSize: 11 }}>{metric.detail}</div>
+                </article>
+              ))}
+            </section>
+          )}
 
-          <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+          {data.columns.length > 0 && (
+            <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
               <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>{navItem.label} list</h2>
               <input aria-label={`Search ${navItem.label.toLowerCase()}`} placeholder="Search..." style={{ width: 220, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outline: "none" }} />
@@ -94,7 +98,8 @@ export default function DashboardSectionPage({ sectionSlug, data }: { sectionSlu
               <span>Showing {data.rows.length} sample records</span>
               <span>Updated just now</span>
             </div>
-          </section>
+            </section>
+          )}
         </main>
       </div>
     </div>

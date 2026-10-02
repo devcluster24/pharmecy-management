@@ -1,4 +1,119 @@
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+
 export default function ShopSetupPage() {
+  const router = useRouter();
+  const [isReady, setIsReady] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function checkAccount() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from("user_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !profile) {
+        if (active) {
+          setMessage(error?.message ?? "Account profile could not be found.");
+          setHasError(true);
+        }
+        return;
+      }
+
+      if (profile.role !== "pharmacy_user") {
+        router.replace("/admin-dashboard");
+        return;
+      }
+
+      if (active) setIsReady(true);
+    }
+
+    void checkAccount().catch((error: unknown) => {
+      if (active) {
+        setMessage(error instanceof Error ? error.message : "Unable to verify your account.");
+        setHasError(true);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  async function saveStore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    setIsSubmitting(true);
+    setMessage("");
+    setHasError(false);
+
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        setMessage(authError?.message ?? "Please sign in before setting up your store.");
+        setHasError(true);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        setMessage(profileError?.message ?? "Your account profile was not found. Confirm that the signup migration is applied to the Supabase project used by this app.");
+        setHasError(true);
+        return;
+      }
+
+      if (profile.role !== "pharmacy_user") {
+        setMessage(`This signed-in account has role "${profile.role}" and cannot set up a pharmacy.`);
+        setHasError(true);
+        return;
+      }
+
+      const { error } = await supabase.rpc("complete_pharmacy_setup", {
+        requested_store_name: String(formData.get("store_name") ?? "").trim(),
+        requested_company_name: String(formData.get("company_name") ?? "").trim(),
+        requested_address: String(formData.get("address") ?? "").trim(),
+        requested_city: String(formData.get("city") ?? "").trim(),
+        requested_country: String(formData.get("country") ?? "").trim(),
+      });
+
+      if (error) {
+        const isRoleRejection = error.message.includes("Only pharmacy accounts can complete store setup");
+        setMessage(isRoleRejection
+          ? "Your signed-in profile is pharmacy_user, but the database setup function rejected it. Apply migration 20261002130000_fix_pharmacy_setup_role_check.sql to the Supabase project configured for this app."
+          : error.message);
+        setHasError(true);
+        return;
+      }
+
+      router.replace("/dashboard");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save pharmacy details.");
+      setHasError(true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <div
       style={{
@@ -68,7 +183,7 @@ export default function ShopSetupPage() {
               fontWeight: 700,
             }}
           >
-            1 of 2
+            2 of 2
           </div>
         </div>
 
@@ -88,7 +203,7 @@ export default function ShopSetupPage() {
                 color: "#102d2a",
               }}
             >
-              Add your store
+              Set up your store
             </h1>
             <p
               style={{
@@ -98,15 +213,17 @@ export default function ShopSetupPage() {
                 lineHeight: 1.6,
               }}
             >
-              Tell us about your pharmacy and start managing inventory, sales, and customers in one place.
+              Add your pharmacy details and continue to your dashboard.
             </p>
 
-            <div style={{ display: "grid", gap: 18 }}>
+            <form onSubmit={saveStore} style={{ display: "grid", gap: 18 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
                 <div>
                 <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Store Name</label>
                 <input
                   type="text"
+                  name="store_name"
+                  required
                   placeholder="Green Valley Pharmacy"
                   style={{
                     width: "100%",
@@ -125,6 +242,7 @@ export default function ShopSetupPage() {
                 <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Company Name</label>
                 <input
                   type="text"
+                  name="company_name"
                   placeholder="Valley Health Ltd."
                   style={{
                     width: "100%",
@@ -143,6 +261,8 @@ export default function ShopSetupPage() {
               <div>
                 <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Physical Store Address</label>
                 <textarea
+                  name="address"
+                  required
                   placeholder="123 Main Road, Dhanmondi, Dhaka"
                   style={{
                     width: "100%",
@@ -164,6 +284,8 @@ export default function ShopSetupPage() {
                   <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>City</label>
                   <input
                     type="text"
+                    name="city"
+                    required
                     placeholder="Dhaka"
                     style={{
                       width: "100%",
@@ -182,6 +304,9 @@ export default function ShopSetupPage() {
                   <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Country</label>
                   <input
                     type="text"
+                    name="country"
+                    required
+                    defaultValue="Bangladesh"
                     placeholder="Bangladesh"
                     style={{
                       width: "100%",
@@ -197,8 +322,9 @@ export default function ShopSetupPage() {
                 </div>
               </div>
 
-              <a
-                href="/dashboard"
+              <button
+                type="submit"
+                disabled={!isReady || isSubmitting}
                 style={{
                   display: "block",
                   width: "100%",
@@ -212,11 +338,14 @@ export default function ShopSetupPage() {
                   textAlign: "center",
                   textDecoration: "none",
                   boxSizing: "border-box",
+                  cursor: !isReady || isSubmitting ? "wait" : "pointer",
+                  opacity: !isReady || isSubmitting ? 0.65 : 1,
                 }}
               >
-                Launch My store
-              </a>
-            </div>
+                {isSubmitting ? "Saving..." : "Save and continue"}
+              </button>
+              {message && <p role={hasError ? "alert" : "status"} style={{ margin: 0, color: hasError ? "#ad4b43" : "#1d7059", fontSize: 12, lineHeight: 1.5 }}>{message}</p>}
+            </form>
           </div>
 
           <aside
