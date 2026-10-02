@@ -5,6 +5,15 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import { supabase } from "@/lib/supabase/client";
+import type { OcrResult } from "@/app/component/ocr/types";
+import { ProductDocumentCapture, ProductDocumentLinks } from "./ProductDocumentCapture";
+import {
+  deleteProductDocuments,
+  getProductDocuments,
+  saveProductDocuments,
+  type ProductDocument,
+} from "./productDocuments";
+import { getProductFieldsFromOcr } from "./productOcr";
 import {
   getProductIdentityKey,
   getProductNameKey,
@@ -288,6 +297,9 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [storageReady, setStorageReady] = useState(adminMode);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProductDocuments, setSelectedProductDocuments] = useState<ProductDocument[]>([]);
+  const [isLoadingProductDocuments, setIsLoadingProductDocuments] = useState(false);
+  const [productDocumentsError, setProductDocumentsError] = useState("");
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [savingProductId, setSavingProductId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -298,6 +310,9 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [nextSerialNumber, setNextSerialNumber] = useState("");
   const [isPreparingProduct, setIsPreparingProduct] = useState(false);
   const [addProductError, setAddProductError] = useState("");
+  const [productDocuments, setProductDocuments] = useState<File[]>([]);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [productOcrMessage, setProductOcrMessage] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ phase: "", checked: 0, total: 0 });
   const [importSummary, setImportSummary] = useState({ added: 0, duplicates: 0 });
@@ -310,6 +325,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const initialQueryKey = useRef("");
   const productQuerySequence = useRef(0);
   const editRowRef = useRef<HTMLTableRowElement | null>(null);
+  const addProductFormRef = useRef<HTMLFormElement | null>(null);
   const savingProductRef = useRef(false);
   const assignEditRowRef = useCallback((node: HTMLTableRowElement | null) => {
     editRowRef.current = node;
@@ -506,14 +522,34 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   useEffect(() => {
     if (!isAddOpen && !selectedProduct) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !isSavingProduct) {
         setIsAddOpen(false);
         setSelectedProduct(null);
+        setSelectedProductDocuments([]);
+        setProductDocumentsError("");
+        setIsLoadingProductDocuments(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAddOpen, selectedProduct]);
+  }, [isAddOpen, isSavingProduct, selectedProduct]);
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+
+    let active = true;
+    void getProductDocuments(selectedProduct.id)
+      .then((documents) => {
+        if (active) setSelectedProductDocuments(documents);
+      })
+      .catch((error: unknown) => {
+        if (active) setProductDocumentsError(getErrorMessage(error));
+      })
+      .finally(() => {
+        if (active) setIsLoadingProductDocuments(false);
+      });
+    return () => { active = false; };
+  }, [selectedProduct]);
 
   const saveEditedProduct = useCallback(async () => {
     if (!editingProduct || !pharmacyUserId || savingProductRef.current) return;
@@ -612,10 +648,32 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     setEditingProduct((current) => current ? { ...current, [field]: value } : current);
   }
 
+  function fillProductFieldsFromOcr(result: OcrResult) {
+    const form = addProductFormRef.current;
+    if (!form) return;
+    const fields = getProductFieldsFromOcr(result);
+    let filledCount = 0;
+
+    for (const [name, value] of Object.entries(fields)) {
+      if (!value) continue;
+      const input = form.elements.namedItem(name);
+      if (input instanceof HTMLInputElement) {
+        input.value = value;
+        filledCount++;
+      }
+    }
+
+    setProductOcrMessage(filledCount
+      ? `${filledCount} field(s) filled from OCR. Review the values, correct any errors, and complete the remaining required fields.`
+      : "Text was recognized, but no product fields could be matched. Enter the details manually.");
+  }
+
   async function openAddProduct() {
     if (!pharmacyUserId || isPreparingProduct || isImporting || !storageReady) return;
     setIsPreparingProduct(true);
     setAddProductError("");
+    setProductOcrMessage("");
+    setProductDocuments([]);
     setImportError("");
     try {
       const { data, error } = await supabase.rpc("reserve_pharmacy_product_identifiers");
@@ -637,6 +695,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSavingProduct) return;
+    setIsSavingProduct(true);
     const form = new FormData(event.currentTarget);
     const value = (name: string) => String(form.get(name) ?? "").trim();
     const brand = value("brand");
@@ -656,62 +716,81 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     };
     if (!pharmacyUserId) {
       setAddProductError("Could not verify the signed-in pharmacy account.");
+      setIsSavingProduct(false);
       return;
     }
-    const { data: sameNameRows, error: duplicateCheckError } = await supabase
-      .from("pharmacy_catalog_products")
-      .select("*")
-      .eq("owner_user_id", pharmacyUserId)
-      .ilike("medicine_name", productFields.medicineName);
-    if (duplicateCheckError) {
-      setAddProductError(duplicateCheckError.message);
-      return;
-    }
-    const sameNameProducts = ((sameNameRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
-    const identityKey = getProductIdentityKey(productFields);
-    if (identityKey && sameNameProducts.some((existing) => getProductIdentityKey(existing) === identityKey)) {
-      setAddProductError("This product already exists with the same name, strength, dosage form, and manufacturer.");
-      return;
-    }
-    const nameKey = getProductNameKey(productFields);
-    if (sameNameProducts.some((existing) => getProductNameKey(existing) === nameKey && !getProductIdentityKey(existing))) {
-      setAddProductError("A product with this name has incomplete identity details. Resolve that record before adding another.");
-      return;
-    }
+    let documentsSaved = false;
+    try {
+      const { data: sameNameRows, error: duplicateCheckError } = await supabase
+        .from("pharmacy_catalog_products")
+        .select("*")
+        .eq("owner_user_id", pharmacyUserId)
+        .ilike("medicine_name", productFields.medicineName);
+      if (duplicateCheckError) {
+        setAddProductError(duplicateCheckError.message);
+        return;
+      }
+      const sameNameProducts = ((sameNameRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
+      const identityKey = getProductIdentityKey(productFields);
+      if (identityKey && sameNameProducts.some((existing) => getProductIdentityKey(existing) === identityKey)) {
+        setAddProductError("This product already exists with the same name, strength, dosage form, and manufacturer.");
+        return;
+      }
+      const nameKey = getProductNameKey(productFields);
+      if (sameNameProducts.some((existing) => getProductNameKey(existing) === nameKey && !getProductIdentityKey(existing))) {
+        setAddProductError("A product with this name has incomplete identity details. Resolve that record before adding another.");
+        return;
+      }
 
-    const product: Product = {
-      ...productFields,
-      id: nextProductId,
-      serialNumber: nextSerialNumber,
-      retailPrice: value("retailPrice") || "-",
-      usageType: value("usageType"),
-      darCode: value("darCode") || "-",
-      medicineTypeCategory: value("medicineTypeCategory"),
-      registrationInformation: value("registrationInformation") || "-",
-    };
-    const { data, error } = await supabase
-      .from("pharmacy_catalog_products")
-      .insert(mapProductToPharmacyRow(product, pharmacyUserId))
-      .select("*")
-      .single();
+      const product: Product = {
+        ...productFields,
+        id: nextProductId,
+        serialNumber: nextSerialNumber,
+        retailPrice: value("retailPrice") || "-",
+        usageType: value("usageType"),
+        darCode: value("darCode") || "-",
+        medicineTypeCategory: value("medicineTypeCategory"),
+        registrationInformation: value("registrationInformation") || "-",
+      };
+      await saveProductDocuments(product.id, productDocuments);
+      documentsSaved = productDocuments.length > 0;
 
-    if (error) {
-      setAddProductError(error.message);
-      return;
+      const { data, error } = await supabase
+        .from("pharmacy_catalog_products")
+        .insert(mapProductToPharmacyRow(product, pharmacyUserId))
+        .select("*")
+        .single();
+
+      if (error) throw new Error(error.message);
+
+      const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
+      setAddProductError("");
+      initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
+      setCurrentPage(1);
+      setSearchTerm("");
+      setProducts((current) => [savedProduct, ...current].slice(0, pageSize));
+      setTotalProductCount((count) => count + 1);
+      rememberSuggestion("dosageForm", savedProduct.dosageForm);
+      rememberSuggestion("strength", savedProduct.strength);
+      rememberSuggestion("packSize", savedProduct.packSize);
+      rememberSuggestion("barcode", savedProduct.barcode);
+      setProductDocuments([]);
+      setIsAddOpen(false);
+    } catch (error) {
+      let message = getErrorMessage(error);
+      if (documentsSaved) {
+        try {
+          await deleteProductDocuments(nextProductId);
+        } catch (cleanupError) {
+          message += ` Local document cleanup also failed: ${getErrorMessage(cleanupError)}`;
+        }
+      }
+      setAddProductError(productDocuments.length
+        ? `Could not save the product and its local documents: ${message}`
+        : message);
+    } finally {
+      setIsSavingProduct(false);
     }
-
-    const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
-    setAddProductError("");
-    initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
-    setCurrentPage(1);
-    setSearchTerm("");
-    setProducts((current) => [savedProduct, ...current].slice(0, pageSize));
-    setTotalProductCount((count) => count + 1);
-    rememberSuggestion("dosageForm", savedProduct.dosageForm);
-    rememberSuggestion("strength", savedProduct.strength);
-    rememberSuggestion("packSize", savedProduct.packSize);
-    rememberSuggestion("barcode", savedProduct.barcode);
-    setIsAddOpen(false);
   }
 
   async function importCatalog(company?: string) {
@@ -791,8 +870,13 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }
 
   function closeModal() {
+    if (isSavingProduct) return;
     setIsAddOpen(false);
     setSelectedProduct(null);
+    setProductDocuments([]);
+    setSelectedProductDocuments([]);
+    setProductDocumentsError("");
+    setIsLoadingProductDocuments(false);
   }
 
   return (
@@ -910,7 +994,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                       })}
                       <td style={{ padding: "10px 13px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <button type="button" disabled={editingProduct?.id === product.id} onClick={() => setSelectedProduct(product)} style={{ border: "1px solid #dce6df", borderRadius: 5, background: "#fff", color: "#227553", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: editingProduct?.id === product.id ? "not-allowed" : "pointer", opacity: editingProduct?.id === product.id ? 0.5 : 1 }}>Details</button>
+                          <button type="button" disabled={editingProduct?.id === product.id} onClick={() => { setSelectedProductDocuments([]); setProductDocumentsError(""); setIsLoadingProductDocuments(true); setSelectedProduct(product); }} style={{ border: "1px solid #dce6df", borderRadius: 5, background: "#fff", color: "#227553", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: editingProduct?.id === product.id ? "not-allowed" : "pointer", opacity: editingProduct?.id === product.id ? 0.5 : 1 }}>Details</button>
                           {editingProduct?.id === product.id ? (
                             <>
                               <button type="button" disabled={savingProductId === product.id} onClick={() => void saveEditedProduct()} style={{ border: 0, borderRadius: 5, background: savingProductId === product.id ? "#aab7af" : "#179c70", color: "#fff", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: savingProductId === product.id ? "wait" : "pointer" }}>{savingProductId === product.id ? "Saving..." : "Save"}</button>
@@ -962,10 +1046,12 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 <h2 id="add-product-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add product</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Enter medicine details to add it to your product list.</p>
               </div>
-              <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+              <button type="button" aria-label="Close" onClick={closeModal} disabled={isSavingProduct} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>×</button>
             </div>
-            <form onSubmit={addProduct}>
+            <form ref={addProductFormRef} onSubmit={addProduct}>
               {addProductError && <p role="alert" style={{ margin: "14px 24px 0", color: "#ad4b43", fontSize: 12 }}>{addProductError}</p>}
+              {productOcrMessage && <p role="status" style={{ margin: "14px 24px 0", color: "#17704e", fontSize: 12 }}>{productOcrMessage}</p>}
+              <ProductDocumentCapture files={productDocuments} onFilesChange={setProductDocuments} onOcrResult={fillProductFieldsFromOcr} disabled={isSavingProduct} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, padding: 24 }}>
                 <FormField label="SL / Serial Number (Auto)"><input name="serialNumber" value={nextSerialNumber} readOnly style={{ ...fieldStyle, background: "#f5f8f5", color: "#75847a" }} /></FormField>
                 <FormField label="Internal Product ID Number (Auto)"><input name="internalProductId" value={nextProductId} readOnly style={{ ...fieldStyle, background: "#f5f8f5", color: "#75847a" }} /></FormField>
@@ -981,8 +1067,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 <FormField label="Registration Information"><input name="registrationInformation" placeholder="Registration information" style={fieldStyle} /></FormField>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-                <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                <button type="submit" disabled={isImporting} style={{ border: 0, borderRadius: 6, background: isImporting ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isImporting ? "not-allowed" : "pointer" }}>Save product</button>
+                <button type="button" onClick={closeModal} disabled={isSavingProduct} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>Cancel</button>
+                <button type="submit" disabled={isImporting || isSavingProduct} style={{ border: 0, borderRadius: 6, background: isImporting || isSavingProduct ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isImporting || isSavingProduct ? "not-allowed" : "pointer" }}>{isSavingProduct ? "Saving product..." : "Save product"}</button>
               </div>
             </form>
           </section>
@@ -1023,6 +1109,18 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 </div>
               ))}
             </dl>
+            <section aria-label="Saved product documents" style={{ display: "grid", gap: 8, padding: "0 24px 18px" }}>
+              <strong style={{ color: "#26352f", fontSize: 13 }}>Locally saved documents</strong>
+              {isLoadingProductDocuments ? (
+                <p style={{ margin: 0, color: "#77857d", fontSize: 12 }}>Loading documents...</p>
+              ) : productDocumentsError ? (
+                <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>Could not load local documents: {productDocumentsError}</p>
+              ) : selectedProductDocuments.length ? (
+                <ProductDocumentLinks documents={selectedProductDocuments} />
+              ) : (
+                <p style={{ margin: 0, color: "#77857d", fontSize: 12 }}>No local documents are attached to this product.</p>
+              )}
+            </section>
             <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
               <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
             </div>

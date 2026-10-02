@@ -12,8 +12,19 @@ export async function POST(request: Request) {
   const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const serviceUrl = process.env.PADDLEOCR_SERVICE_URL;
   const serviceApiKey = process.env.PADDLEOCR_SERVICE_API_KEY;
+  const missingConfiguration = [
+    ["NEXT_PUBLIC_SUPABASE_URL", supabaseUrl],
+    ["NEXT_PUBLIC_SUPABASE_ANON_KEY", publicKey],
+    ["PADDLEOCR_SERVICE_URL", serviceUrl],
+    ["PADDLEOCR_SERVICE_API_KEY", serviceApiKey],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
   if (!supabaseUrl || !publicKey || !serviceUrl || !serviceApiKey) {
-    return jsonError("OCR server configuration is incomplete.", 503);
+    return jsonError(
+      `OCR server configuration is incomplete. Missing ${missingConfiguration.join(", ")}. Add the server values to .env.local and restart Next.js.`,
+      503,
+    );
   }
 
   const accessToken = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
