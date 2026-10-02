@@ -23,6 +23,7 @@ type Product = ProductFields & {
 };
 
 const PRODUCT_STORAGE_KEY = "medicine-products";
+const CATALOG_PAGE_SIZE = 1000;
 const editableProductFields: { key: keyof ProductFields; label: string }[] = [
   { key: "serialNumber", label: "SL / Serial Number" },
   { key: "pharmaceuticalCompany", label: "Pharmaceutical Company" },
@@ -711,16 +712,27 @@ export default function ProductDataImportPage() {
           throw authError ?? new Error("Sign in to load the product catalog.");
         }
 
-        const { data, error } = await supabase
-          .from("admin_medicine_catalog")
-          .select("*")
-          .order("created_at", { ascending: true });
+        const catalogRows: Record<string, unknown>[] = [];
+        for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
+          const { data, error } = await supabase
+            .from("admin_medicine_catalog")
+            .select("*")
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(offset, offset + CATALOG_PAGE_SIZE - 1);
 
-        if (error) {
-          throw error;
+          if (error) {
+            throw error;
+          }
+
+          const page = data ?? [];
+          catalogRows.push(...page);
+          if (page.length < CATALOG_PAGE_SIZE) {
+            break;
+          }
         }
 
-        const catalog = (data ?? []).map((row) => mapCatalogRowToProduct(row));
+        const catalog = catalogRows.map((row) => mapCatalogRowToProduct(row));
         const legacyProducts = loadProductsFromLocalStorage();
         let migratedCount = 0;
 
