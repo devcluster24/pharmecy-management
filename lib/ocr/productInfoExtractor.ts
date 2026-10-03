@@ -15,6 +15,9 @@ type LineMetrics = {
   left: number;
   right: number;
   height: number;
+  normalizedHeight: number | null;
+  width: number;
+  normalizedWidth: number | null;
 };
 
 type IndexedLine = {
@@ -96,7 +99,7 @@ function getPages(result: OcrResult): OcrPage[] {
   }];
 }
 
-function getMetrics(box: number[][] | undefined): LineMetrics | null {
+function getMetrics(box: number[][] | undefined, page: OcrPage): LineMetrics | null {
   if (!box || box.length < 3
     || box.some((point) => point.length < 2 || !point.every(Number.isFinite))) return null;
 
@@ -110,11 +113,18 @@ function getMetrics(box: number[][] | undefined): LineMetrics | null {
     left: Math.min(...xs),
     right: Math.max(...xs),
     height: bottom - top,
+    normalizedHeight: page.height && page.height > 0
+      ? (bottom - top) / page.height
+      : null,
+    width: Math.max(...xs) - Math.min(...xs),
+    normalizedWidth: page.width && page.width > 0
+      ? (Math.max(...xs) - Math.min(...xs)) / page.width
+      : null,
   };
 }
 
 function getIndexedLines(page: OcrPage): IndexedLine[] {
-  return page.lines.map((line, index) => ({ line, index, metrics: getMetrics(line.box) }));
+  return page.lines.map((line, index) => ({ line, index, metrics: getMetrics(line.box, page) }));
 }
 
 function cleanText(text: string) {
@@ -154,6 +164,40 @@ function isLikelyBrand(text: string) {
   return !STRENGTH_PATTERN.test(value);
 }
 
+function compareDimension(
+  leftNormalized: number | null | undefined,
+  rightNormalized: number | null | undefined,
+  leftRaw: number | undefined,
+  rightRaw: number | undefined,
+) {
+  if (leftNormalized !== null && leftNormalized !== undefined
+    && rightNormalized !== null && rightNormalized !== undefined) {
+    return leftNormalized === rightNormalized ? 0 : rightNormalized - leftNormalized;
+  }
+  if (leftRaw !== undefined && rightRaw !== undefined && leftRaw !== rightRaw) {
+    return rightRaw - leftRaw;
+  }
+  if (leftRaw !== undefined && rightRaw === undefined) return -1;
+  if (leftRaw === undefined && rightRaw !== undefined) return 1;
+  return 0;
+}
+
+function compareBrandSize(left: IndexedLine, right: IndexedLine) {
+  const heightComparison = compareDimension(
+    left.metrics?.normalizedHeight,
+    right.metrics?.normalizedHeight,
+    left.metrics?.height,
+    right.metrics?.height,
+  );
+  if (heightComparison !== 0) return heightComparison;
+  return compareDimension(
+    left.metrics?.normalizedWidth,
+    right.metrics?.normalizedWidth,
+    left.metrics?.width,
+    right.metrics?.width,
+  );
+}
+
 function getBrandCandidate(page: OcrPage, lines: IndexedLine[]): BrandCandidate | null {
   const candidates = lines.flatMap((entry) => {
     const labeled = cleanText(entry.line.text).match(BRAND_LABEL)?.[1];
@@ -161,13 +205,8 @@ function getBrandCandidate(page: OcrPage, lines: IndexedLine[]): BrandCandidate 
     return isLikelyBrand(text) ? [{ text, line: entry, page }] : [];
   });
   candidates.sort((left, right) => {
-    const leftHeight = left.line.metrics?.height;
-    const rightHeight = right.line.metrics?.height;
-    if (leftHeight !== undefined && rightHeight === undefined) return -1;
-    if (leftHeight === undefined && rightHeight !== undefined) return 1;
-    if (leftHeight !== undefined && rightHeight !== undefined && leftHeight !== rightHeight) {
-      return rightHeight - leftHeight;
-    }
+    const sizeComparison = compareBrandSize(left.line, right.line);
+    if (sizeComparison !== 0) return sizeComparison;
     const leftTop = left.line.metrics?.top;
     const rightTop = right.line.metrics?.top;
     if (leftTop !== undefined && rightTop !== undefined && leftTop !== rightTop) return leftTop - rightTop;
@@ -260,13 +299,8 @@ export function extractProductInformationFromResults(results: OcrResult[]): Prod
   });
 
   brands.sort((left, right) => {
-    const leftHeight = left.candidate.line.metrics?.height;
-    const rightHeight = right.candidate.line.metrics?.height;
-    if (leftHeight !== undefined && rightHeight === undefined) return -1;
-    if (leftHeight === undefined && rightHeight !== undefined) return 1;
-    if (leftHeight !== undefined && rightHeight !== undefined && leftHeight !== rightHeight) {
-      return rightHeight - leftHeight;
-    }
+    const sizeComparison = compareBrandSize(left.candidate.line, right.candidate.line);
+    if (sizeComparison !== 0) return sizeComparison;
     return (left.candidate.line.metrics?.top ?? Infinity) - (right.candidate.line.metrics?.top ?? Infinity);
   });
 

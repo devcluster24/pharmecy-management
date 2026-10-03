@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import { supabase } from "@/lib/supabase/client";
-import { ProductDocumentCapture, ProductDocumentLinks } from "./ProductDocumentCapture";
+import { ProductDocumentCapture, ProductDocumentLinks, type ProductSaveInformation } from "./ProductDocumentCapture";
 import {
   deleteProductDocuments,
   getProductDocuments,
@@ -17,7 +17,6 @@ import {
   getProductNameKey,
   type ProductImportCandidate,
 } from "./productImport";
-import type { ProductInformation } from "@/lib/ocr/productInfoExtractor";
 
 type Product = {
   id: string;
@@ -93,6 +92,9 @@ type ProductFormValues = {
   darCode: string;
   medicineTypeCategory: string;
   registrationInformation: string;
+  packSize: string;
+  unit: string;
+  barcode: string;
 };
 const CATALOG_PAGE_SIZE = 1000;
 const IMPORT_BATCH_SIZE = 500;
@@ -287,6 +289,28 @@ async function loadAllPharmacyProducts(ownerUserId: string) {
   }
 }
 
+async function loadPharmacyCompanyNames(ownerUserId: string) {
+  const names = new Set<string>();
+  for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("pharmacy_catalog_products")
+      .select("manufacturer")
+      .eq("owner_user_id", ownerUserId)
+      .order("manufacturer", { ascending: true })
+      .range(offset, offset + CATALOG_PAGE_SIZE - 1);
+    if (error) throw error;
+
+    const rows = (data ?? []) as { manufacturer: string }[];
+    rows.forEach(({ manufacturer }) => {
+      const name = manufacturer.trim();
+      if (name) names.add(name);
+    });
+    if (rows.length < CATALOG_PAGE_SIZE) {
+      return [...names].sort((left, right) => left.localeCompare(right));
+    }
+  }
+}
+
 function ProductManagementHeader() {
   return (
     <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
@@ -304,6 +328,7 @@ function ProductManagementHeader() {
 
 export default function ProductManagementPage({ adminMode = false }: { adminMode?: boolean } = {}) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productCompanyOptions, setProductCompanyOptions] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestions>(initialSuggestions);
   const [storageReady, setStorageReady] = useState(adminMode);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -418,6 +443,14 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         setTotalProductCount(firstPage.count);
         setStorageReady(true);
         initialQueryKey.current = `${user.id}:1:${DEFAULT_PRODUCT_PAGE_SIZE}:`;
+
+        void loadPharmacyCompanyNames(user.id)
+          .then((companyNames) => {
+            if (active) setProductCompanyOptions(companyNames);
+          })
+          .catch((error: unknown) => {
+            if (active) setImportError(getErrorMessage(error));
+          });
 
         void loadCatalogCompanies()
           .then((companies) => {
@@ -593,6 +626,11 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       if (error) throw error;
       const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
       setProducts((current) => current.map((product) => product.id === savedProduct.id ? savedProduct : product));
+      void loadPharmacyCompanyNames(pharmacyUserId)
+        .then(setProductCompanyOptions)
+        .catch((refreshError: unknown) => {
+          setImportError(`Could not refresh pharmaceutical company suggestions: ${getErrorMessage(refreshError)}`);
+        });
       setEditingProduct(null);
     } catch (error) {
       setImportError(`Could not save product changes: ${getErrorMessage(error)}`);
@@ -632,6 +670,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       setCurrentPage(targetPage);
       setProducts(refreshed.products);
       setTotalProductCount(refreshed.count);
+      const companyNames = await loadPharmacyCompanyNames(pharmacyUserId);
+      setProductCompanyOptions(companyNames);
     } catch (error) {
       setImportError(`Could not delete or refresh product: ${getErrorMessage(error)}`);
     }
@@ -712,9 +752,9 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       category: value("medicineTypeCategory"),
       dosageForm: value("dosageForm"),
       strength: value("strength"),
-      packSize: "-",
-      unit: "-",
-      barcode: value("darCode"),
+      packSize: value("packSize") || "-",
+      unit: value("unit") || "-",
+      barcode: value("barcode") || value("darCode"),
     };
     if (!pharmacyUserId) {
       setAddProductError("Could not verify the signed-in pharmacy account.");
@@ -772,6 +812,13 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       setCurrentPage(1);
       setSearchTerm("");
       setProducts((current) => [savedProduct, ...current].slice(0, pageSize));
+      setProductCompanyOptions((current) => {
+        const manufacturer = savedProduct.manufacturer.trim();
+        if (!manufacturer || current.some((name) => name.toLocaleLowerCase() === manufacturer.toLocaleLowerCase())) {
+          return current;
+        }
+        return [...current, manufacturer].sort((left, right) => left.localeCompare(right));
+      });
       setTotalProductCount((count) => count + 1);
       rememberSuggestion("dosageForm", savedProduct.dosageForm);
       rememberSuggestion("strength", savedProduct.strength);
@@ -813,10 +860,13 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       darCode: value("darCode"),
       medicineTypeCategory: value("medicineTypeCategory"),
       registrationInformation: value("registrationInformation"),
+      packSize: value("packSize"),
+      unit: value("unit"),
+      barcode: value("barcode"),
     });
   }
 
-  async function saveExtractedProduct(information: ProductInformation) {
+  async function saveExtractedProduct(information: ProductSaveInformation) {
     await saveProductValues({
       manufacturer: information.pharmaceuticalCompany ?? "",
       brand: information.brandName ?? "",
@@ -825,9 +875,12 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       dosageForm: information.dosageFormDescription ?? "",
       retailPrice: information.retailPrice ?? "",
       usageType: "",
-      darCode: "",
-      medicineTypeCategory: "",
-      registrationInformation: "",
+      darCode: information.darCode,
+      medicineTypeCategory: information.medicineTypeCategory,
+      registrationInformation: information.registrationInformation,
+      packSize: information.packSize,
+      unit: information.unit,
+      barcode: information.barcode,
     });
   }
 
@@ -882,6 +935,14 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         if (savedProducts.length !== batch.length) {
           throw new Error(`Only ${savedProducts.length} of ${batch.length} products in this batch were saved.`);
         }
+        setProductCompanyOptions((current) => {
+          const names = new Map(current.map((name) => [name.toLocaleLowerCase(), name]));
+          savedProducts.forEach(({ manufacturer }) => {
+            const name = manufacturer.trim();
+            if (name && !names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
+          });
+          return [...names.values()].sort((left, right) => left.localeCompare(right));
+        });
         addedCount += savedProducts.length;
         setTotalProductCount((count) => count + savedProducts.length);
         setImportProgress({ phase: "Saving products", checked: addedCount, total: productsToInsert.length });
@@ -1095,6 +1156,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 setIsManualImportOpen(true);
               }}
               onSaveProductInformation={saveExtractedProduct}
+              companyOptions={productCompanyOptions}
+              serialNumber={nextSerialNumber}
               saveError={addProductError}
               disabled={isSavingProduct}
             />
@@ -1127,6 +1190,9 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 <FormField label="DAR Code"><input name="darCode" placeholder="DAR code" style={fieldStyle} /></FormField>
                 <FormField label="Medicine Type/Category"><input name="medicineTypeCategory" placeholder="Medicine type or category" style={fieldStyle} /></FormField>
                 <FormField label="Registration Information"><input name="registrationInformation" placeholder="Registration information" style={fieldStyle} /></FormField>
+                <FormField label="Pack Size"><input name="packSize" placeholder="e.g. 10 tablets" style={fieldStyle} /></FormField>
+                <FormField label="Unit"><input name="unit" placeholder="e.g. tablet" style={fieldStyle} /></FormField>
+                <FormField label="Barcode/GTIN"><input name="barcode" placeholder="Barcode or GTIN" style={fieldStyle} /></FormField>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
                 <button type="button" onClick={() => setIsManualImportOpen(false)} disabled={isSavingProduct} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>Cancel</button>

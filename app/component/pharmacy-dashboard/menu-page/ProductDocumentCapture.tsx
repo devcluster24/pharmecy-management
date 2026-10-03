@@ -8,6 +8,17 @@ import { extractProductInformation, extractProductInformationFromResults, type P
 import { clearStoredScanPhotos, getStoredScanPhotos, storeScanPhotos } from "@/lib/ocr/scanPhotoStorage";
 import type { ProductDocument } from "./productDocuments";
 
+export type ProductSaveInformation = ProductInformation & {
+  darCode: string;
+  medicineTypeCategory: string;
+  registrationInformation: string;
+  packSize: string;
+  unit: string;
+  barcode: string;
+};
+
+type EditableProductInformation = ProductSaveInformation;
+
 const SCAN_PHOTO_COUNT = 3;
 const SCAN_PHOTO_INTERVAL_MS = 450;
 
@@ -88,13 +99,17 @@ export function ProductDocumentCapture({
   onFilesChange,
   onManualImport,
   onSaveProductInformation,
+  companyOptions,
+  serialNumber,
   saveError = "",
   disabled = false,
 }: {
   files: File[];
   onFilesChange: (files: File[]) => void;
   onManualImport: () => void;
-  onSaveProductInformation: (information: ProductInformation) => Promise<void>;
+  onSaveProductInformation: (information: ProductSaveInformation) => Promise<void>;
+  companyOptions: string[];
+  serialNumber: string;
   saveError?: string;
   disabled?: boolean;
 }) {
@@ -104,7 +119,7 @@ export function ProductDocumentCapture({
   const completedFrameSignatureRef = useRef<Uint8Array | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState("");
-  const [productInformation, setProductInformation] = useState<ProductInformation | null>(null);
+  const [productInformation, setProductInformation] = useState<EditableProductInformation | null>(null);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [capturedPhotoCount, setCapturedPhotoCount] = useState(0);
   const [isLiveScanEnabled, setIsLiveScanEnabled] = useState(false);
@@ -169,7 +184,15 @@ export function ProductDocumentCapture({
           if (completedVideo?.videoWidth && completedVideo.videoHeight) {
             completedFrameSignatureRef.current = getFrameSignature(completedVideo);
           }
-          setProductInformation(extractProductInformation(result));
+          setProductInformation({
+            ...extractProductInformation(result),
+            darCode: "",
+            medicineTypeCategory: "",
+            registrationInformation: "",
+            packSize: "",
+            unit: "",
+            barcode: "",
+          });
           setIsScanComplete(true);
           setIsLiveScanEnabled(false);
           scanCompleted = true;
@@ -249,6 +272,10 @@ export function ProductDocumentCapture({
   }, [cameraStream, disabled, isScanComplete]);
 
   function addFiles(selectedFiles: File[]) {
+    if (selectedFiles.length > 1) {
+      setError("Only one document can be selected.");
+      return [];
+    }
     const supportedFiles = selectedFiles.filter(isSupportedFile);
     const rejectedCount = selectedFiles.length - supportedFiles.length;
     const newFiles = supportedFiles.filter((file, index) =>
@@ -259,6 +286,11 @@ export function ProductDocumentCapture({
         existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified,
       ),
     );
+    const exceedsLimit = files.length + newFiles.length > 1;
+    if (exceedsLimit) {
+      setError("Only one document can be attached. Remove the current document before choosing another.");
+      return [];
+    }
     setError(rejectedCount ? "Only JPG, PNG, WEBP, BMP, TIFF images and PDF documents are supported." : "");
     onFilesChange([...files, ...newFiles]);
     return newFiles;
@@ -311,7 +343,15 @@ export function ProductDocumentCapture({
         setError("No text was recognized in the selected documents.");
         return;
       }
-      setProductInformation(extractProductInformationFromResults(ocrResults));
+      setProductInformation({
+        ...extractProductInformationFromResults(ocrResults),
+        darCode: "",
+        medicineTypeCategory: "",
+        registrationInformation: "",
+        packSize: "",
+        unit: "",
+        barcode: "",
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not scan the selected documents.");
     } finally {
@@ -368,13 +408,12 @@ export function ProductDocumentCapture({
           ref={fileInputRef}
           type="file"
           accept={ACCEPT_ATTRIBUTE}
-          multiple
           onChange={selectFiles}
           disabled={disabled || isRecognizing}
           style={{ display: "none" }}
         />
         <button type="button" onClick={() => fileInputRef.current?.click()} disabled={disabled || isRecognizing} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 11px", fontSize: 12, fontWeight: 600, cursor: disabled || isRecognizing ? "not-allowed" : "pointer" }}>
-          {isRecognizing ? "Scanning documents..." : "Choose documents"}
+          {isRecognizing ? "Scanning documents..." : <>Choose documents <span style={{ fontSize: 9, fontWeight: 500, color: "#87938d" }}>(Max 1 Documents)</span></>}
         </button>
         <button type="button" onClick={onManualImport} disabled={disabled || isRecognizing} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 11px", fontSize: 12, fontWeight: 600, cursor: disabled || isRecognizing ? "not-allowed" : "pointer" }}>
           Add Manual Import
@@ -431,7 +470,39 @@ export function ProductDocumentCapture({
             <label key={label} style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.4fr) minmax(0, 1fr)", alignItems: "center", gap: 10, color: "#405248", fontSize: 12, fontWeight: 600 }}>
               {value}
               <input
+                list={label === "pharmaceuticalCompany" ? "ocr-pharmaceutical-companies" : undefined}
                 value={productInformation[label] ?? ""}
+                onChange={(event) => {
+                  const inputValue = event.currentTarget.value;
+                  setProductInformation((current) => current
+                    ? { ...current, [label]: inputValue }
+                    : current);
+                }}
+                placeholder="Not detected"
+                disabled={disabled}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #dce5df", borderRadius: 6, padding: "8px 9px", color: "#26352f", fontSize: 12 }}
+              />
+            </label>
+          ))}
+          <datalist id="ocr-pharmaceutical-companies">
+            {companyOptions.map((company) => <option key={company} value={company} />)}
+          </datalist>
+          <label style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.4fr) minmax(0, 1fr)", alignItems: "center", gap: 10, color: "#405248", fontSize: 12, fontWeight: 600 }}>
+            SL / Serial Number (Auto)
+            <input value={serialNumber} readOnly style={{ width: "100%", boxSizing: "border-box", border: "1px solid #dce5df", borderRadius: 6, padding: "8px 9px", color: "#75847a", background: "#f5f8f5", fontSize: 12 }} />
+          </label>
+          {([
+            ["darCode", "DAR Code"],
+            ["medicineTypeCategory", "Medicine Type/Category"],
+            ["registrationInformation", "Registration Information"],
+            ["packSize", "Pack Size"],
+            ["unit", "Unit"],
+            ["barcode", "Barcode/GTIN"],
+          ] as const).map(([label, value]) => (
+            <label key={label} style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.4fr) minmax(0, 1fr)", alignItems: "center", gap: 10, color: "#405248", fontSize: 12, fontWeight: 600 }}>
+              {value}
+              <input
+                value={productInformation[label]}
                 onChange={(event) => {
                   const inputValue = event.currentTarget.value;
                   setProductInformation((current) => current

@@ -7,6 +7,8 @@ export type OcrLine = {
 export type OcrPage = {
   page: number;
   lines: OcrLine[];
+  width?: number;
+  height?: number;
 };
 
 export type OcrResult = {

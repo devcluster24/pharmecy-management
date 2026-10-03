@@ -26,6 +26,8 @@ function isOcrResult(value: unknown): value is OcrResult {
     && result.pages.every((page) => page
       && Number.isInteger(page.page)
       && Array.isArray(page.lines)
+      && (page.width === undefined || (typeof page.width === "number" && Number.isFinite(page.width) && page.width > 0))
+      && (page.height === undefined || (typeof page.height === "number" && Number.isFinite(page.height) && page.height > 0))
       && page.lines.every(isOcrLine));
 }
 

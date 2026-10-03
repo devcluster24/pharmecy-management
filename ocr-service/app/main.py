@@ -91,7 +91,11 @@ def validate_file(content: bytes, content_type: str) -> None:
         raise HTTPException(status_code=400, detail="The uploaded image is invalid or damaged.") from error
 
 
-def serialize_results(results: Any) -> dict[str, Any]:
+def serialize_results(
+    results: Any,
+    image_width: int | None = None,
+    image_height: int | None = None,
+) -> dict[str, Any]:
     pages = []
     all_text = []
     for page_number, result in enumerate(results, start=1):
@@ -132,7 +136,11 @@ def serialize_results(results: Any) -> dict[str, Any]:
                     lines[-1]["box"] = box
             if text.strip():
                 all_text.append(text)
-        pages.append({"page": page_number, "lines": lines})
+        page = {"page": page_number, "lines": lines}
+        if image_width and image_height:
+            page["width"] = image_width
+            page["height"] = image_height
+        pages.append(page)
     return {"text": "\n".join(all_text), "pages": pages}
 
 
@@ -183,7 +191,12 @@ async def recognize(
                 input_path = Path(temp_dir) / f"upload-{index}{MIME_SUFFIXES[content_type]}"
                 input_path.write_bytes(content)
                 results = await asyncio.to_thread(run_ocr, input_path)
-                serialized = serialize_results(results)
+                image_width = None
+                image_height = None
+                if content_type in ALLOWED_IMAGE_TYPES:
+                    with Image.open(io.BytesIO(content)) as image:
+                        image_width, image_height = image.size
+                serialized = serialize_results(results, image_width, image_height)
                 for page in serialized["pages"]:
                     page["page"] += len(pages)
                     pages.append(page)
