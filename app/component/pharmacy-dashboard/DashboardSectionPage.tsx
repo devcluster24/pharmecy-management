@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import Sidebar from "./components/Sidebar";
 import PharmacyProfileMenu from "./components/PharmacyProfileMenu";
 import { dashboardNavItems } from "./navigation";
@@ -11,7 +12,15 @@ export type SectionData = {
   rows: string[][];
 };
 
-export default function DashboardSectionPage({ sectionSlug, data }: { sectionSlug: string; data: SectionData }) {
+export default function DashboardSectionPage({
+  sectionSlug,
+  data,
+  actionContent,
+}: {
+  sectionSlug: string;
+  data: SectionData;
+  actionContent?: ReactNode;
+}) {
   const navItem = dashboardNavItems.find((item) => item.slug === sectionSlug);
 
   if (!navItem) {
@@ -51,9 +60,11 @@ export default function DashboardSectionPage({ sectionSlug, data }: { sectionSlu
               <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{navItem.label}</h1>
               <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>{data.description}</p>
             </div>
-            <button type="button" style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
-              {data.action}
-            </button>
+            {actionContent ?? (
+              <button type="button" style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
+                {data.action}
+              </button>
+            )}
           </div>
 
           {data.metrics.length > 0 && (

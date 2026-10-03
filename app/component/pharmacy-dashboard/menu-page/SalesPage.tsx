@@ -1,4 +1,5 @@
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import SalesActions from "./SalesActions";
 
 const pageData: SectionData = {
   description: "Review transactions, payments, and daily sales performance.",
@@ -18,5 +19,5 @@ const pageData: SectionData = {
 };
 
 export default function SalesPage() {
-  return <DashboardSectionPage sectionSlug="sales" data={pageData} />;
+  return <DashboardSectionPage sectionSlug="sales" data={pageData} actionContent={<SalesActions />} />;
 }
