@@ -1,6 +1,7 @@
 export type OcrLine = {
   text: string;
   confidence: number | null;
+  box?: number[][];
 };
 
 export type OcrPage = {

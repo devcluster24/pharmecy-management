@@ -40,7 +40,11 @@ uvicorn app.main:app --app-dir ocr-service --host 127.0.0.1 --port 8000
 
 Start Next.js in another terminal with `npm run dev`. The OCR API health check is `http://127.0.0.1:8000/health`.
 
-`OCR_LANG` defaults to `en`. Change it in the OCR service environment only to a language supported by the installed PaddleOCR models. The service accepts JPEG, PNG, WEBP, BMP, TIFF, and PDF uploads up to 10 MB; uploaded files are deleted after processing.
+`OCR_LANG` defaults to `en`. Change it in the OCR service environment only to a language supported by the installed PaddleOCR models. The service accepts up to three JPEG, PNG, WEBP, BMP, TIFF, or PDF files in one request, with a combined limit of 10 MB; uploaded files are deleted after processing.
+
+OCR line results include text and confidence, with an optional `box` polygon of `[x, y]` points. The reusable product-text extractor in `lib/ocr/productTextExtractor.ts` uses these coordinates to find a prominent product name and nearby Generic text.
+
+The product camera scanner captures three frames about 450 ms apart, stores them temporarily in browser IndexedDB, and posts them together to the authenticated OCR endpoint. The local copies are cleared after processing, and the camera images are not shown or saved as product attachments. Backend inference time depends on the OCR service and hardware.
 
 ## Reuse in application pages
 

@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { OCR_ACCEPTED_FILE_TYPES, OCR_MAX_FILE_BYTES } from "@/app/component/ocr/constants";
 
 export const runtime = "nodejs";
+const OCR_MAX_BATCH_FILES = 3;
 
 function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status });
@@ -38,23 +39,34 @@ export async function POST(request: Request) {
 
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > OCR_MAX_FILE_BYTES + 128 * 1024) {
-    return jsonError("The selected file exceeds the 10 MB limit.", 413);
+    return jsonError("The selected files exceed the 10 MB combined limit.", 413);
   }
 
-  let file: FormDataEntryValue | null;
+  let files: FormDataEntryValue[];
   try {
-    file = (await request.formData()).get("file");
+    const formData = await request.formData();
+    files = formData.getAll("files");
+    if (!files.length) {
+      const file = formData.get("file");
+      if (file) files = [file];
+    }
   } catch {
     return jsonError("Upload a valid image or PDF file.", 400);
   }
-  if (!(file instanceof File)) return jsonError("Upload a valid image or PDF file.", 400);
-  if (!OCR_ACCEPTED_FILE_TYPES.some((type) => type === file.type)) {
-    return jsonError("Choose a JPEG, PNG, WEBP, BMP, TIFF, or PDF file.", 415);
+  if (!files.length || files.length > OCR_MAX_BATCH_FILES || files.some((file) => !(file instanceof File))) {
+    return jsonError(`Upload between 1 and ${OCR_MAX_BATCH_FILES} valid image or PDF files.`, 400);
   }
-  if (file.size > OCR_MAX_FILE_BYTES) return jsonError("The selected file exceeds the 10 MB limit.", 413);
+  const uploadFiles = files as File[];
+  if (uploadFiles.some((file) => !OCR_ACCEPTED_FILE_TYPES.some((type) => type === file.type))) {
+    return jsonError("Choose JPEG, PNG, WEBP, BMP, TIFF, or PDF files.", 415);
+  }
+  if (uploadFiles.some((file) => file.size > OCR_MAX_FILE_BYTES)
+    || uploadFiles.reduce((total, file) => total + file.size, 0) > OCR_MAX_FILE_BYTES) {
+    return jsonError("The selected files exceed the 10 MB combined limit.", 413);
+  }
 
   const upstreamBody = new FormData();
-  upstreamBody.set("file", file, file.name);
+  uploadFiles.forEach((file) => upstreamBody.append("files", file, file.name));
   let upstream: Response;
   try {
     upstream = await fetch(`${serviceUrl.replace(/\/+$/, "")}/api/ocr/recognize`, {

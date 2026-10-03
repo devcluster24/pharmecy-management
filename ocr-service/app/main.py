@@ -15,6 +15,7 @@ from PIL import Image
 app = FastAPI(title="Pharmacy PaddleOCR service", version="1.0.0")
 logger = logging.getLogger("paddleocr-service")
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_BATCH_FILES = 3
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"}
 ALLOWED_TYPES = ALLOWED_IMAGE_TYPES | {"application/pdf"}
 MIME_SUFFIXES = {
@@ -51,6 +52,28 @@ def run_ocr(input_path: Path) -> Any:
         return get_ocr().predict(input=str(input_path))
 
 
+def serialize_polygon(value: Any) -> list[list[float]] | None:
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if not isinstance(value, list) or len(value) < 3:
+        return None
+
+    points = []
+    for point in value:
+        if hasattr(point, "tolist"):
+            point = point.tolist()
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y):
+            return None
+        points.append([x, y])
+    return points
+
+
 def validate_file(content: bytes, content_type: str) -> None:
     if content_type == "application/pdf":
         if not content.startswith(b"%PDF-"):
@@ -78,12 +101,17 @@ def serialize_results(results: Any) -> dict[str, Any]:
         payload = raw.get("res", raw)
         texts = payload.get("rec_texts", [])
         scores = payload.get("rec_scores", [])
+        polygons = payload.get("rec_polys", payload.get("dt_polys", []))
         if hasattr(texts, "tolist"):
             texts = texts.tolist()
         if hasattr(scores, "tolist"):
             scores = scores.tolist()
+        if hasattr(polygons, "tolist"):
+            polygons = polygons.tolist()
         if not isinstance(texts, list) or not isinstance(scores, list):
             raise ValueError("PaddleOCR returned invalid recognized text.")
+        if not isinstance(polygons, list):
+            polygons = []
 
         lines = []
         for index, text in enumerate(texts):
@@ -98,6 +126,10 @@ def serialize_results(results: Any) -> dict[str, Any]:
                 except (TypeError, ValueError):
                     confidence = None
             lines.append({"text": text, "confidence": confidence})
+            if index < len(polygons):
+                box = serialize_polygon(polygons[index])
+                if box is not None:
+                    lines[-1]["box"] = box
             if text.strip():
                 all_text.append(text)
         pages.append({"page": page_number, "lines": lines})
@@ -111,7 +143,8 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/ocr/recognize")
 async def recognize(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(default=None),
+    files: list[UploadFile] | None = File(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     expected_key = os.getenv("PADDLEOCR_API_KEY", "")
@@ -121,22 +154,42 @@ async def recognize(
     if not hmac.compare_digest(provided_key, expected_key):
         raise HTTPException(status_code=401, detail="Invalid OCR service credentials.")
 
-    content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=415, detail="Choose a JPEG, PNG, WEBP, BMP, TIFF, or PDF file.")
-    content = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not content:
-        raise HTTPException(status_code=400, detail="The selected file is empty.")
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="The selected file exceeds the 10 MB limit.")
-    validate_file(content, content_type)
+    uploads = files or ([file] if file is not None else [])
+    if not uploads or len(uploads) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=400, detail=f"Upload between 1 and {MAX_BATCH_FILES} image or PDF files.")
+
+    contents = []
+    total_size = 0
+    for upload in uploads:
+        content_type = (upload.content_type or "").lower()
+        if content_type not in ALLOWED_TYPES:
+            raise HTTPException(status_code=415, detail="Choose JPEG, PNG, WEBP, BMP, TIFF, or PDF files.")
+        content = await upload.read(MAX_UPLOAD_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=400, detail="A selected file is empty.")
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="A selected file exceeds the 10 MB limit.")
+        total_size += len(content)
+        if total_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="The selected files exceed the 10 MB combined limit.")
+        validate_file(content, content_type)
+        contents.append((content, content_type))
 
     try:
         with tempfile.TemporaryDirectory(prefix="pharmacy-ocr-") as temp_dir:
-            input_path = Path(temp_dir) / f"upload{MIME_SUFFIXES[content_type]}"
-            input_path.write_bytes(content)
-            results = await asyncio.to_thread(run_ocr, input_path)
-            return serialize_results(results)
+            pages = []
+            all_text = []
+            for index, (content, content_type) in enumerate(contents, start=1):
+                input_path = Path(temp_dir) / f"upload-{index}{MIME_SUFFIXES[content_type]}"
+                input_path.write_bytes(content)
+                results = await asyncio.to_thread(run_ocr, input_path)
+                serialized = serialize_results(results)
+                for page in serialized["pages"]:
+                    page["page"] += len(pages)
+                    pages.append(page)
+                if serialized["text"].strip():
+                    all_text.append(serialized["text"])
+            return {"text": "\n".join(all_text), "pages": pages}
     except HTTPException:
         raise
     except Exception as error:

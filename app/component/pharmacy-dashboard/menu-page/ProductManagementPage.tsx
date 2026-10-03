@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import { supabase } from "@/lib/supabase/client";
-import type { OcrResult } from "@/app/component/ocr/types";
 import { ProductDocumentCapture, ProductDocumentLinks } from "./ProductDocumentCapture";
 import {
   deleteProductDocuments,
@@ -13,12 +12,12 @@ import {
   saveProductDocuments,
   type ProductDocument,
 } from "./productDocuments";
-import { getProductFieldsFromOcr } from "./productOcr";
 import {
   getProductIdentityKey,
   getProductNameKey,
   type ProductImportCandidate,
 } from "./productImport";
+import type { ProductInformation } from "@/lib/ocr/productInfoExtractor";
 
 type Product = {
   id: string;
@@ -83,6 +82,18 @@ type PharmacyProductRow = {
 type SuggestionField = "dosageForm" | "strength" | "packSize" | "barcode";
 type Suggestions = Record<SuggestionField, string[]>;
 type CatalogCompany = { name: string; count: number };
+type ProductFormValues = {
+  manufacturer: string;
+  brand: string;
+  genericName: string;
+  strength: string;
+  dosageForm: string;
+  retailPrice: string;
+  usageType: string;
+  darCode: string;
+  medicineTypeCategory: string;
+  registrationInformation: string;
+};
 const CATALOG_PAGE_SIZE = 1000;
 const IMPORT_BATCH_SIZE = 500;
 const DEFAULT_PRODUCT_PAGE_SIZE = 25;
@@ -296,6 +307,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [suggestions, setSuggestions] = useState<Suggestions>(initialSuggestions);
   const [storageReady, setStorageReady] = useState(adminMode);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isManualImportOpen, setIsManualImportOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedProductDocuments, setSelectedProductDocuments] = useState<ProductDocument[]>([]);
   const [isLoadingProductDocuments, setIsLoadingProductDocuments] = useState(false);
@@ -312,7 +324,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [addProductError, setAddProductError] = useState("");
   const [productDocuments, setProductDocuments] = useState<File[]>([]);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
-  const [productOcrMessage, setProductOcrMessage] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ phase: "", checked: 0, total: 0 });
   const [importSummary, setImportSummary] = useState({ added: 0, duplicates: 0 });
@@ -325,8 +336,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const initialQueryKey = useRef("");
   const productQuerySequence = useRef(0);
   const editRowRef = useRef<HTMLTableRowElement | null>(null);
-  const addProductFormRef = useRef<HTMLFormElement | null>(null);
   const savingProductRef = useRef(false);
+  const savingNewProductRef = useRef(false);
   const assignEditRowRef = useCallback((node: HTMLTableRowElement | null) => {
     editRowRef.current = node;
   }, []);
@@ -523,16 +534,20 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     if (!isAddOpen && !selectedProduct) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !isSavingProduct) {
-        setIsAddOpen(false);
-        setSelectedProduct(null);
-        setSelectedProductDocuments([]);
-        setProductDocumentsError("");
-        setIsLoadingProductDocuments(false);
+        if (isManualImportOpen) {
+          setIsManualImportOpen(false);
+        } else {
+          setIsAddOpen(false);
+          setSelectedProduct(null);
+          setSelectedProductDocuments([]);
+          setProductDocumentsError("");
+          setIsLoadingProductDocuments(false);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAddOpen, isSavingProduct, selectedProduct]);
+  }, [isAddOpen, isManualImportOpen, isSavingProduct, selectedProduct]);
 
   useEffect(() => {
     if (!selectedProduct) return;
@@ -648,31 +663,11 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     setEditingProduct((current) => current ? { ...current, [field]: value } : current);
   }
 
-  function fillProductFieldsFromOcr(result: OcrResult) {
-    const form = addProductFormRef.current;
-    if (!form) return;
-    const fields = getProductFieldsFromOcr(result);
-    let filledCount = 0;
-
-    for (const [name, value] of Object.entries(fields)) {
-      if (!value) continue;
-      const input = form.elements.namedItem(name);
-      if (input instanceof HTMLInputElement) {
-        input.value = value;
-        filledCount++;
-      }
-    }
-
-    setProductOcrMessage(filledCount
-      ? `${filledCount} field(s) filled from OCR. Review the values, correct any errors, and complete the remaining required fields.`
-      : "Text was recognized, but no product fields could be matched. Enter the details manually.");
-  }
-
   async function openAddProduct() {
     if (!pharmacyUserId || isPreparingProduct || isImporting || !storageReady) return;
     setIsPreparingProduct(true);
     setAddProductError("");
-    setProductOcrMessage("");
+    setIsManualImportOpen(false);
     setProductDocuments([]);
     setImportError("");
     try {
@@ -693,19 +688,26 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     }
   }
 
-  async function addProduct(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (isSavingProduct) return;
+  async function saveProductValues(values: ProductFormValues) {
+    if (savingNewProductRef.current) return;
+    savingNewProductRef.current = true;
     setIsSavingProduct(true);
-    const form = new FormData(event.currentTarget);
-    const value = (name: string) => String(form.get(name) ?? "").trim();
+    setAddProductError("");
+    const value = (name: keyof ProductFormValues) => values[name].trim();
     const brand = value("brand");
     const genericName = value("genericName");
+    const manufacturer = value("manufacturer");
+    if (!brand || !manufacturer) {
+      setAddProductError("Pharmaceutical Company and Brand Name are required.");
+      setIsSavingProduct(false);
+      savingNewProductRef.current = false;
+      return;
+    }
     const productFields: ProductImportCandidate = {
       medicineName: brand || genericName,
       brand,
       genericName,
-      manufacturer: value("manufacturer"),
+      manufacturer,
       productType: value("usageType") || "Medicine",
       category: value("medicineTypeCategory"),
       dosageForm: value("dosageForm"),
@@ -717,6 +719,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     if (!pharmacyUserId) {
       setAddProductError("Could not verify the signed-in pharmacy account.");
       setIsSavingProduct(false);
+      savingNewProductRef.current = false;
       return;
     }
     let documentsSaved = false;
@@ -776,6 +779,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       rememberSuggestion("barcode", savedProduct.barcode);
       setProductDocuments([]);
       setIsAddOpen(false);
+      setIsManualImportOpen(false);
     } catch (error) {
       let message = getErrorMessage(error);
       if (documentsSaved) {
@@ -790,7 +794,41 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         : message);
     } finally {
       setIsSavingProduct(false);
+      savingNewProductRef.current = false;
     }
+  }
+
+  async function addProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const value = (name: keyof ProductFormValues) => String(form.get(name) ?? "").trim();
+    await saveProductValues({
+      manufacturer: value("manufacturer"),
+      brand: value("brand"),
+      genericName: value("genericName"),
+      strength: value("strength"),
+      dosageForm: value("dosageForm"),
+      retailPrice: value("retailPrice"),
+      usageType: value("usageType"),
+      darCode: value("darCode"),
+      medicineTypeCategory: value("medicineTypeCategory"),
+      registrationInformation: value("registrationInformation"),
+    });
+  }
+
+  async function saveExtractedProduct(information: ProductInformation) {
+    await saveProductValues({
+      manufacturer: information.pharmaceuticalCompany ?? "",
+      brand: information.brandName ?? "",
+      genericName: information.genericName ?? "",
+      strength: information.strength ?? "",
+      dosageForm: information.dosageFormDescription ?? "",
+      retailPrice: information.retailPrice ?? "",
+      usageType: "",
+      darCode: "",
+      medicineTypeCategory: "",
+      registrationInformation: "",
+    });
   }
 
   async function importCatalog(company?: string) {
@@ -872,6 +910,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   function closeModal() {
     if (isSavingProduct) return;
     setIsAddOpen(false);
+    setIsManualImportOpen(false);
     setSelectedProduct(null);
     setProductDocuments([]);
     setSelectedProductDocuments([]);
@@ -1048,10 +1087,33 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
               </div>
               <button type="button" aria-label="Close" onClick={closeModal} disabled={isSavingProduct} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>×</button>
             </div>
-            <form ref={addProductFormRef} onSubmit={addProduct}>
+            <ProductDocumentCapture
+              files={productDocuments}
+              onFilesChange={setProductDocuments}
+              onManualImport={() => {
+                setAddProductError("");
+                setIsManualImportOpen(true);
+              }}
+              onSaveProductInformation={saveExtractedProduct}
+              saveError={addProductError}
+              disabled={isSavingProduct}
+            />
+          </section>
+        </div>
+      )}
+
+      {isAddOpen && isManualImportOpen && (
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget && !isSavingProduct) setIsManualImportOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.58)" }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="manual-import-title" style={{ width: "min(760px, 100%)", maxHeight: "min(90vh, 820px)", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.3)" }}>
+            <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
+              <div>
+                <h2 id="manual-import-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add Manual Import</h2>
+                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Enter medicine details manually to add the product.</p>
+              </div>
+              <button type="button" aria-label="Close manual import" onClick={() => { if (!isSavingProduct) setIsManualImportOpen(false); }} disabled={isSavingProduct} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>×</button>
+            </div>
+            <form onSubmit={addProduct}>
               {addProductError && <p role="alert" style={{ margin: "14px 24px 0", color: "#ad4b43", fontSize: 12 }}>{addProductError}</p>}
-              {productOcrMessage && <p role="status" style={{ margin: "14px 24px 0", color: "#17704e", fontSize: 12 }}>{productOcrMessage}</p>}
-              <ProductDocumentCapture files={productDocuments} onFilesChange={setProductDocuments} onOcrResult={fillProductFieldsFromOcr} disabled={isSavingProduct} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, padding: 24 }}>
                 <FormField label="SL / Serial Number (Auto)"><input name="serialNumber" value={nextSerialNumber} readOnly style={{ ...fieldStyle, background: "#f5f8f5", color: "#75847a" }} /></FormField>
                 <FormField label="Internal Product ID Number (Auto)"><input name="internalProductId" value={nextProductId} readOnly style={{ ...fieldStyle, background: "#f5f8f5", color: "#75847a" }} /></FormField>
@@ -1067,7 +1129,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 <FormField label="Registration Information"><input name="registrationInformation" placeholder="Registration information" style={fieldStyle} /></FormField>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-                <button type="button" onClick={closeModal} disabled={isSavingProduct} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>Cancel</button>
+                <button type="button" onClick={() => setIsManualImportOpen(false)} disabled={isSavingProduct} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isSavingProduct ? "not-allowed" : "pointer" }}>Cancel</button>
                 <button type="submit" disabled={isImporting || isSavingProduct} style={{ border: 0, borderRadius: 6, background: isImporting || isSavingProduct ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isImporting || isSavingProduct ? "not-allowed" : "pointer" }}>{isSavingProduct ? "Saving product..." : "Save product"}</button>
               </div>
             </form>
