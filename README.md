@@ -29,6 +29,16 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Browser-side product OCR
+
+Product image OCR runs in the user's browser with PaddleOCR ONNX models and ONNX Runtime Web. It does not use a Python service or upload the image to an OCR API. The first scan downloads about 50 MB of model and runtime assets from this Vercel deployment; later scans can reuse the browser cache.
+
+The current model setup is intended for English/Latin medicine labels. Bangla-script recognition is not included. OCR does not classify product fields or populate them automatically; recognized text lines are offered as selectable suggestions under each product field. Each scan checks the original and a lightly upscaled/sharpened/contrast-adjusted image, then displays the result with the higher average OCR confidence and suggests retaking a low-confidence image.
+
+`npm install` and `npm ci` run `scripts/copy-ocr-runtime.mjs`, which copies the required ONNX Runtime Web WASM files into the ignored `public/ocr/runtime/` directory. The PaddleOCR model archives are self-hosted from `public/ocr/models/`, so production OCR does not depend on an external model server.
+
+The `dev` and `build` scripts use Next.js Webpack because the OCR SDK's OpenCV dependency contains Node-only imports that Turbopack cannot resolve for the browser.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

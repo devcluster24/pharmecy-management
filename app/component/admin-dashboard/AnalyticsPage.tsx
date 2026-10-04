@@ -12,6 +12,9 @@ type ProductFields = {
   strength: string;
   dosageFormDescription: string;
   retailPrice: string;
+  packSize: string;
+  unitPrice: string;
+  packPrice: string;
   usageType: string;
   darCode: string;
   medicineTypeCategory: string;
@@ -31,7 +34,9 @@ const editableProductFields: { key: keyof ProductFields; label: string }[] = [
   { key: "genericName", label: "Generic Name" },
   { key: "strength", label: "Strength" },
   { key: "dosageFormDescription", label: "Dosage Form / Description" },
-  { key: "retailPrice", label: "Retail Price" },
+  { key: "packSize", label: "Pack Size" },
+  { key: "unitPrice", label: "Unit Price" },
+  { key: "packPrice", label: "Pack Price" },
   { key: "usageType", label: "Usage Type" },
   { key: "darCode", label: "DAR Code" },
   { key: "medicineTypeCategory", label: "Medicine Type/Category" },
@@ -102,6 +107,26 @@ const productColumnAliases: Record<keyof ProductFields, string[]> = {
     "unit price",
   ],
 
+  packSize: [
+    "pack size",
+    "pack",
+    "package size",
+    "pack quantity",
+  ],
+
+  unitPrice: [
+    "unit price",
+    "retail price",
+    "mrp",
+    "price",
+  ],
+
+  packPrice: [
+    "pack price",
+    "package price",
+    "strip price",
+  ],
+
   usageType: [
     "usage type",
     "usage type human animal",
@@ -155,34 +180,6 @@ function toProductText(value: unknown): string {
   const text = String(value).trim();
 
   return text || "-";
-}
-
-function normalizeImportUrl(url: string) {
-  const trimmed = url.trim();
-
-  if (!trimmed) {
-    throw new Error("Please enter a data URL.");
-  }
-
-  /*
-   * GitHub:
-   * https://github.com/user/repo/blob/main/file.json
-   *
-   * becomes:
-   * https://raw.githubusercontent.com/user/repo/main/file.json
-   */
-
-  const githubMatch = trimmed.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i
-  );
-
-  if (githubMatch) {
-    const [, owner, repo, path] = githubMatch;
-
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${path}`;
-  }
-
-  return trimmed;
 }
 
 function splitGenericAndStrength(value: string) {
@@ -309,6 +306,7 @@ async function insertProductIntoCatalog(
 }
 
 function mapProductToCatalogRow(product: Product) {
+  const unitPrice = product.unitPrice === "-" ? product.retailPrice : product.unitPrice;
   return {
     id: product.id,
     serial_number: product.serialNumber,
@@ -317,7 +315,10 @@ function mapProductToCatalogRow(product: Product) {
     generic_name: product.genericName,
     strength: product.strength,
     dosage_form_description: product.dosageFormDescription,
-    retail_price: product.retailPrice,
+    retail_price: unitPrice,
+    pack_size: product.packSize,
+    unit_price: unitPrice,
+    pack_price: product.packPrice,
     usage_type: product.usageType,
     dar_code: product.darCode,
     medicine_type_category: product.medicineTypeCategory,
@@ -335,6 +336,9 @@ function mapCatalogRowToProduct(row: Record<string, unknown>): Product {
     strength: String(row.strength ?? "-"),
     dosageFormDescription: String(row.dosage_form_description ?? "-"),
     retailPrice: String(row.retail_price ?? "-"),
+    packSize: String(row.pack_size ?? "-"),
+    unitPrice: String(row.unit_price ?? row.retail_price ?? "-"),
+    packPrice: String(row.pack_price ?? "-"),
     usageType: String(row.usage_type ?? "-"),
     darCode: String(row.dar_code ?? "-"),
     medicineTypeCategory: String(row.medicine_type_category ?? "-"),
@@ -349,7 +353,7 @@ function mapCatalogRowToProduct(row: Record<string, unknown>): Product {
 function createProductFromSourceRow(
   row: Record<string, unknown>,
   index: number
-): ProductFields | null {
+): (ProductFields & { id: string }) | null {
   const normalizedRow: Record<string, unknown> = {};
 
   Object.entries(row).forEach(([key, value]) => {
@@ -421,6 +425,12 @@ function createProductFromSourceRow(
   const brandName = toProductText(
     findValue("brandName")
   );
+  const importedId = toProductText(
+    normalizedRow["id number"] ??
+      normalizedRow["id"] ??
+      normalizedRow["product id"] ??
+      normalizedRow["id no"]
+  );
 
   /*
    * Brand Name এবং Generic Name দুটোই না থাকলে
@@ -434,6 +444,7 @@ function createProductFromSourceRow(
   }
 
   return {
+    id: importedId === "-" ? "" : importedId,
     serialNumber: toProductText(
       findValue("serialNumber") ?? index + 1
     ),
@@ -453,8 +464,12 @@ function createProductFromSourceRow(
     ),
 
     retailPrice: toProductText(
-      findValue("retailPrice")
+      findValue("unitPrice") ?? findValue("retailPrice")
     ),
+
+    packSize: toProductText(findValue("packSize")),
+    unitPrice: toProductText(findValue("unitPrice") ?? findValue("retailPrice")),
+    packPrice: toProductText(findValue("packPrice")),
 
     usageType: toProductText(
       findValue("usageType")
@@ -475,61 +490,12 @@ function createProductFromSourceRow(
 }
 
 /* =========================================================
-   JSON
-========================================================= */
-
-function extractProductRows(
-  payload: unknown
-): Record<string, unknown>[] {
-  if (Array.isArray(payload)) {
-    return payload.filter(
-      (
-        item
-      ): item is Record<string, unknown> =>
-        typeof item === "object" &&
-        item !== null
-    );
-  }
-
-  if (
-    typeof payload === "object" &&
-    payload !== null
-  ) {
-    const object =
-      payload as Record<string, unknown>;
-
-    const possibleKeys = [
-      "data",
-      "items",
-      "medicines",
-      "products",
-      "records",
-    ];
-
-    for (const key of possibleKeys) {
-      const value = object[key];
-
-      if (Array.isArray(value)) {
-        return value.filter(
-          (
-            item
-          ): item is Record<string, unknown> =>
-            typeof item === "object" &&
-            item !== null
-        );
-      }
-    }
-  }
-
-  return [];
-}
-
-/* =========================================================
    CSV Parser
    No external package required
 ========================================================= */
 
 function parseCSV(text: string): Record<string, unknown>[] {
+  text = text.replace(/^\uFEFF/, "");
   const rows: string[][] = [];
 
   let currentRow: string[] = [];
@@ -614,50 +580,6 @@ function parseCSV(text: string): Record<string, unknown>[] {
 }
 
 /* =========================================================
-   URL Fetch
-========================================================= */
-
-async function fetchProductDataFromUrl(
-  url: string
-) {
-  const normalizedUrl = normalizeImportUrl(url);
-
-  const response = await fetch(normalizedUrl);
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch data. HTTP ${response.status}`
-    );
-  }
-
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  const text = await response.text();
-
-  /*
-   * CSV
-   */
-  if (
-    contentType.includes("text/csv") ||
-    normalizedUrl.toLowerCase().endsWith(".csv")
-  ) {
-    return parseCSV(text);
-  }
-
-  /*
-   * JSON
-   */
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(
-      "The URL did not return valid JSON or CSV data."
-    );
-  }
-}
-
-/* =========================================================
    UI
 ========================================================= */
 
@@ -666,8 +588,8 @@ export default function ProductDataImportPage() {
     []
   );
 
-  const [importUrl, setImportUrl] =
-    useState("");
+  const [selectedCsvFile, setSelectedCsvFile] =
+    useState<File | null>(null);
 
   const [isImporting, setIsImporting] =
     useState(false);
@@ -696,7 +618,10 @@ export default function ProductDataImportPage() {
   const [showImportPanel, setShowImportPanel] =
     useState(true);
 
-  const [showClearConfirm, setShowClearConfirm] =
+  const [isClearingProducts, setIsClearingProducts] =
+    useState(false);
+
+  const [isClearingPharmacyProducts, setIsClearingPharmacyProducts] =
     useState(false);
 
   /*
@@ -802,6 +727,9 @@ export default function ProductDataImportPage() {
         product.darCode,
         product.medicineTypeCategory,
         product.registrationInformation,
+        product.packSize,
+        product.unitPrice,
+        product.packPrice,
         product.id,
       ]
         .join(" ")
@@ -841,27 +769,30 @@ export default function ProductDataImportPage() {
     pageSize,
   ]);
 
-  /* =======================================================
-     Import URL
-  ======================================================= */
+  function handleCsvSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null;
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setImportStatus("Choose a CSV file.");
+      return;
+    }
+    setSelectedCsvFile(file);
+    setImportStatus("");
+  }
 
-  async function handleImportProductData() {
-    if (!importUrl.trim()) {
-      setImportStatus(
-        "Please enter a JSON or CSV data URL."
-      );
-
+  async function handleImportCsv() {
+    if (!selectedCsvFile) {
+      setImportStatus("Upload a CSV file before importing.");
       return;
     }
 
     try {
       setIsImporting(true);
-      setImportStatus("Connecting to data source...");
-
-      const payload = await fetchProductDataFromUrl(importUrl);
-      const rows = extractProductRows(payload);
+      setImportStatus(`Reading ${selectedCsvFile.name}...`);
+      const rows = parseCSV(await selectedCsvFile.text());
       if (!rows.length) {
-        throw new Error("No product data found in this URL.");
+        throw new Error("The CSV file has no product rows.");
       }
 
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -869,171 +800,101 @@ export default function ProductDataImportPage() {
         throw authError ?? new Error("Sign in before importing products.");
       }
 
-      let addedCount = 0;
-      let duplicateCount = 0;
       let skippedCount = 0;
-      const currentProducts = [...products];
+      let upsertedCount = 0;
+      let generatedId = createProductId(products);
+      const usedIds = new Set(products.map((product) => product.id));
+      const currentProducts = new Map(products.map((product) => [product.id, product]));
+      const reservedIds = new Set(
+        rows
+          .map((row) => createProductFromSourceRow(row, 0)?.id)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const importedIds = new Set<string>();
+      const importedProducts: Product[] = [];
 
       for (let index = 0; index < rows.length; index++) {
-        const productData = createProductFromSourceRow(rows[index], index);
-        if (!productData) {
+        const parsedProduct = createProductFromSourceRow(rows[index], index);
+        if (!parsedProduct) {
           skippedCount++;
           continue;
         }
 
-        if (isDuplicateProduct(productData, currentProducts)) {
-          duplicateCount++;
-          continue;
+        let id = parsedProduct.id;
+        if (!id) {
+          while (usedIds.has(generatedId) || reservedIds.has(generatedId)) {
+            generatedId = `MED-${String(Number(generatedId.slice(4)) + 1).padStart(4, "0")}`;
+          }
+          id = generatedId;
+          reservedIds.add(id);
+          generatedId = `MED-${String(Number(generatedId.slice(4)) + 1).padStart(4, "0")}`;
         }
 
-        const newProduct: Product = {
-          ...productData,
-          id: createProductId(currentProducts),
-        };
-        const savedProduct = await insertProductIntoCatalog(newProduct, user.id);
-        currentProducts.push(savedProduct);
-        setProducts([...currentProducts]);
-        addedCount++;
-        setImportStatus(`Imported ${addedCount} product(s) • Checked ${index + 1}/${rows.length} • ${duplicateCount} duplicate skipped`);
+        if (importedIds.has(id)) {
+          skippedCount++;
+          continue;
+        }
+        importedIds.add(id);
+        usedIds.add(id);
+
+        const product: Product = { ...parsedProduct, id };
+        if (!parsedProduct.id && isDuplicateProduct(product, [...currentProducts.values()])) {
+          skippedCount++;
+          continue;
+        }
+        importedProducts.push(product);
+      }
+
+      if (!importedProducts.length) {
+        throw new Error("No valid products were found in the CSV file.");
+      }
+
+      for (let offset = 0; offset < importedProducts.length; offset += 250) {
+        const batch = importedProducts.slice(offset, offset + 250);
+        const { data, error } = await supabase
+          .from("admin_medicine_catalog")
+          .upsert(
+            batch.map((product) => ({
+              ...mapProductToCatalogRow(product),
+              created_by: user.id,
+            })),
+            { onConflict: "id" },
+          )
+          .select("*");
+
+        if (error) {
+          if (
+            error.code === "PGRST204" ||
+            /could not find the .* column of 'admin_medicine_catalog' in the schema cache/i.test(error.message)
+          ) {
+            throw new Error(
+              "The Supabase catalog schema is missing the new pricing columns. Run supabase/migrations/20261004171500_admin_catalog_pricing_fields.sql in the Supabase SQL Editor, then retry the CSV import.",
+            );
+          }
+          throw new Error(`Imported ${upsertedCount} row(s) before the next CSV batch failed: ${error.message}`);
+        }
+        if (!data || data.length !== batch.length) {
+          throw new Error(`Supabase saved ${data?.length ?? 0} of ${batch.length} rows in the current CSV batch.`);
+        }
+
+        for (const row of data) {
+          const savedProduct = mapCatalogRowToProduct(row);
+          currentProducts.set(savedProduct.id, savedProduct);
+        }
+        upsertedCount += data.length;
+        setProducts([...currentProducts.values()]);
+        setImportStatus(`Imported ${upsertedCount}/${importedProducts.length} CSV row(s) to Supabase...`);
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
 
       setCurrentPage(1);
-      setImportStatus(`Import completed: ${addedCount} added, ${duplicateCount} duplicate skipped, ${skippedCount} invalid skipped.`);
+      setSelectedCsvFile(null);
+      setImportStatus(`CSV import complete: ${upsertedCount} row(s) saved to Supabase; ${skippedCount} invalid or duplicate row(s) skipped.`);
     } catch (error) {
       console.error(error);
-      setImportStatus(error instanceof Error ? error.message : "Failed to import product data.");
+      setImportStatus(error instanceof Error ? error.message : "Failed to import CSV data.");
     } finally {
       setIsImporting(false);
-    }
-  }
-
-  /* =======================================================
-     Local File Import
-  ======================================================= */
-
-  async function handleFileImport(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file =
-      event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    try {
-      setIsImporting(true);
-
-      setImportStatus(
-        `Reading ${file.name}...`
-      );
-
-      const text = await file.text();
-
-      let payload: unknown;
-
-      if (
-        file.name
-          .toLowerCase()
-          .endsWith(".csv")
-      ) {
-        payload = parseCSV(text);
-      } else {
-        payload = JSON.parse(text);
-      }
-
-      const rows =
-        extractProductRows(payload);
-
-      if (!rows.length) {
-        throw new Error(
-          "No product data found in the selected file."
-        );
-      }
-
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        throw authError ?? new Error("Sign in before importing products.");
-      }
-
-      let addedCount = 0;
-      let duplicateCount = 0;
-      let skippedCount = 0;
-      const currentProducts = [...products];
-
-      for (
-        let index = 0;
-        index < rows.length;
-        index++
-      ) {
-        const productData =
-          createProductFromSourceRow(
-            rows[index],
-            index
-          );
-
-        if (!productData) {
-          skippedCount++;
-          continue;
-        }
-
-        if (
-          isDuplicateProduct(
-            productData,
-            currentProducts
-          )
-        ) {
-          duplicateCount++;
-          continue;
-        }
-
-        const newProduct: Product = {
-          ...productData,
-          id: createProductId(
-            currentProducts
-          ),
-        };
-
-        const savedProduct = await insertProductIntoCatalog(newProduct, user.id);
-        currentProducts.push(savedProduct);
-        setProducts([...currentProducts]);
-
-        addedCount++;
-
-        setImportStatus(
-          `Imported ${addedCount} product(s) • ` +
-            `Checked ${index + 1}/${rows.length}`
-        );
-
-        await new Promise<void>(
-          (resolve) =>
-            setTimeout(resolve, 0)
-        );
-      }
-
-      setCurrentPage(1);
-
-      setImportStatus(
-        `File import completed: ${addedCount} added, ` +
-          `${duplicateCount} duplicate skipped, ` +
-          `${skippedCount} invalid skipped.`
-      );
-    } catch (error) {
-      console.error(error);
-
-      setImportStatus(
-        error instanceof Error
-          ? error.message
-          : "Failed to import file."
-      );
-    } finally {
-      setIsImporting(false);
-
-      /*
-       * Same file আবার select করার সুযোগ
-       */
-      event.target.value = "";
     }
   }
 
@@ -1108,28 +969,81 @@ export default function ProductDataImportPage() {
   ======================================================= */
 
   async function handleClearAllProducts() {
-    const { error } = await supabase
-      .from("admin_medicine_catalog")
-      .delete()
-      .not("id", "is", null);
+    setIsClearingProducts(true);
+    setImportStatus("Deleting all products from Supabase in batches...");
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw sessionError ?? new Error("Sign in again before deleting catalog data.");
+      }
 
-    if (error) {
-      setImportStatus(error.message);
+      const response = await fetch("/api/admin/catalog/delete-all", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const result = await response.json() as {
+        deletedCount?: number;
+        remainingCount?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(result.error ?? `Catalog deletion failed (HTTP ${response.status}).`);
+      }
+      if (result.remainingCount !== 0 || typeof result.deletedCount !== "number") {
+        throw new Error("The server did not confirm that the entire catalog was deleted.");
+      }
+
+      setProducts([]);
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(PRODUCT_STORAGE_KEY);
+      }
+
+      setSelectedProduct(null);
+      setCurrentPage(1);
+      setImportStatus(`${result.deletedCount.toLocaleString()} product(s) deleted from Supabase. Remaining records: ${result.remainingCount}.`);
+    } catch (error) {
+      setImportStatus(error instanceof Error ? error.message : "Could not delete products from the shared Supabase catalog.");
+    } finally {
+      setIsClearingProducts(false);
+    }
+  }
+
+  async function handleClearAllPharmacyProducts() {
+    if (!window.confirm("Delete every pharmacy account's Product list from Supabase? This cannot be undone.")) {
       return;
     }
 
-    setProducts([]);
+    setIsClearingPharmacyProducts(true);
+    setImportStatus("Deleting all pharmacy Product list records from Supabase...");
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw sessionError ?? new Error("Sign in again before deleting pharmacy product data.");
+      }
 
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(PRODUCT_STORAGE_KEY);
+      const response = await fetch("/api/admin/pharmacy-catalog/delete-all", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const result = await response.json() as {
+        deletedCount?: number;
+        remainingCount?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(result.error ?? `Pharmacy product deletion failed (HTTP ${response.status}).`);
+      }
+      if (result.remainingCount !== 0 || typeof result.deletedCount !== "number") {
+        throw new Error("The server did not confirm that all pharmacy Product list records were deleted.");
+      }
+
+      setImportStatus(`${result.deletedCount.toLocaleString()} pharmacy Product list record(s) deleted from Supabase. Remaining records: ${result.remainingCount}.`);
+    } catch (error) {
+      setImportStatus(error instanceof Error ? error.message : "Could not delete pharmacy Product list data.");
+    } finally {
+      setIsClearingPharmacyProducts(false);
     }
-
-    setSelectedProduct(null);
-    setShowClearConfirm(false);
-    setCurrentPage(1);
-    setImportStatus(
-      "All products have been deleted from the shared Supabase catalog."
-    );
   }
 
   /* =======================================================
@@ -1198,18 +1112,6 @@ export default function ProductDataImportPage() {
                 : "Import Product Data"}
             </button>
 
-            <button
-              type="button"
-              onClick={() =>
-                setShowClearConfirm(true)
-              }
-              disabled={
-                isLoadingProducts || products.length === 0
-              }
-              className="rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Clear All
-            </button>
           </div>
         </div>
 
@@ -1225,55 +1127,32 @@ export default function ProductDataImportPage() {
               </h2>
 
               <p className="mt-1 text-sm text-gray-500">
-                Paste a JSON/CSV URL or select a
-                local JSON/CSV file.
+                Upload a CSV file with product columns, then import it into Supabase.
               </p>
             </div>
 
-            <div className="flex flex-col gap-3 lg:flex-row">
-              <input
-                type="url"
-                value={importUrl}
-                onChange={(event) =>
-                  setImportUrl(
-                    event.target.value
-                  )
-                }
-                placeholder="https://example.com/products.json"
-                disabled={isImporting || isLoadingProducts}
-                className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-black focus:ring-1 focus:ring-black disabled:bg-gray-100"
-              />
-
-              <button
-                type="button"
-                onClick={
-                  handleImportProductData
-                }
-                disabled={
-                  isImporting ||
-                  isLoadingProducts ||
-                  !importUrl.trim()
-                }
-                className="rounded-lg bg-black px-6 py-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isImporting
-                  ? "Importing..."
-                  : "Import Product Data"}
-              </button>
-
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-6 py-3 text-center text-sm font-medium text-gray-700 transition hover:bg-gray-50">
-                Select File
-
+                Upload CSV
                 <input
                   type="file"
-                  accept=".json,.csv,application/json,text/csv"
-                  onChange={
-                    handleFileImport
-                  }
+                  accept=".csv,text/csv"
+                  onChange={handleCsvSelection}
                   disabled={isImporting || isLoadingProducts}
                   className="hidden"
                 />
               </label>
+              <span className="min-w-0 flex-1 truncate text-sm text-gray-600">
+                {selectedCsvFile?.name ?? "No CSV file selected"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleImportCsv()}
+                disabled={isImporting || isLoadingProducts || !selectedCsvFile}
+                className="rounded-lg bg-black px-6 py-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isImporting ? "Importing..." : "Import"}
+              </button>
             </div>
 
             {importStatus && (
@@ -1288,12 +1167,8 @@ export default function ProductDataImportPage() {
               </p>
 
               <p className="mt-1 leading-6">
-                SL / Serial Number • Pharmaceutical
-                Company • Brand Name • Generic Name •
-                Strength • Dosage Form / Description •
-                Retail Price • Usage Type • DAR Code •
-                Medicine Type/Category • Registration
-                Information
+                ID Number • Brand Name • Generic Name • Company • Strength •
+                Dosage Form • Pack Size • Unit Price • Pack Price
               </p>
 
               <p className="mt-2">
@@ -1359,35 +1234,39 @@ export default function ProductDataImportPage() {
               className="w-full rounded-md border border-[#e0e6e1] px-[10px] py-2 text-xs text-[#26352f] outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 md:w-[240px]"
             />
 
-            <div className="flex items-center gap-2 text-xs text-[#687871]">
-              <span>Rows:</span>
-
-              <select
-                value={pageSize}
-                onChange={(event) => {
-                  setPageSize(
-                    Number(event.target.value)
-                  );
-                  setCurrentPage(1);
-                }}
-                className="rounded-md border border-[#e0e6e1] bg-white px-2.5 py-2 text-xs text-[#26352f] outline-none focus:border-emerald-600"
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 text-xs text-[#687871]">
+                <span>Rows:</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="rounded-md border border-[#e0e6e1] bg-white px-2.5 py-2 text-xs text-[#26352f] outline-none focus:border-emerald-600"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleClearAllProducts()}
+                disabled={isLoadingProducts || isClearingProducts}
+                className="rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <option value={10}>
-                  10
-                </option>
-
-                <option value={25}>
-                  25
-                </option>
-
-                <option value={50}>
-                  50
-                </option>
-
-                <option value={100}>
-                  100
-                </option>
-              </select>
+                {isClearingProducts ? "Deleting..." : "Delete all Supabase data"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearAllPharmacyProducts()}
+                disabled={isLoadingProducts || isClearingProducts || isClearingPharmacyProducts}
+                className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isClearingPharmacyProducts ? "Deleting pharmacy lists..." : "Delete all pharmacy Product lists"}
+              </button>
             </div>
           </div>
         </div>
@@ -1398,10 +1277,10 @@ export default function ProductDataImportPage() {
 
         <div style={{ overflow: "hidden", border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", minWidth: 1220, borderCollapse: "collapse", textAlign: "left" }}>
+            <table style={{ width: "100%", minWidth: 1400, borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
                 <tr>
-                  {["SL / Serial Number", "Pharmaceutical Company", "Brand Name", "Generic Name", "Strength", "Dosage Form / Description", "Retail Price", "Usage Type", "Actions"].map((column) => (
+                  {["ID Number", "Brand Name", "Generic Name", "Company", "Strength", "Dosage Form", "Pack Size", "Unit Price", "Pack Price", "Actions"].map((column) => (
                     <th key={column} style={{ padding: "11px 13px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>
                       {column}
                     </th>
@@ -1412,15 +1291,15 @@ export default function ProductDataImportPage() {
               <tbody>
                 {paginatedProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ padding: "52px 20px", textAlign: "center", color: "#77857d", fontSize: 13 }}>
+                    <td colSpan={10} style={{ padding: "52px 20px", textAlign: "center", color: "#77857d", fontSize: 13 }}>
                       {searchTerm ? "No products match your search." : "No products yet. Import product data to get started."}
                     </td>
                   </tr>
                 ) : (
                   paginatedProducts.map((product) => (
                       <tr key={product.id} style={{ borderBottom: "1px solid #f0f2f0" }}>
-                        {[product.serialNumber, product.pharmaceuticalCompany, product.brandName, product.genericName, product.strength, product.dosageFormDescription, product.retailPrice, product.usageType].map((value, index) => (
-                          <td key={`${product.id}-${index}`} title={value} style={{ maxWidth: index === 1 || index === 3 || index === 5 ? 210 : undefined, padding: "13px", color: index === 0 || index === 2 ? "#26352f" : "#687871", fontSize: 12, fontWeight: index === 0 || index === 2 ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {[product.id, product.brandName, product.genericName, product.pharmaceuticalCompany, product.strength, product.dosageFormDescription, product.packSize, product.unitPrice, product.packPrice].map((value, index) => (
+                          <td key={`${product.id}-${index}`} title={value} style={{ maxWidth: index === 1 || index === 2 || index === 5 ? 210 : undefined, padding: "13px", color: index === 0 || index === 1 ? "#26352f" : "#687871", fontSize: 12, fontWeight: index === 0 || index === 1 ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {value || "-"}
                           </td>
                         ))}
@@ -1643,57 +1522,6 @@ export default function ProductDataImportPage() {
         </div>
       )}
 
-      {/* =====================================================
-          Clear Confirmation
-      ===================================================== */}
-
-      {showClearConfirm && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-          onClick={() =>
-            setShowClearConfirm(false)
-          }
-        >
-          <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <h2 className="text-lg font-bold text-gray-900">
-              Clear all products?
-            </h2>
-
-            <p className="mt-2 text-sm leading-6 text-gray-500">
-              This will permanently remove all
-              currently stored products from this
-              browser&apos;s local storage.
-            </p>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setShowClearConfirm(false)
-                }
-                className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  handleClearAllProducts
-                }
-                className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700"
-              >
-                Clear All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </AdminDashboardShell>
   );
 }

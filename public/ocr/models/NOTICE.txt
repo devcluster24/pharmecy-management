@@ -1,0 +1,7 @@
+The PP-OCRv5 mobile detection and recognition model archives in this directory are distributed under Apache License 2.0.
+
+Upstream source:
+https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_det_onnx_infer.tar
+https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_rec_onnx_infer.tar
+
+The archives contain the upstream model metadata and license declaration. PaddleOCR project: https://github.com/PaddlePaddle/PaddleOCR
