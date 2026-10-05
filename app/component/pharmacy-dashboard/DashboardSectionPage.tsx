@@ -6,20 +6,28 @@ import { dashboardNavItems } from "./navigation";
 
 export type SectionData = {
   description: string;
+  errorMessage?: string;
   action: string;
   metrics: { label: string; value: string; detail: string }[];
   columns: string[];
-  rows: string[][];
+  rows: ReactNode[][];
+  listTitle?: string;
+  listNavigation?: ReactNode;
+  listFooter?: ReactNode;
 };
 
 export default function DashboardSectionPage({
   sectionSlug,
   data,
   actionContent,
+  listTitle,
+  listNavigation,
 }: {
   sectionSlug: string;
   data: SectionData;
   actionContent?: ReactNode;
+  listTitle?: string;
+  listNavigation?: ReactNode;
 }) {
   const navItem = dashboardNavItems.find((item) => item.slug === sectionSlug);
 
@@ -67,6 +75,12 @@ export default function DashboardSectionPage({
             )}
           </div>
 
+          {data.errorMessage && (
+            <p role="alert" style={{ margin: "0 0 18px", color: "#b34b43", fontSize: 13 }}>
+              {data.errorMessage}
+            </p>
+          )}
+
           {data.metrics.length > 0 && (
             <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
               {data.metrics.map((metric) => (
@@ -82,7 +96,12 @@ export default function DashboardSectionPage({
           {data.columns.length > 0 && (
             <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
-              <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>{navItem.label} list</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+                {listNavigation}
+                {listTitle !== "" && (
+                  <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>{listTitle ?? `${navItem.label} list`}</h2>
+                )}
+              </div>
               <input aria-label={`Search ${navItem.label.toLowerCase()}`} placeholder="Search..." style={{ width: 220, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outline: "none" }} />
             </div>
             <div style={{ overflowX: "auto" }}>
@@ -102,13 +121,22 @@ export default function DashboardSectionPage({
                       ))}
                     </tr>
                   ))}
+                  {data.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={data.columns.length} style={{ padding: "24px 16px", color: "#87928d", fontSize: 12, textAlign: "center" }}>
+                        No records found.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
-              <span>Showing {data.rows.length} sample records</span>
-              <span>Updated just now</span>
-            </div>
+            {data.listFooter ?? (
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+                <span>Showing {data.rows.length} records</span>
+                <span>Updated just now</span>
+              </div>
+            )}
             </section>
           )}
         </main>

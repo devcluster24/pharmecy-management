@@ -1,7 +1,7 @@
 'use client';
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import { supabase } from "@/lib/supabase/client";
@@ -84,6 +84,67 @@ const DEFAULT_PRODUCT_PAGE_SIZE = 25;
 const storageKeys = {
   products: "pharmacy-cluster-products",
 };
+
+type NewProductNameFields = {
+  id: string;
+  brandName: string;
+  genericName: string;
+  company: string;
+  strength: string;
+  dosageForm: string;
+  packSize: string;
+  unitPrice: string;
+  packPrice: string;
+};
+
+type PriceField = "packSize" | "unitPrice" | "packPrice";
+
+function createNewProductNameFields(): NewProductNameFields {
+  return {
+    id: "",
+    brandName: "",
+    genericName: "",
+    company: "",
+    strength: "",
+    dosageForm: "",
+    packSize: "",
+    unitPrice: "",
+    packPrice: "",
+  };
+}
+
+function parsePrice(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function formatCalculatedPrice(value: number) {
+  return String(Number(value.toFixed(4)));
+}
+
+function calculateNewNamePrices(field: PriceField, values: NewProductNameFields): NewProductNameFields {
+  const packSize = parsePrice(values.packSize);
+  const unitPrice = parsePrice(values.unitPrice);
+  const packPrice = parsePrice(values.packPrice);
+  const next = { ...values };
+
+  if (field === "packSize" && packSize !== null) {
+    if (unitPrice !== null) next.packPrice = formatCalculatedPrice(packSize * unitPrice);
+    else if (packPrice !== null && packSize > 0) next.unitPrice = formatCalculatedPrice(packPrice / packSize);
+  } else if (field === "unitPrice" && unitPrice !== null) {
+    if (packSize !== null) next.packPrice = formatCalculatedPrice(packSize * unitPrice);
+    else if (packPrice !== null && unitPrice > 0) next.packSize = formatCalculatedPrice(packPrice / unitPrice);
+  } else if (field === "packPrice" && packPrice !== null) {
+    if (packSize !== null && packSize > 0) next.unitPrice = formatCalculatedPrice(packPrice / packSize);
+    else if (unitPrice !== null && unitPrice > 0) next.packSize = formatCalculatedPrice(packPrice / unitPrice);
+  }
+
+  if (field === "packSize" && packSize !== null) next.packSize = formatCalculatedPrice(packSize);
+  if (field === "unitPrice" && unitPrice !== null) next.unitPrice = formatCalculatedPrice(unitPrice);
+  if (field === "packPrice" && packPrice !== null) next.packPrice = formatCalculatedPrice(packPrice);
+  return next;
+}
 
 function createProductId() {
   return `MED-${globalThis.crypto.randomUUID().toUpperCase()}`;
@@ -291,6 +352,12 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [products, setProducts] = useState<Product[]>([]);
   const [storageReady, setStorageReady] = useState(adminMode);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isNewNameOpen, setIsNewNameOpen] = useState(false);
+  const [isGeneratingNewNameId, setIsGeneratingNewNameId] = useState(false);
+  const [isSavingNewName, setIsSavingNewName] = useState(false);
+  const [isCompanyInputFocused, setIsCompanyInputFocused] = useState(false);
+  const [newNameFields, setNewNameFields] = useState<NewProductNameFields>(createNewProductNameFields);
+  const [newNameError, setNewNameError] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [savingProductId, setSavingProductId] = useState("");
@@ -493,16 +560,18 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }, [adminMode, pharmacyUserId]);
 
   useEffect(() => {
-    if (!isAddOpen && !selectedProduct) return;
+    if (!isAddOpen && !isNewNameOpen && !selectedProduct) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (isGeneratingNewNameId || isSavingNewName) return;
         setIsAddOpen(false);
+        setIsNewNameOpen(false);
         setSelectedProduct(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAddOpen, selectedProduct]);
+  }, [isAddOpen, isGeneratingNewNameId, isNewNameOpen, isSavingNewName, selectedProduct]);
 
   const saveEditedProduct = useCallback(async () => {
     if (!editingProduct || !pharmacyUserId || savingProductRef.current) return;
@@ -588,6 +657,13 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const effectiveSelectedCompany = availableCompanies.some((company) => company.name === selectedCompany)
     ? selectedCompany
     : "";
+  const typedCompanyName = newNameFields.company.trimStart();
+  const inlineCompanySuggestion = isCompanyInputFocused && typedCompanyName
+    ? pharmacyCompanyNames.find((name) =>
+        name.toLocaleLowerCase().startsWith(typedCompanyName.toLocaleLowerCase()) &&
+        name.length > typedCompanyName.length,
+      )
+    : undefined;
   const progressPercentage = importProgress.total
     ? Math.round((importProgress.checked / importProgress.total) * 100)
     : 0;
@@ -695,6 +771,153 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     setIsAddOpen(false);
   }
 
+  async function openNewNameModal() {
+    if (!pharmacyUserId || !storageReady || isImporting) return;
+    setNewNameFields(createNewProductNameFields());
+    setNewNameError("");
+    setIsNewNameOpen(true);
+    setIsGeneratingNewNameId(true);
+    try {
+      const { data, error } = await supabase.rpc("reserve_pharmacy_product_identifiers");
+      if (error) throw error;
+      const reserved = (data ?? [])[0] as { product_id?: string } | undefined;
+      const productId = reserved?.product_id;
+      if (!productId) {
+        throw new Error("The database did not return a product ID. Apply the latest Supabase migration and retry.");
+      }
+      setNewNameFields((current) => ({ ...current, id: productId }));
+    } catch (error) {
+      console.error("Could not reserve a product ID:", error);
+      setNewNameError(getErrorMessage(error));
+    } finally {
+      setIsGeneratingNewNameId(false);
+    }
+  }
+
+  function closeNewNameModal() {
+    if (isGeneratingNewNameId || isSavingNewName) return;
+    setIsNewNameOpen(false);
+    setNewNameError("");
+  }
+
+  function handleNewNamePriceBlur(field: PriceField) {
+    const value = newNameFields[field];
+    if (value.trim() && parsePrice(value) === null) {
+      setNewNameError("Enter a valid non-negative number for pack size and prices.");
+      return;
+    }
+    setNewNameFields((current) => calculateNewNamePrices(field, current));
+    setNewNameError("");
+  }
+
+  async function saveNewName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSavingNewName) return;
+    if (!pharmacyUserId) {
+      setNewNameError("Could not verify the signed-in pharmacy account.");
+      return;
+    }
+
+    const brand = newNameFields.brandName.trim();
+    const genericName = newNameFields.genericName.trim();
+    const manufacturer = newNameFields.company.trim();
+    const strength = newNameFields.strength.trim();
+    const dosageForm = newNameFields.dosageForm.trim();
+    const productId = newNameFields.id.trim();
+    const enteredPrices = [newNameFields.packSize, newNameFields.unitPrice, newNameFields.packPrice];
+    const parsedPrices = enteredPrices.map(parsePrice);
+
+    if (!brand || !manufacturer) {
+      setNewNameError("Brand Name and Company Name are required.");
+      return;
+    }
+    if (!productId) {
+      setNewNameError("A product ID could not be generated. Close and reopen the form to retry.");
+      return;
+    }
+    if (enteredPrices.some((value, index) => value.trim() && parsedPrices[index] === null)) {
+      setNewNameError("Enter valid non-negative numbers for Pack Size, Unit Price, or Pack Price.");
+      return;
+    }
+    const [packSize, unitPrice, packPrice] = parsedPrices;
+    if (packSize !== null && packSize <= 0) {
+      setNewNameError("Pack Size must be greater than zero.");
+      return;
+    }
+
+    const candidate: ProductImportCandidate = {
+      medicineName: brand,
+      brand,
+      genericName: genericName || "-",
+      manufacturer,
+      productType: "Medicine",
+      category: "",
+      dosageForm: dosageForm || "-",
+      strength: strength || "-",
+      packSize: packSize === null ? "-" : formatCalculatedPrice(packSize),
+      unit: "-",
+      barcode: "-",
+    };
+
+    setIsSavingNewName(true);
+    setNewNameError("");
+    try {
+      const { data: matchingRows, error: duplicateCheckError } = await supabase
+        .from("pharmacy_catalog_products")
+        .select("*")
+        .eq("owner_user_id", pharmacyUserId)
+        .ilike("medicine_name", brand);
+      if (duplicateCheckError) throw duplicateCheckError;
+      const matchingProducts = ((matchingRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
+      const identityKey = getProductIdentityKey(candidate);
+      if (identityKey && matchingProducts.some((product) => getProductIdentityKey(product) === identityKey)) {
+        throw new Error("This product already exists with the same name, strength, dosage form, and company.");
+      }
+
+      const product: Product = {
+        ...candidate,
+        id: productId,
+        retailPrice: unitPrice === null ? "-" : formatCalculatedPrice(unitPrice),
+        unitPrice: unitPrice === null ? "-" : formatCalculatedPrice(unitPrice),
+        packPrice: packPrice === null ? "-" : formatCalculatedPrice(packPrice),
+        usageType: "Medicine",
+        darCode: "-",
+        medicineTypeCategory: "",
+        registrationInformation: "-",
+      };
+      const { data, error } = await supabase
+        .from("pharmacy_catalog_products")
+        .insert(mapProductToPharmacyRow(product, pharmacyUserId))
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
+      initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
+      setCurrentPage(1);
+      setSearchTerm("");
+      try {
+        const refreshed = await loadPharmacyProductPage(pharmacyUserId, 1, pageSize, "");
+        setProducts(refreshed.products);
+        setTotalProductCount(refreshed.count);
+      } catch (error) {
+        setProducts((current) => [savedProduct, ...current]);
+        setTotalProductCount((count) => count + 1);
+        setImportError(`Product was saved, but the product list could not be refreshed: ${getErrorMessage(error)}`);
+      }
+      setPharmacyCompanyNames((current) => current.includes(manufacturer) ? current : [...current, manufacturer]);
+      if (genericName && genericName !== "-") {
+        setPharmacyGenericNames((current) => current.includes(genericName) ? current : [...current, genericName]);
+      }
+      setIsNewNameOpen(false);
+    } catch (error) {
+      console.error("Could not save new product name:", error);
+      setNewNameError(getErrorMessage(error));
+    } finally {
+      setIsSavingNewName(false);
+    }
+  }
+
   async function importCatalog(company?: string) {
     if (isImporting || !storageReady || !pharmacyUserId || (!company && !totalCatalogCount)) return;
     setIsImporting(true);
@@ -789,9 +1012,17 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
               <h1 style={{ margin: 0, color: adminMode ? "#1d2c25" : "#172622", fontSize: adminMode ? 26 : 30, lineHeight: 1.2, fontWeight: 750 }}>{adminMode ? "Product Data Import" : "Product Management"}</h1>
               <p style={{ margin: adminMode ? "7px 0 0" : "8px 0 0", color: adminMode ? "#78867f" : "#6a7973", fontSize: adminMode ? 12 : 14 }}>{adminMode ? "Import, validate, search, and manage the shared product catalog." : "Manage your pharmacy catalog, prices, and product availability."}</p>
             </div>
-            <button type="button" disabled={isImporting || !storageReady} onClick={openAddProduct} style={{ border: 0, borderRadius: 7, background: isImporting || !storageReady ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady ? "not-allowed" : "pointer" }}>
-              Read product label
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" disabled={isImporting || !storageReady} onClick={openAddProduct} style={{ border: 0, borderRadius: 7, background: isImporting || !storageReady ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady ? "not-allowed" : "pointer" }}>
+                Read product label
+              </button>
+
+              {!adminMode && (
+                <button type="button" disabled={isImporting || !storageReady || !pharmacyUserId} onClick={openNewNameModal} style={{ border: "1px solid #179c70", borderRadius: 7, background: "#fff", color: "#16845f", padding: "9px 13px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer", opacity: isImporting || !storageReady || !pharmacyUserId ? 0.6 : 1 }}>
+                  + Add New
+                </button>
+              )}
+            </div>
           </div>
 
           <section aria-label="Import products" style={{ marginBottom: 18, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
@@ -957,6 +1188,106 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
               genericNamesError={pharmacyGenericNamesError}
               onSaveProduct={saveOcrProduct}
             />
+          </section>
+        </div>
+      )}
+
+      {isNewNameOpen && (
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNameModal(); }} style={{ position: "fixed", inset: 0, zIndex: 51, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="new-product-name-title" style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
+              <div>
+                <h2 id="new-product-name-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add New Product</h2>
+                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Add product details and pricing to your pharmacy list.</p>
+              </div>
+              <button type="button" aria-label="Close" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>×</button>
+            </div>
+            <form onSubmit={(event) => void saveNewName(event)} noValidate>
+              <div style={{ padding: "8px 24px 18px" }}>
+                <h3 style={{ margin: "8px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Product details</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
+                  <label style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
+                    ID Number
+                    <input aria-label="ID Number" value={isGeneratingNewNameId ? "Generating ID..." : newNameFields.id} readOnly style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: "#f8faf8", padding: "6px 9px", color: "#26372f", fontSize: 12, fontWeight: 600 }} />
+                  </label>
+                  {([
+                    ["brandName", "Brand Name"],
+                    ["genericName", "Generic Name"],
+                    ["company", "Company Name"],
+                    ["strength", "Strength"],
+                    ["dosageForm", "Dosage Form"],
+                  ] as const).map(([field, label]) => (
+                    <label key={field} style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
+                      <span>{label}{(field === "brandName" || field === "company") && <span aria-hidden="true" style={{ color: "#c4574c" }}> *</span>}</span>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          aria-label={label}
+                          aria-required={field === "brandName" || field === "company"}
+                          required={field === "brandName" || field === "company"}
+                          autoComplete={field === "company" ? "off" : undefined}
+                          value={newNameFields[field]}
+                          onFocus={field === "company" ? () => setIsCompanyInputFocused(true) : undefined}
+                          onBlur={field === "company" ? () => setIsCompanyInputFocused(false) : undefined}
+                          onKeyDown={field === "company" && inlineCompanySuggestion ? (event) => {
+                            const input = event.currentTarget;
+                            if (
+                              (event.key === "Tab" || event.key === "ArrowRight") &&
+                              (event.key === "Tab" || input.selectionStart === input.value.length)
+                            ) {
+                              event.preventDefault();
+                              setNewNameFields((current) => ({ ...current, company: inlineCompanySuggestion }));
+                            }
+                          } : undefined}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setNewNameFields((current) => ({ ...current, [field]: value }));
+                            setNewNameError("");
+                          }}
+                          style={{ position: "relative", zIndex: 1, width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: inlineCompanySuggestion ? "transparent" : "#fff", padding: "6px 9px", color: inlineCompanySuggestion ? "transparent" : "#26372f", caretColor: "#26372f", fontSize: 12 }}
+                        />
+                        {field === "company" && inlineCompanySuggestion && (
+                          <span aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", padding: "7px 10px", color: "#26372f", fontSize: 12, lineHeight: "normal", whiteSpace: "pre", pointerEvents: "none" }}>
+                            <span style={{ color: "transparent" }}>{newNameFields.company}</span>
+                            <span style={{ color: "#9aa79f" }}>{inlineCompanySuggestion.slice(typedCompanyName.length)}</span>
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <h3 style={{ margin: "14px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Pack &amp; pricing</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
+                  {([
+                    ["packSize", "Pack Size"],
+                    ["unitPrice", "Unit Price"],
+                    ["packPrice", "Pack Price"],
+                  ] as const).map(([field, label]) => (
+                    <label key={field} style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
+                      <span>{label}</span>
+                      <input
+                        aria-label={label}
+                        type="text"
+                        inputMode="decimal"
+                        value={newNameFields[field]}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setNewNameFields((current) => ({ ...current, [field]: value }));
+                          setNewNameError("");
+                        }}
+                        onBlur={() => handleNewNamePriceBlur(field)}
+                        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: "#fff", padding: "6px 9px", color: "#26372f", fontSize: 12 }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p style={{ margin: "-7px 24px 16px", color: "#77857d", fontSize: 11 }}>Price fields calculate the related value when you leave the input. Enter any two values to calculate the third.</p>
+              {newNameError && <p role="alert" style={{ margin: "0 24px 16px", color: "#b34b43", fontSize: 12 }}>{newNameError}</p>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+                <button type="button" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>Cancel</button>
+                <button type="submit" disabled={isGeneratingNewNameId || isSavingNewName || !newNameFields.id} style={{ border: 0, borderRadius: 6, background: isGeneratingNewNameId || isSavingNewName || !newNameFields.id ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isSavingNewName ? "wait" : "pointer" }}>{isGeneratingNewNameId ? "Generating ID..." : isSavingNewName ? "Saving..." : "Save"}</button>
+              </div>
+            </form>
           </section>
         </div>
       )}
