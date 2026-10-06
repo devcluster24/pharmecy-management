@@ -6,9 +6,10 @@ import PurchaseCreateAction from "./PurchaseCreateAction";
 import {
   calculateUnitPurchasePrice,
   emptyPurchaseListSnapshot,
+  getOrderTotal,
   getPurchaseListSnapshot,
+  groupPurchaseOrders,
   subscribeToPurchaseList,
-  type PurchaseListRow,
   emptyPurchaseListSnapshot as emptyPlaceOrderSnapshot,
   getPlaceOrderListSnapshot,
   subscribeToPlaceOrderList,
@@ -35,39 +36,8 @@ function formatMonthYear(value: string) {
   return match ? `${match[2]}/${match[1].slice(-2)}` : value;
 }
 
-function getOrderTotal(rows: PurchaseListRow[]) {
-  return rows.reduce((total, row) => {
-    const amount = Number(row.totalPrice);
-    return Number.isFinite(amount) ? total + amount : total;
-  }, 0);
-}
-
 function formatCurrency(amount: number) {
   return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function groupOrders(rows: PurchaseListRow[]) {
-  const groupedOrders = new Map<string, PurchaseListRow[]>();
-  for (const row of rows) {
-    const orderRows = groupedOrders.get(row.order) ?? [];
-    orderRows.push(row);
-    groupedOrders.set(row.order, orderRows);
-  }
-  return [...groupedOrders.entries()]
-    .map(([order, orderRows]) => ({
-      order,
-      rows: orderRows,
-      updatedAt: orderRows.reduce((latest, row) => {
-        const timestamp = Date.parse(row.updatedAt ?? "");
-        return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
-      }, 0),
-    }))
-    .sort((left, right) => {
-      if (left.updatedAt !== right.updatedAt) return right.updatedAt - left.updatedAt;
-      const leftSequence = Number(/^PO(?:-RC)?-(\d+)$/.exec(left.order)?.[1] ?? 0);
-      const rightSequence = Number(/^PO(?:-RC)?-(\d+)$/.exec(right.order)?.[1] ?? 0);
-      return rightSequence - leftSequence;
-    });
 }
 
 export default function PurchasePage() {
@@ -84,8 +54,8 @@ export default function PurchasePage() {
   const [activeList, setActiveList] = useState<ListType>("place");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [paginationState, setPaginationState] = useState({ key: "", page: 1 });
-  const placeOrders = useMemo(() => groupOrders(placeOrderList.rows), [placeOrderList.rows]);
-  const receiveOrders = useMemo(() => groupOrders(purchaseList.rows), [purchaseList.rows]);
+  const placeOrders = useMemo(() => groupPurchaseOrders(placeOrderList.rows), [placeOrderList.rows]);
+  const receiveOrders = useMemo(() => groupPurchaseOrders(purchaseList.rows), [purchaseList.rows]);
   const orders = activeList === "place" ? placeOrders : receiveOrders;
   const paginationKey = `${activeList}:${orders.map(({ order, updatedAt }) => `${order}:${updatedAt}`).join("|")}`;
   const totalPages = Math.max(1, Math.ceil(orders.length / ORDERS_PER_PAGE));

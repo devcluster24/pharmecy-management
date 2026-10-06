@@ -22,12 +22,18 @@ export default function DashboardSectionPage({
   actionContent,
   listTitle,
   listNavigation,
+  searchAccessory,
+  searchValue,
+  onSearchChange,
 }: {
   sectionSlug: string;
   data: SectionData;
   actionContent?: ReactNode;
   listTitle?: string;
   listNavigation?: ReactNode;
+  searchAccessory?: ReactNode;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
 }) {
   const navItem = dashboardNavItems.find((item) => item.slug === sectionSlug);
 
@@ -102,7 +108,16 @@ export default function DashboardSectionPage({
                   <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>{listTitle ?? `${navItem.label} list`}</h2>
                 )}
               </div>
-              <input aria-label={`Search ${navItem.label.toLowerCase()}`} placeholder="Search..." style={{ width: 220, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outline: "none" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {searchAccessory}
+                <input
+                  aria-label={`Search ${navItem.label.toLowerCase()}`}
+                  placeholder="Search..."
+                  value={searchValue}
+                  onChange={onSearchChange ? (event) => onSearchChange(event.target.value) : undefined}
+                  style={{ width: 220, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outline: "none" }}
+                />
+              </div>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>

@@ -31,10 +31,47 @@ export type PurchaseListSnapshot = {
   error: string;
 };
 
+export type GroupedPurchaseOrder = {
+  order: string;
+  rows: PurchaseListRow[];
+  updatedAt: number;
+};
+
 export const emptyPurchaseListSnapshot: PurchaseListSnapshot = { rows: [], error: "" };
 const purchaseListUpdatedEvent = "pharmecy-purchase-list-updated";
 let cachedSnapshot: PurchaseListSnapshot | null = null;
 let cachedPlaceOrderSnapshot: PurchaseListSnapshot | null = null;
+
+export function getOrderTotal(rows: PurchaseListRow[]) {
+  return rows.reduce((total, row) => {
+    const amount = Number(row.totalPrice);
+    return Number.isFinite(amount) ? total + amount : total;
+  }, 0);
+}
+
+export function groupPurchaseOrders(rows: PurchaseListRow[]): GroupedPurchaseOrder[] {
+  const groupedOrders = new Map<string, PurchaseListRow[]>();
+  for (const row of rows) {
+    const orderRows = groupedOrders.get(row.order) ?? [];
+    orderRows.push(row);
+    groupedOrders.set(row.order, orderRows);
+  }
+  return [...groupedOrders.entries()]
+    .map(([order, orderRows]) => ({
+      order,
+      rows: orderRows,
+      updatedAt: orderRows.reduce((latest, row) => {
+        const timestamp = Date.parse(row.updatedAt ?? "");
+        return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+      }, 0),
+    }))
+    .sort((left, right) => {
+      if (left.updatedAt !== right.updatedAt) return right.updatedAt - left.updatedAt;
+      const leftSequence = Number(/^PO(?:-RC)?-(\d+)$/.exec(left.order)?.[1] ?? 0);
+      const rightSequence = Number(/^PO(?:-RC)?-(\d+)$/.exec(right.order)?.[1] ?? 0);
+      return rightSequence - leftSequence;
+    });
+}
 
 function isPurchaseListRow(value: unknown): value is PurchaseListRow {
   if (!value || typeof value !== "object") return false;
