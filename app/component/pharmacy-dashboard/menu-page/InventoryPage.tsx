@@ -13,6 +13,7 @@ import {
   getLowStockThresholdSnapshot,
   subscribeToLowStockThreshold,
 } from "./lowStockStorage";
+import { isInventoryItemExpired } from "./inventoryExpiry";
 
 const receiveOrderColumns = [
   "Date & Time",
@@ -55,19 +56,6 @@ function expiresWithinSelectedMonths(expDate: string, now: Date, months: ExpiryM
   return monthsUntilExpiry >= 0 && monthsUntilExpiry <= months;
 }
 
-function hasExpired(expDate: string, now: Date) {
-  const match = /^(\d{4})-(\d{2})$/.exec(expDate);
-  if (!match) return false;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  if (month < 1 || month > 12) return false;
-
-  const currentMonth = now.getFullYear() * 12 + now.getMonth() + 1;
-  const expirationMonth = year * 12 + month;
-  return expirationMonth < currentMonth;
-}
-
 export default function InventoryPage() {
   const purchaseList = useSyncExternalStore(
     subscribeToPurchaseList,
@@ -103,7 +91,7 @@ export default function InventoryPage() {
   const listRows = activeList === "expire-soon"
     ? sortedRows.filter((row) => expiresWithinSelectedMonths(row.expDate, globalDate, expiryMonthFilter))
     : activeList === "expaired"
-      ? sortedRows.filter((row) => hasExpired(row.expDate, globalDate))
+      ? sortedRows.filter((row) => isInventoryItemExpired(row.expDate, globalDate))
       : activeList === "low-stock"
         ? lowStockEnabled
           ? sortedRows.filter((row) => {

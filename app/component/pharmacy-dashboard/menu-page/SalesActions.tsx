@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  emptyPurchaseListSnapshot,
+  getPurchaseListSnapshot,
+  subscribeToPurchaseList,
+} from "./purchaseStorage";
+import { isInventoryItemExpired } from "./inventoryExpiry";
 
-const saleTypes = ["Prescription Sale", "Wholesale", "New Sale"] as const;
+const saleTypes = ["New Sale"] as const;
 type SaleType = (typeof saleTypes)[number];
 
 type SaleProduct = {
@@ -11,37 +16,24 @@ type SaleProduct = {
   brand: string;
   genericName: string;
   medicineName: string;
-  retailPrice: string;
+  strength: string;
   unit: string;
   packSize: string;
+  boxPrice: string;
+  unitPrice: string;
+  batchNumber: string;
+  expDate: string;
+  isExpired: boolean;
 };
 
 type SaleLine = {
-  product: SaleProduct;
-  quantities: [string, string, string];
-  quantityTotal: string;
-  unitPrice: string;
-  boxCountEnabled: boolean;
-  boxCountQty: string;
-  boxCountTotalPrice: string;
-};
-
-type EntryModal = {
-  productId: string;
-  mode: "quantity" | "boxCount";
-} | null;
-
-type PharmacyProductRow = {
   id: string;
-  brand: string;
-  generic_name: string;
-  medicine_name: string;
-  retail_price: string;
-  unit: string;
-  pack_size: string;
+  product: SaleProduct;
+  batchOptions: SaleProduct[];
+  selectedBatches: SaleProduct[];
+  quantity: string;
 };
 
-const MATCH_LIMIT = 30;
 const inputStyle = {
   boxSizing: "border-box" as const,
   border: "1px solid #dce5df",
@@ -60,15 +52,35 @@ function getErrorMessage(error: unknown) {
   return "Could not load products. Please try again.";
 }
 
-function mapProduct(row: PharmacyProductRow): SaleProduct {
+function mapInventoryRow(row: {
+  id: string;
+  brand: string;
+  genericName: string;
+  strength: string;
+  dosageForm: string;
+  batchNumber: string;
+  expDate: string;
+  mrp?: string;
+  unitPrice: string;
+  packPrice: string;
+  productPackPrice?: string;
+  packSize: string;
+}): SaleProduct {
+  const boxPrice = [row.mrp, row.productPackPrice, row.packPrice]
+    .find((price) => Boolean(price?.trim() && price.trim() !== "-"));
   return {
     id: row.id,
-    brand: row.brand.trim() || row.medicine_name.trim(),
-    genericName: row.generic_name,
-    medicineName: row.medicine_name,
-    retailPrice: row.retail_price,
-    unit: row.unit,
-    packSize: row.pack_size,
+    brand: row.brand.trim(),
+    genericName: row.genericName,
+    medicineName: row.brand,
+    strength: row.strength,
+    unit: row.dosageForm,
+    packSize: row.packSize,
+    boxPrice: boxPrice || "0",
+    unitPrice: row.unitPrice,
+    batchNumber: row.batchNumber,
+    expDate: row.expDate,
+    isExpired: isInventoryItemExpired(row.expDate),
   };
 }
 
@@ -81,15 +93,9 @@ function formatPrice(price: number) {
   return `৳${price.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function getQuantityTotal(quantities: [string, string, string]) {
-  return quantities.reduce((sum, quantity) => {
-    const parsed = Number.parseInt(quantity, 10);
-    return sum + (Number.isFinite(parsed) ? Math.max(0, parsed) : 0);
-  }, 0);
-}
-
-function clearZeroOnFocus(value: string, clear: () => void) {
-  if (value === "0" || value === "0.00") clear();
+function getQuantityTotal(quantity: string) {
+  const parsed = Number.parseInt(quantity, 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function getMatchRank(product: SaleProduct, query: string) {
@@ -104,21 +110,34 @@ function getMatchRank(product: SaleProduct, query: string) {
   return 5;
 }
 
+function getProductGroupKey(product: SaleProduct) {
+  return JSON.stringify([
+    product.brand,
+    product.genericName,
+    product.strength,
+    product.unit,
+    product.packSize,
+  ].map((value) => value.trim().toLocaleLowerCase()));
+}
+
 export default function SalesActions() {
+  const inventorySnapshot = useSyncExternalStore(
+    subscribeToPurchaseList,
+    getPurchaseListSnapshot,
+    () => emptyPurchaseListSnapshot,
+  );
   const [activeSaleType, setActiveSaleType] = useState<SaleType | null>(null);
   const [matchingProducts, setMatchingProducts] = useState<SaleProduct[]>([]);
   const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [isProductSearchOpen, setIsProductSearchOpen] = useState(true);
+  const [keyboardActiveGroupKey, setKeyboardActiveGroupKey] = useState<string | null>(null);
+  const [batchSelectionLineId, setBatchSelectionLineId] = useState<string | null>(null);
+  const [batchSearchTerm, setBatchSearchTerm] = useState("");
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
   const [productError, setProductError] = useState("");
-  const [entryModal, setEntryModal] = useState<EntryModal>(null);
-  const [quantityDraft, setQuantityDraft] = useState<[string, string, string]>(["0", "0", "0"]);
-  const [quantityTotalDraft, setQuantityTotalDraft] = useState("0");
-  const [boxCountQtyDraft, setBoxCountQtyDraft] = useState("0");
-  const [boxCountPriceDraft, setBoxCountPriceDraft] = useState("0");
+  const [expiredProduct, setExpiredProduct] = useState<SaleProduct | null>(null);
   const searchSequence = useRef(0);
-  const selectedProductIds = useRef(new Set<string>());
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!activeSaleType) return;
@@ -130,30 +149,22 @@ export default function SalesActions() {
     const timeout = window.setTimeout(() => {
       void (async () => {
         try {
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          if (sessionError) throw sessionError;
-          if (!session?.user.id) throw new Error("Sign in to search products.");
-
-          const escapedQuery = query.replace(/[\\%_,()]/g, (character) => `\\${character}`);
-          const { data, error } = await supabase
-            .from("pharmacy_catalog_products")
-            .select("id, brand, generic_name, medicine_name, retail_price, unit, pack_size")
-            .eq("owner_user_id", session.user.id)
-            .or(`brand.ilike.%${escapedQuery}%,generic_name.ilike.%${escapedQuery}%,medicine_name.ilike.%${escapedQuery}%`)
-            .order("brand", { ascending: true })
-            .limit(MATCH_LIMIT);
-          if (error) throw error;
+          if (inventorySnapshot.error) throw new Error(inventorySnapshot.error);
 
           if (!active || requestSequence !== searchSequence.current) return;
           const normalizedQuery = query.toLocaleLowerCase();
-          const matches = ((data ?? []) as PharmacyProductRow[])
-            .map(mapProduct)
-            .filter((product) => !selectedProductIds.current.has(product.id))
+          const matches = inventorySnapshot.rows
+            .map(mapInventoryRow)
+            .filter((product) =>
+              product.brand.toLocaleLowerCase().includes(normalizedQuery)
+              || product.genericName.toLocaleLowerCase().includes(normalizedQuery),
+            )
+            .filter((product) => !selectedProductIds.includes(product.id))
             .sort((left, right) =>
               getMatchRank(left, normalizedQuery) - getMatchRank(right, normalizedQuery)
-              || left.brand.localeCompare(right.brand),
+              || left.brand.localeCompare(right.brand)
+              || left.expDate.localeCompare(right.expDate),
             )
-            .slice(0, 8);
           setMatchingProducts(matches);
           setProductError("");
         } catch (error) {
@@ -171,110 +182,130 @@ export default function SalesActions() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [activeSaleType, searchTerm]);
+  }, [activeSaleType, inventorySnapshot, searchTerm, selectedProductIds]);
 
   useEffect(() => {
     if (!activeSaleType) return;
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (entryModal) setEntryModal(null);
+      if (expiredProduct) setExpiredProduct(null);
+      else if (batchSelectionLineId) setBatchSelectionLineId(null);
       else setActiveSaleType(null);
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [activeSaleType, entryModal]);
+  }, [activeSaleType, batchSelectionLineId, expiredProduct]);
 
   const totalUnits = saleLines.reduce(
-    (total, line) => total + getQuantityTotal([line.quantityTotal, "0", "0"]),
+    (total, line) => total + getQuantityTotal(line.quantity),
     0,
   );
   const totalPrice = saleLines.reduce(
-    (total, line) => total + getQuantityTotal([line.quantityTotal, "0", "0"]) * getUnitPrice(line.unitPrice),
+    (total, line) => total + getQuantityTotal(line.quantity) * getUnitPrice(line.selectedBatches[0]?.unitPrice ?? "0"),
     0,
   );
+  const matchingProductGroups = [...matchingProducts.reduce((groups, product) => {
+    const groupKey = getProductGroupKey(product);
+    const group = groups.get(groupKey) ?? [];
+    group.push(product);
+    groups.set(groupKey, group);
+    return groups;
+  }, new Map<string, SaleProduct[]>()).entries()];
 
-  function addProduct(product: SaleProduct) {
-    selectedProductIds.current.add(product.id);
-    setSaleLines((current) => current.some((line) => line.product.id === product.id)
-      ? current
-      : [...current, {
-        product,
-        quantities: ["0", "0", "0"],
-        quantityTotal: "0",
-        unitPrice: String(getUnitPrice(product.retailPrice)),
-        boxCountEnabled: false,
-        boxCountQty: "0",
-        boxCountTotalPrice: "0",
-      }]);
+  function addProductsToSale(products: SaleProduct[]) {
+    if (products.length === 0) return;
+    const groupKey = getProductGroupKey(products[0]);
+
+    setSelectedProductIds((current) => [
+      ...current,
+      ...products.map((product) => product.id).filter((id) => !current.includes(id)),
+    ]);
+    setSaleLines((current) => {
+      if (current.some((line) => getProductGroupKey(line.product) === groupKey)) return current;
+      const availableBatches = products.filter((product) => !product.isExpired);
+      const selectedBatches = availableBatches.length === 1 ? availableBatches : [];
+      return [
+        ...current,
+        { id: products[0].id, product: products[0], batchOptions: products, selectedBatches, quantity: selectedBatches.length ? "0" : "" },
+      ];
+    });
+    if (products.filter((product) => !product.isExpired).length !== 1) {
+      setBatchSelectionLineId(products[0].id);
+      setBatchSearchTerm("");
+    }
     setSearchTerm("");
+    setKeyboardActiveGroupKey(null);
     setMatchingProducts([]);
     setIsSearchingProducts(false);
-    setIsProductSearchOpen(false);
   }
 
-  function updateUnitPrice(productId: string, value: string) {
-    setSaleLines((current) => current.map((line) => line.product.id === productId
-      ? { ...line, unitPrice: value }
-      : line));
-  }
-
-  function openEntryModal(line: SaleLine, mode: "quantity" | "boxCount") {
-    if (mode === "quantity") {
-      setQuantityDraft([...line.quantities] as [string, string, string]);
-      setQuantityTotalDraft(line.quantityTotal);
-    } else {
-      setBoxCountQtyDraft(line.boxCountQty);
-      setBoxCountPriceDraft(line.boxCountTotalPrice);
+  function handleProductSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (matchingProductGroups.length === 0) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const currentIndex = matchingProductGroups.findIndex(([groupKey]) => groupKey === keyboardActiveGroupKey);
+      const nextIndex = currentIndex < 0
+        ? event.key === "ArrowDown" ? 0 : matchingProductGroups.length - 1
+        : (currentIndex + (event.key === "ArrowDown" ? 1 : -1) + matchingProductGroups.length) % matchingProductGroups.length;
+      setKeyboardActiveGroupKey(matchingProductGroups[nextIndex][0]);
+      return;
     }
-    setEntryModal({ productId: line.product.id, mode });
-  }
+    if (event.key !== "Enter") return;
 
-  function commitEntryModal() {
-    if (!entryModal) return;
-    if (entryModal.mode === "quantity") {
-      const parsedTotal = Number.parseInt(quantityTotalDraft, 10);
-      const first = Number.parseInt(quantityDraft[0], 10) || 0;
-      const second = Number.parseInt(quantityDraft[1], 10) || 0;
-      const quantities: [string, string, string] = Number.isFinite(parsedTotal) && parsedTotal >= 0
-        ? parsedTotal < first + second
-          ? [String(parsedTotal), "0", "0"]
-          : [String(first), String(second), String(parsedTotal - first - second)]
-        : quantityDraft;
-      setSaleLines((current) => current.map((line) => line.product.id === entryModal.productId
-        ? { ...line, quantities, quantityTotal: String(getQuantityTotal(quantities)) }
-        : line));
-    } else {
-      setSaleLines((current) => current.map((line) => {
-        if (line.product.id !== entryModal.productId) return line;
-        const boxQty = Number.parseFloat(boxCountQtyDraft);
-        const boxPrice = Number.parseFloat(boxCountPriceDraft);
-        return {
-          ...line,
-          boxCountEnabled: true,
-          boxCountQty: boxCountQtyDraft,
-          boxCountTotalPrice: boxCountPriceDraft,
-          unitPrice: Number.isFinite(boxQty) && boxQty > 0 && Number.isFinite(boxPrice) && boxPrice >= 0
-            ? (boxPrice / boxQty).toFixed(2)
-            : line.unitPrice,
-        };
-      }));
-    }
-    setEntryModal(null);
+    const selectedGroup = matchingProductGroups.find(([groupKey]) => groupKey === keyboardActiveGroupKey)
+      ?? (matchingProductGroups.length === 1 ? matchingProductGroups[0] : undefined);
+    if (!selectedGroup) return;
+    event.preventDefault();
+    addProductsToSale(selectedGroup[1]);
   }
 
   function removeProduct(productId: string) {
-    selectedProductIds.current.delete(productId);
-    setSaleLines((current) => current.filter((line) => line.product.id !== productId));
-    setIsProductSearchOpen(true);
+    const removedLine = saleLines.find((line) => line.id === productId);
+    const hasAnotherLineForProduct = saleLines.some((line) =>
+      line.id !== productId
+      && removedLine
+      && getProductGroupKey(line.product) === getProductGroupKey(removedLine.product),
+    );
+    if (!hasAnotherLineForProduct && removedLine) {
+      const removedIds = new Set(removedLine.batchOptions.map((product) => product.id));
+      setSelectedProductIds((current) => current.filter((id) => !removedIds.has(id)));
+    }
+    setSaleLines((current) => current.filter((line) => line.id !== productId));
+  }
+
+  function openBatchSelection(line: SaleLine) {
+    setBatchSelectionLineId(line.id);
+    setBatchSearchTerm("");
+  }
+
+  function selectBatchForSale(line: SaleLine, batch: SaleProduct) {
+    if (batch.isExpired) {
+      setExpiredProduct(batch);
+      return;
+    }
+    setSaleLines((current) => current.map((saleLine) => {
+      if (saleLine.id !== line.id) return saleLine;
+      const isSelected = saleLine.selectedBatches.some((selectedBatch) => selectedBatch.id === batch.id);
+      const selectedBatches = isSelected
+        ? saleLine.selectedBatches.filter((selectedBatch) => selectedBatch.id !== batch.id)
+        : [...saleLine.selectedBatches, batch];
+      return {
+        ...saleLine,
+        selectedBatches,
+        quantity: selectedBatches.length > 0 ? saleLine.quantity || "0" : "",
+      };
+    }));
   }
 
   function openSale(saleType: SaleType) {
     searchSequence.current += 1;
     setMatchingProducts([]);
-    selectedProductIds.current.clear();
+    setSelectedProductIds([]);
     setSaleLines([]);
     setSearchTerm("");
-    setIsProductSearchOpen(true);
+    setKeyboardActiveGroupKey(null);
+    setBatchSelectionLineId(null);
+    setBatchSearchTerm("");
     setProductError("");
     setIsSearchingProducts(false);
     setActiveSaleType(saleType);
@@ -326,8 +357,9 @@ export default function SalesActions() {
             style={{
               display: "grid",
               gridTemplateRows: "auto minmax(0, 1fr) auto",
-              width: "min(900px, 100%)",
-              maxHeight: "min(90vh, 850px)",
+              width: "min(1200px, 100%)",
+              height: "min(90vh, 850px)",
+              maxHeight: "calc(100vh - 32px)",
               borderRadius: 10,
               background: "#fff",
               boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)",
@@ -350,100 +382,158 @@ export default function SalesActions() {
             </div>
 
             <div style={{ minHeight: 0, overflowY: "auto", padding: 24 }}>
-              {productError && <p role="alert" style={{ margin: "0 0 14px", color: "#ad4b43", fontSize: 13 }}>{productError}</p>}
-              {isProductSearchOpen && (
-                <div style={{ position: "relative", marginBottom: 18 }}>
-                  <label htmlFor="sale-product-search" style={{ display: "block", marginBottom: 6, color: "#405248", fontSize: 12, fontWeight: 650 }}>Brand Name</label>
-                  <input
-                    id="sale-product-search"
-                    autoComplete="off"
-                    value={searchTerm}
-                    onChange={(event) => {
-                      setSearchTerm(event.currentTarget.value);
-                      setMatchingProducts([]);
-                      setProductError("");
-                      setIsSearchingProducts(Boolean(event.currentTarget.value.trim()));
-                    }}
-                    placeholder="Type a brand name to search..."
-                    style={{ ...inputStyle, width: "100%" }}
-                  />
-                  {searchTerm.trim() && (isSearchingProducts || matchingProducts.length > 0 || productError) && (
-                    <div role="listbox" aria-label="Matching products" style={{ position: "absolute", zIndex: 2, top: "100%", left: 0, right: 0, maxHeight: 240, overflowY: "auto", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(7, 28, 17, 0.12)" }}>
-                      {isSearchingProducts ? (
-                        <p role="status" style={{ margin: 0, padding: "10px 12px", color: "#77857d", fontSize: 12 }}>Searching products...</p>
-                      ) : productError ? (
-                        <p role="alert" style={{ margin: 0, padding: "10px 12px", color: "#ad4b43", fontSize: 12 }}>{productError}</p>
-                      ) : matchingProducts.length ? matchingProducts.map((product) => (
+              {(productError || inventorySnapshot.error) && <p role="alert" style={{ margin: "0 0 14px", color: "#ad4b43", fontSize: 13 }}>{productError || inventorySnapshot.error}</p>}
+              <div style={{ position: "relative", marginBottom: 18 }}>
+                <label htmlFor="sale-product-search" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, color: "#405248", fontSize: 12, fontWeight: 650 }}>
+                  Brand Name
+                  <span aria-label={`${inventorySnapshot.rows.length} inventory items`} style={{ borderRadius: 999, background: "#eef6f1", color: "#17704e", padding: "2px 7px", fontSize: 11 }}>
+                    {inventorySnapshot.rows.length}
+                  </span>
+                </label>
+                <input
+                  id="sale-product-search"
+                  autoComplete="off"
+                  value={searchTerm}
+                  onChange={(event) => {
+                    setSearchTerm(event.currentTarget.value);
+                    setKeyboardActiveGroupKey(null);
+                    setMatchingProducts([]);
+                    setProductError("");
+                    setIsSearchingProducts(Boolean(event.currentTarget.value.trim()));
+                  }}
+                  onKeyDown={handleProductSearchKeyDown}
+                  placeholder="Type a brand name to search..."
+                  style={{ ...inputStyle, width: "100%" }}
+                />
+                {searchTerm.trim() && (isSearchingProducts || matchingProducts.length > 0 || productError) && (
+                  <div aria-label="Matching inventory brands" style={{ position: "absolute", zIndex: 2, top: "100%", left: 0, right: 0, maxHeight: 320, overflowY: "auto", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(7, 28, 17, 0.12)" }}>
+                    {isSearchingProducts ? (
+                      <p role="status" style={{ margin: 0, padding: "10px 12px", color: "#77857d", fontSize: 12 }}>Searching products...</p>
+                    ) : productError ? (
+                      <p role="alert" style={{ margin: 0, padding: "10px 12px", color: "#ad4b43", fontSize: 12 }}>{productError}</p>
+                    ) : matchingProductGroups.length ? matchingProductGroups.map(([groupKey, products]) => {
+                      const firstProduct = products[0];
+                      return (
                         <button
-                          key={product.id}
+                          key={groupKey}
                           type="button"
-                          role="option"
-                          aria-selected="false"
-                          onClick={() => addProduct(product)}
-                          style={{ display: "flex", justifyContent: "space-between", width: "100%", gap: 12, border: 0, borderBottom: "1px solid #edf0ed", background: "#fff", padding: "10px 12px", textAlign: "left", cursor: "pointer" }}
+                          aria-label={`Select ${firstProduct.brand}`}
+                          onClick={() => addProductsToSale(products)}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 14, padding: "10px 12px", border: 0, borderBottom: "1px solid #edf0ed", background: groupKey === keyboardActiveGroupKey ? "#f4faf6" : "#fff", textAlign: "left", cursor: "pointer" }}
                         >
-                          <span>
-                            <strong style={{ display: "block", color: "#26352f", fontSize: 13 }}>{product.brand}</strong>
-                            {product.genericName && <small style={{ display: "block", marginTop: 3, color: "#77857d", fontSize: 11 }}>{product.genericName}</small>}
-                          </span>
-                          <span style={{ flexShrink: 0, color: "#17704e", fontSize: 12 }}>{formatPrice(getUnitPrice(product.retailPrice))}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <strong style={{ display: "block", color: "#26352f", fontSize: 13 }}>{firstProduct.brand}</strong>
+                            <small style={{ display: "block", marginTop: 3, color: "#77857d", fontSize: 11 }}>
+                              {[firstProduct.genericName, firstProduct.strength, firstProduct.unit, firstProduct.packSize].filter(Boolean).join(" · ")}
+                            </small>
+                            <small style={{ display: "block", marginTop: 4, color: "#77857d", fontSize: 10 }}>
+                              {products.length} batch{products.length === 1 ? "" : "es"} available
+                            </small>
+                          </div>
                         </button>
-                      )) : (
-                        <p style={{ margin: 0, padding: "10px 12px", color: "#77857d", fontSize: 12 }}>No matching brand found.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                      );
+                    }) : (
+                      <p style={{ margin: 0, padding: "10px 12px", color: "#77857d", fontSize: 12 }}>No matching brand found in Inventory.</p>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {saleLines.length > 0 && (
-                <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "grid", gap: 10, overflowX: "auto" }}>
+                  <div
+                    aria-hidden="true"
+                    style={{ display: "grid", gridTemplateColumns: "150px 100px minmax(200px, 1.5fr) 90px 95px 95px 90px 110px 28px", alignItems: "center", gap: 12, minWidth: 1100, padding: "0 0 8px", borderBottom: "1px solid #e5ebe6", color: "#77857d", fontSize: 10, fontWeight: 650 }}
+                  >
+                    {["Brand Name", "Batch Number", "Details", "Pack Size", "Box Price", "Unit Price", "Quantity", "Total Price", ""].map((heading, index) => (
+                      <span key={`${heading}-${index}`} style={{ textAlign: index >= 4 && index <= 5 ? "right" : "left" }}>{heading}</span>
+                    ))}
+                  </div>
                   {saleLines.map((line) => {
-                    const quantityTotal = getQuantityTotal([line.quantityTotal, "0", "0"]);
-                    const unitPrice = getUnitPrice(line.unitPrice);
+                    const quantity = getQuantityTotal(line.quantity);
+                    const selectedBatch = line.selectedBatches[0];
+                    const boxPrice = getUnitPrice(selectedBatch?.boxPrice ?? "0");
+                    const unitPrice = getUnitPrice(selectedBatch?.unitPrice ?? "0");
+                    const usedBatchIds = new Set(saleLines
+                      .filter((otherLine) => otherLine.id !== line.id && getProductGroupKey(otherLine.product) === getProductGroupKey(line.product))
+                      .flatMap((otherLine) => otherLine.selectedBatches.map((batch) => batch.id))
+                      .filter((id): id is string => Boolean(id)));
+                    const expiredBatches = line.batchOptions.filter((batch) => batch.isExpired);
+                    const hasAnotherAvailableBatch = line.batchOptions.some((batch) =>
+                      !batch.isExpired
+                      && !line.selectedBatches.some((selected) => selected.id === batch.id)
+                      && !usedBatchIds.has(batch.id),
+                    );
                     return (
-                      <div key={line.product.id} style={{ overflowX: "auto", border: "1px solid #e5ebe6", borderRadius: 7 }}>
-                        <article style={{ display: "grid", gridTemplateColumns: "minmax(190px, 1fr) auto 115px 115px 28px", alignItems: "center", gap: 12, minWidth: 700, padding: 12 }}>
-                          <div style={{ display: "grid", justifyItems: "start", gap: 6, minWidth: 0 }}>
+                      <div key={line.id}>
+                        <article style={{ display: "grid", gridTemplateColumns: "150px 100px minmax(200px, 1.5fr) 90px 95px 95px 90px 110px 28px", alignItems: "center", gap: 12, minWidth: 1100, padding: "4px 0" }}>
+                          <div style={{ minWidth: 0 }}>
                             <strong style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.brand}</strong>
-                            <small style={{ display: "block", marginTop: 3, overflow: "hidden", color: "#77857d", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[line.product.genericName, line.product.packSize, line.product.unit].filter(Boolean).join(" · ") || line.product.medicineName}</small>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                              {quantityTotal > 0 && <small style={{ borderRadius: 4, background: "#eef6f1", padding: "3px 6px", color: "#17704e", fontSize: 10 }}>Quantity: {line.quantities.join(" + ")} = {quantityTotal}</small>}
-                              {line.boxCountEnabled && <small style={{ borderRadius: 4, background: "#f4f1e8", padding: "3px 6px", color: "#80631b", fontSize: 10 }}>Box Count: {line.boxCountQty} × {formatPrice(getUnitPrice(line.unitPrice))} = {formatPrice(Number.parseFloat(line.boxCountTotalPrice) || 0)}</small>}
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                              {line.selectedBatches.length > 0 ? line.selectedBatches.map((batch) => (
+                                <small key={batch.id} style={{ borderRadius: 4, background: "#eef6f1", padding: "3px 5px", color: "#17704e", fontSize: 10, whiteSpace: "nowrap" }}>
+                                  {batch.batchNumber || "-"}
+                                </small>
+                              )) : (
+                                <small style={{ color: "#77857d", fontSize: 10 }}>Batch not selected</small>
+                              )}
                             </div>
                           </div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                            <button type="button" onClick={() => openEntryModal(line, "quantity")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#405248", padding: "6px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Quantity</button>
-                            <button type="button" onClick={() => openEntryModal(line, "boxCount")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#405248", padding: "6px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Box Count</button>
+                          <div style={{ minWidth: 0 }}>
+                            <button
+                              type="button"
+                              onClick={() => openBatchSelection(line)}
+                              style={{ border: 0, outline: "none", background: "transparent", color: "#17704e", padding: "7px 0", fontSize: 11, cursor: "pointer" }}
+                            >
+                              {line.selectedBatches.length > 0 ? "Edit batches" : "Select batch"}
+                            </button>
+                            {expiredBatches.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setExpiredProduct(expiredBatches[0])}
+                                style={{ marginTop: 4, border: 0, background: "transparent", color: "#b42318", padding: 0, fontSize: 10, cursor: "pointer" }}
+                              >
+                                Expaired batch info
+                              </button>
+                            )}
+                            {hasAnotherAvailableBatch && selectedBatch && (
+                              <small style={{ display: "block", color: "#77857d", fontSize: 10 }}>More batches available</small>
+                            )}
                           </div>
+                          <span style={{ overflow: "hidden", color: "#77857d", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {[line.product.genericName, line.product.strength, line.product.unit].filter(Boolean).join(" · ") || line.product.medicineName}
+                          </span>
+                          <span style={{ overflow: "hidden", color: "#526158", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.packSize || "-"}</span>
+                          <span style={{ color: "#405248", fontSize: 12, textAlign: "right" }}>{formatPrice(boxPrice)}</span>
+                          <span style={{ color: "#405248", fontSize: 12, textAlign: "right" }}>{formatPrice(unitPrice)}</span>
                           <label style={{ color: "#77857d", fontSize: 10 }}>
-                            Unit Price
                             <input
-                              aria-label={`${line.product.brand} unit price`}
+                              aria-label={`${line.product.brand} quantity`}
                               type="text"
-                              inputMode="decimal"
-                              value={line.unitPrice}
-                              onFocus={() => clearZeroOnFocus(line.unitPrice, () => updateUnitPrice(line.product.id, ""))}
-                              onChange={(event) => updateUnitPrice(line.product.id, event.currentTarget.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))}
-                              onBlur={() => { if (!line.unitPrice) updateUnitPrice(line.product.id, "0"); }}
-                              style={{ ...inputStyle, display: "block", width: "100%", marginTop: 5, padding: "7px 5px" }}
+                              inputMode="numeric"
+                              value={line.quantity}
+                              disabled={line.selectedBatches.length === 0}
+                              onChange={(event) => {
+                                const nextQuantity = event.currentTarget.value.replace(/\D/g, "");
+                                setSaleLines((current) => current.map((currentLine) =>
+                                  currentLine.id === line.id
+                                    ? { ...currentLine, quantity: nextQuantity }
+                                    : currentLine,
+                                ));
+                              }}
+                              placeholder={line.selectedBatches.length > 0 ? "0" : "Select batch first"}
+                              style={{ ...inputStyle, display: "block", width: "100%", padding: "7px 5px", opacity: line.selectedBatches.length > 0 ? 1 : 0.55 }}
                             />
                           </label>
                           <div style={{ textAlign: "right" }}>
-                            <small style={{ display: "block", marginBottom: 5, color: "#77857d", fontSize: 10 }}>Total Price</small>
-                            <strong style={{ color: "#17704e", fontSize: 12 }}>{formatPrice(unitPrice * quantityTotal)}</strong>
+                            <strong style={{ color: "#17704e", fontSize: 12 }}>{formatPrice(unitPrice * quantity)}</strong>
                           </div>
-                          <button type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => removeProduct(line.product.id)} style={{ border: 0, background: "transparent", color: "#ad4b43", fontSize: 18, cursor: "pointer" }}>×</button>
+                          <button type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => removeProduct(line.id)} style={{ border: 0, background: "transparent", color: "#ad4b43", fontSize: 18, cursor: "pointer" }}>×</button>
                         </article>
                       </div>
                     );
                   })}
                 </div>
-              )}
-              {saleLines.some((line) => getQuantityTotal(line.quantities) > 0 || line.boxCountEnabled) && !isProductSearchOpen && (
-                <button type="button" onClick={() => setIsProductSearchOpen(true)} style={{ marginTop: 14, border: "1px dashed #b8c8be", borderRadius: 6, background: "#fbfcfb", color: "#17704e", padding: "9px 12px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>
-                  + Add another Brand Name
-                </button>
               )}
             </div>
 
@@ -458,115 +548,113 @@ export default function SalesActions() {
         </div>
       )}
 
-      {activeSaleType && entryModal && (
+      {activeSaleType && batchSelectionLineId && (() => {
+        const line = saleLines.find((saleLine) => saleLine.id === batchSelectionLineId);
+        if (!line) return null;
+
+        const normalizedBatchSearch = batchSearchTerm.trim().toLocaleLowerCase();
+        const matchingBatches = line.batchOptions.filter((batch) =>
+          batch.batchNumber.toLocaleLowerCase().includes(normalizedBatchSearch),
+        );
+
+        return (
+          <div
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setBatchSelectionLineId(null);
+            }}
+            style={{ position: "fixed", inset: 0, zIndex: 75, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
+          >
+            <section role="dialog" aria-modal="true" aria-labelledby="sale-batch-title" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", width: "min(520px, 100%)", maxHeight: "min(75vh, 620px)", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)", overflow: "hidden" }}>
+              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
+                <div>
+                  <h2 id="sale-batch-title" style={{ margin: 0, color: "#20342a", fontSize: 17, fontWeight: 700 }}>Search Batch Number</h2>
+                  <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>{line.product.brand}</p>
+                </div>
+                <button type="button" aria-label="Close batch search" onClick={() => setBatchSelectionLineId(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+              </header>
+              <div style={{ padding: "14px 20px 10px" }}>
+                <label htmlFor="sale-batch-search" style={{ display: "block", marginBottom: 6, color: "#405248", fontSize: 12, fontWeight: 650 }}>Search Batch Number</label>
+                <input
+                  id="sale-batch-search"
+                  autoComplete="off"
+                  value={batchSearchTerm}
+                  onChange={(event) => setBatchSearchTerm(event.currentTarget.value)}
+                  placeholder="Type a batch number..."
+                  style={{ ...inputStyle, width: "100%" }}
+                />
+              </div>
+              <div style={{ minHeight: 0, overflowY: "auto", padding: "0 20px 16px" }}>
+                {matchingBatches.length > 0 ? (
+                  <div style={{ display: "grid" }}>
+                    {matchingBatches.map((batch) => {
+                      const isUsedByAnotherRow = saleLines.some((saleLine) =>
+                        saleLine.id !== line.id && saleLine.selectedBatches.some((selectedBatch) => selectedBatch.id === batch.id),
+                      );
+                      const isSelected = line.selectedBatches.some((selectedBatch) => selectedBatch.id === batch.id);
+                      if (batch.isExpired) {
+                        return (
+                          <div key={batch.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, borderBottom: "1px solid #edf0ed", padding: "10px 4px" }}>
+                            <span style={{ color: "#718078", fontSize: 12 }}>Batch {batch.batchNumber || "-"} · Exp {batch.expDate || "-"}</span>
+                            <button type="button" onClick={() => setExpiredProduct(batch)} style={{ border: "1px solid #f1c3c0", borderRadius: 5, background: "#fff7f6", color: "#b42318", padding: "5px 8px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}>Expaired</button>
+                          </div>
+                        );
+                      }
+                      return (
+                        <button
+                          key={batch.id}
+                          type="button"
+                          disabled={isUsedByAnotherRow}
+                          onClick={() => selectBatchForSale(line, batch)}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, border: 0, borderBottom: "1px solid #edf0ed", background: isSelected ? "#eef6f1" : "#fff", padding: "10px 4px", textAlign: "left", cursor: isUsedByAnotherRow ? "not-allowed" : "pointer", opacity: isUsedByAnotherRow ? 0.55 : 1 }}
+                        >
+                          <span style={{ color: "#34453b", fontSize: 12 }}>
+                            Batch {batch.batchNumber || "-"} · Exp {batch.expDate || "-"}
+                            {isUsedByAnotherRow ? " · Already added" : ""}
+                          </span>
+                          <span style={{ color: isSelected ? "#17704e" : "#77857d", fontSize: 11 }}>
+                            {isSelected ? "Selected · Click to remove" : `Box ${formatPrice(getUnitPrice(batch.boxPrice))}`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, padding: "12px 4px", color: "#77857d", fontSize: 12 }}>No matching batch number found.</p>
+                )}
+              </div>
+              <footer style={{ display: "flex", justifyContent: "flex-end", padding: "12px 20px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+                <button type="button" onClick={() => setBatchSelectionLineId(null)} style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "8px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Done ({line.selectedBatches.length} selected)</button>
+              </footer>
+            </section>
+          </div>
+        );
+      })()}
+
+      {activeSaleType && expiredProduct && (
         <div
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setEntryModal(null);
+            if (event.target === event.currentTarget) setExpiredProduct(null);
           }}
-          style={{ position: "fixed", inset: 0, zIndex: 70, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.42)" }}
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
         >
-          <section role="dialog" aria-modal="true" aria-labelledby="sale-entry-title" style={{ width: "min(420px, 100%)", borderRadius: 9, background: "#fff", boxShadow: "0 20px 60px rgba(7, 28, 17, 0.25)" }}>
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
-              <h3 id="sale-entry-title" style={{ margin: 0, color: "#20342a", fontSize: 16, fontWeight: 700 }}>
-                {entryModal.mode === "quantity" ? "Quantity" : "Box Count"}
-              </h3>
-              <button type="button" aria-label="Close" onClick={() => setEntryModal(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 22, lineHeight: 1, cursor: "pointer" }}>×</button>
+          <section role="dialog" aria-modal="true" aria-labelledby="expired-item-title" style={{ width: "min(380px, 100%)", borderRadius: 9, background: "#fff", boxShadow: "0 20px 60px rgba(7, 28, 17, 0.25)" }}>
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid #f3dada" }}>
+              <h3 id="expired-item-title" style={{ margin: 0, color: "#b42318", fontSize: 17, fontWeight: 700 }}>Expaired</h3>
+              <button type="button" aria-label="Close expired item notice" onClick={() => setExpiredProduct(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 22, lineHeight: 1, cursor: "pointer" }}>×</button>
             </header>
-            <div style={{ display: "grid", gap: 14, padding: 20 }}>
-              {entryModal.mode === "quantity" ? (
-                <>
-                  <label style={{ color: "#405248", fontSize: 12, fontWeight: 600 }}>
-                    Quantity
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6 }}>
-                      {quantityDraft.map((quantity, index) => (
-                        <span key={index} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                          {index > 0 && <span style={{ color: "#87938d" }}>+</span>}
-                          <input
-                            aria-label={`Quantity ${index + 1}`}
-                            type="text"
-                            inputMode="numeric"
-                            value={quantity}
-                            onFocus={() => clearZeroOnFocus(quantity, () => setQuantityDraft((current) => current.map((item, itemIndex) => itemIndex === index ? "" : item) as [string, string, string]))}
-                            onChange={(event) => {
-                              const value = event.currentTarget.value.replace(/\D/g, "");
-                              setQuantityDraft((current) => {
-                                const updated = current.map((item, itemIndex) => itemIndex === index ? value : item) as [string, string, string];
-                                setQuantityTotalDraft(String(getQuantityTotal(updated)));
-                                return updated;
-                              });
-                            }}
-                            onBlur={() => {
-                              if (!quantityDraft[index]) {
-                                setQuantityDraft((current) => current.map((item, itemIndex) => itemIndex === index ? "0" : item) as [string, string, string]);
-                              }
-                            }}
-                            style={{ ...inputStyle, width: 70, textAlign: "center" }}
-                          />
-                        </span>
-                      ))}
-                    </div>
-                  </label>
-                  <label style={{ color: "#405248", fontSize: 12, fontWeight: 600 }}>
-                    Total Qty
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={quantityTotalDraft}
-                      onFocus={() => clearZeroOnFocus(quantityTotalDraft, () => setQuantityTotalDraft(""))}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value.replace(/\D/g, "");
-                        setQuantityTotalDraft(value);
-                        const parsed = Number.parseInt(value, 10);
-                        const first = Number.parseInt(quantityDraft[0], 10) || 0;
-                        const second = Number.parseInt(quantityDraft[1], 10) || 0;
-                        if (Number.isFinite(parsed)) {
-                          setQuantityDraft(parsed < first + second
-                            ? [String(parsed), "0", "0"]
-                            : [String(first), String(second), String(parsed - first - second)]);
-                        }
-                      }}
-                      onBlur={() => { if (!quantityTotalDraft) setQuantityTotalDraft("0"); }}
-                      style={{ ...inputStyle, display: "block", width: "100%", marginTop: 6 }}
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label style={{ color: "#405248", fontSize: 12, fontWeight: 600 }}>
-                    Qty
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={boxCountQtyDraft}
-                      onFocus={() => clearZeroOnFocus(boxCountQtyDraft, () => setBoxCountQtyDraft(""))}
-                      onChange={(event) => setBoxCountQtyDraft(event.currentTarget.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))}
-                      onBlur={() => { if (!boxCountQtyDraft) setBoxCountQtyDraft("0"); }}
-                      style={{ ...inputStyle, display: "block", width: "100%", marginTop: 6 }}
-                    />
-                  </label>
-                  <label style={{ color: "#405248", fontSize: 12, fontWeight: 600 }}>
-                    Total Price
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={boxCountPriceDraft}
-                      onFocus={() => clearZeroOnFocus(boxCountPriceDraft, () => setBoxCountPriceDraft(""))}
-                      onChange={(event) => setBoxCountPriceDraft(event.currentTarget.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))}
-                      onBlur={() => { if (!boxCountPriceDraft) setBoxCountPriceDraft("0"); }}
-                      style={{ ...inputStyle, display: "block", width: "100%", marginTop: 6 }}
-                    />
-                  </label>
-                  <small style={{ color: "#77857d", fontSize: 11 }}>Unit Price = Total Price ÷ Qty</small>
-                </>
-              )}
+            <div style={{ display: "grid", gap: 6, padding: 20, color: "#405248", fontSize: 13 }}>
+              <strong>{expiredProduct.brand}</strong>
+              {expiredProduct.batchNumber && <span>Batch: {expiredProduct.batchNumber}</span>}
+              <span>Expiry date: {expiredProduct.expDate || "-"}</span>
+              <p style={{ margin: "8px 0 0", color: "#b42318" }}>This inventory item cannot be added to the sale.</p>
             </div>
-            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 20px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-              <button type="button" onClick={() => setEntryModal(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button type="button" onClick={commitEntryModal} style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "8px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Add</button>
+            <footer style={{ display: "flex", justifyContent: "flex-end", padding: "0 20px 16px" }}>
+              <button type="button" onClick={() => setExpiredProduct(null)} style={{ border: 0, borderRadius: 6, background: "#b42318", color: "#fff", padding: "8px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
             </footer>
           </section>
         </div>
       )}
+
     </>
   );
 }
