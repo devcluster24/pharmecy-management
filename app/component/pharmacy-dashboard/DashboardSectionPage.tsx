@@ -20,6 +20,8 @@ export default function DashboardSectionPage({
   sectionSlug,
   data,
   actionContent,
+  hideAction = false,
+  content,
   listTitle,
   listNavigation,
   searchAccessory,
@@ -29,6 +31,8 @@ export default function DashboardSectionPage({
   sectionSlug: string;
   data: SectionData;
   actionContent?: ReactNode;
+  hideAction?: boolean;
+  content?: ReactNode;
   listTitle?: string;
   listNavigation?: ReactNode;
   searchAccessory?: ReactNode;
@@ -74,11 +78,11 @@ export default function DashboardSectionPage({
               <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{navItem.label}</h1>
               <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>{data.description}</p>
             </div>
-            {actionContent ?? (
+            {!hideAction && (actionContent ?? (
               <button type="button" style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
                 {data.action}
               </button>
-            )}
+            ))}
           </div>
 
           {data.errorMessage && (
@@ -98,6 +102,8 @@ export default function DashboardSectionPage({
               ))}
             </section>
           )}
+
+          {content}
 
           {data.columns.length > 0 && (
             <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>

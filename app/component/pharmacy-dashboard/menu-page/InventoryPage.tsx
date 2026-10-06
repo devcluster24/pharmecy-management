@@ -8,6 +8,11 @@ import {
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
+import {
+  emptyLowStockThresholdSnapshot,
+  getLowStockThresholdSnapshot,
+  subscribeToLowStockThreshold,
+} from "./lowStockStorage";
 
 const receiveOrderColumns = [
   "Date & Time",
@@ -25,7 +30,7 @@ const receiveOrderColumns = [
   "Actions",
 ];
 const ORDERS_PER_PAGE = 10;
-type InventoryListType = "inventory" | "expire-soon" | "expaired";
+type InventoryListType = "inventory" | "expire-soon" | "expaired" | "low-stock";
 type ExpiryMonthFilter = 1 | 2 | 3;
 
 function formatDateTime(row: PurchaseListRow) {
@@ -69,6 +74,11 @@ export default function InventoryPage() {
     getPurchaseListSnapshot,
     () => emptyPurchaseListSnapshot,
   );
+  const lowStockThresholdSnapshot = useSyncExternalStore(
+    subscribeToLowStockThreshold,
+    getLowStockThresholdSnapshot,
+    () => emptyLowStockThresholdSnapshot,
+  );
   const [selectedRow, setSelectedRow] = useState<PurchaseListRow | null>(null);
   const [activeList, setActiveList] = useState<InventoryListType>("inventory");
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<ExpiryMonthFilter>(3);
@@ -86,11 +96,24 @@ export default function InventoryPage() {
     [purchaseList.rows],
   );
   const globalDate = new Date();
+  const threshold = Number(lowStockThresholdSnapshot.threshold);
+  const lowStockEnabled = lowStockThresholdSnapshot.threshold.trim() !== ""
+    && Number.isInteger(threshold)
+    && threshold > 0;
   const listRows = activeList === "expire-soon"
     ? sortedRows.filter((row) => expiresWithinSelectedMonths(row.expDate, globalDate, expiryMonthFilter))
     : activeList === "expaired"
       ? sortedRows.filter((row) => hasExpired(row.expDate, globalDate))
-    : sortedRows;
+      : activeList === "low-stock"
+        ? lowStockEnabled
+          ? sortedRows.filter((row) => {
+            const rawQuantity = row.quantity?.trim();
+            if (!rawQuantity) return false;
+            const quantity = Number(rawQuantity);
+            return Number.isFinite(quantity) && quantity <= threshold;
+          })
+          : []
+        : sortedRows;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const rows = normalizedSearchQuery
     ? listRows.filter((row) => [
@@ -101,7 +124,7 @@ export default function InventoryPage() {
       row.genericName,
     ].some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery)))
     : listRows;
-  const paginationKey = `${activeList}:${expiryMonthFilter}:${rows.map(({ id, updatedAt }) => `${id}:${updatedAt ?? ""}`).join("|")}`;
+  const paginationKey = `${activeList}:${expiryMonthFilter}:${threshold}:${rows.map(({ id, updatedAt }) => `${id}:${updatedAt ?? ""}`).join("|")}`;
   const totalPages = Math.max(1, Math.ceil(rows.length / ORDERS_PER_PAGE));
   const currentPage = Math.min(
     paginationState.key === paginationKey ? paginationState.page : 1,
@@ -114,8 +137,12 @@ export default function InventoryPage() {
       ? `Review items expiring within the next ${expiryMonthFilter} month${expiryMonthFilter === 1 ? "" : "s"}.`
       : activeList === "expaired"
         ? "Review items that expired before the current month."
-      : "Review stock received from your suppliers.",
-    errorMessage: purchaseList.error,
+        : activeList === "low-stock"
+          ? lowStockEnabled
+            ? `Items with quantity equal to or below ${threshold} units.`
+            : "Low Stock Not Working: enter and save a threshold greater than 0 in Settings."
+          : "Review stock received from your suppliers.",
+    errorMessage: purchaseList.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
     action: "Adjust stock",
     metrics: [],
     columns: receiveOrderColumns,
@@ -136,7 +163,10 @@ export default function InventoryPage() {
       ];
       return [
         ...cells.map((value, index) => (
-          <span key={`${row.id}-${index}`} style={activeList === "expaired" ? { color: "#dc2626" } : undefined}>
+          <span key={`${row.id}-${index}`} style={{
+            ...(activeList === "expaired" || (activeList === "low-stock" && index === 8) ? { color: "#dc2626" } : {}),
+            ...(activeList === "low-stock" && index === 8 ? { fontWeight: 700 } : {}),
+          }}>
             {value}
           </span>
         )),
@@ -150,9 +180,13 @@ export default function InventoryPage() {
         </button>,
       ];
     }),
-    listFooter: rows.length > ORDERS_PER_PAGE ? (
+    listFooter: (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
-        <span>Showing {(currentPage - 1) * ORDERS_PER_PAGE + 1}-{Math.min(currentPage * ORDERS_PER_PAGE, rows.length)} of {rows.length} items</span>
+        <span>
+          {rows.length === 0
+            ? "Showing 0 items"
+            : `Showing ${(currentPage - 1) * ORDERS_PER_PAGE + 1}-${Math.min(currentPage * ORDERS_PER_PAGE, rows.length)} of ${rows.length} items`}
+        </span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
@@ -171,7 +205,7 @@ export default function InventoryPage() {
           >Next</button>
         </div>
       </div>
-    ) : undefined,
+    ),
   };
 
   return (
@@ -208,6 +242,7 @@ export default function InventoryPage() {
             ["inventory", "Inventory"],
             ["expire-soon", "Expire Soon"],
             ["expaired", "Expaired"],
+            ["low-stock", "Low Stock"],
           ] as const).map(([listType, label]) => (
             <button
               key={listType}
