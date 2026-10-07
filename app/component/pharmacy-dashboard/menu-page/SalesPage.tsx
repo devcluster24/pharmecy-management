@@ -1,5 +1,13 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import SalesActions from "./SalesActions";
+import {
+  emptySalesListSnapshot,
+  getSalesListSnapshot,
+  subscribeToSalesList,
+} from "./salesStorage";
 
 const pageData: SectionData = {
   description: "Review transactions, payments, and daily sales performance.",
@@ -19,5 +27,26 @@ const pageData: SectionData = {
 };
 
 export default function SalesPage() {
-  return <DashboardSectionPage sectionSlug="sales" data={pageData} actionContent={<SalesActions />} />;
+  const sales = useSyncExternalStore(
+    subscribeToSalesList,
+    getSalesListSnapshot,
+    () => emptySalesListSnapshot,
+  );
+  const data: SectionData = {
+    ...pageData,
+    errorMessage: sales.error || undefined,
+    rows: [
+      ...sales.rows.map((sale) => [
+        sale.invoice,
+        sale.customer,
+        String(sale.items),
+        sale.time,
+        `৳${sale.amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        sale.payment,
+      ]),
+      ...pageData.rows,
+    ],
+  };
+
+  return <DashboardSectionPage sectionSlug="sales" data={data} actionContent={<SalesActions />} />;
 }

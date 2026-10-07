@@ -24,3 +24,35 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.pay-amount-input:focus {
+  border-color: transparent !important;
+  outline: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .sale-invoice-print,
+  .sale-invoice-print * {
+    visibility: visible !important;
+  }
+
+  .sale-invoice-print {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .sale-invoice-print-actions {
+    display: none !important;
+  }
+}

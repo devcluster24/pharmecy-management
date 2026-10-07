@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { downloadSaleInvoicePdf } from "./saleInvoicePdf";
+import { persistSale, type SalesListRow } from "./salesStorage";
 import {
   emptyPurchaseListSnapshot,
   getPurchaseListSnapshot,
@@ -93,6 +95,10 @@ function formatPrice(price: number) {
   return `৳${price.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function roundCurrency(amount: number) {
+  return Number(amount.toFixed(2));
+}
+
 function getQuantityTotal(quantity: string) {
   const parsed = Number.parseInt(quantity, 10);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
@@ -129,12 +135,16 @@ export default function SalesActions() {
   const [activeSaleType, setActiveSaleType] = useState<SaleType | null>(null);
   const [matchingProducts, setMatchingProducts] = useState<SaleProduct[]>([]);
   const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
+  const [payAmount, setPayAmount] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [keyboardActiveGroupKey, setKeyboardActiveGroupKey] = useState<string | null>(null);
   const [batchSelectionLineId, setBatchSelectionLineId] = useState<string | null>(null);
   const [batchSearchTerm, setBatchSearchTerm] = useState("");
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
   const [productError, setProductError] = useState("");
+  const [saleSaveError, setSaleSaveError] = useState("");
+  const [saleInvoice, setSaleInvoice] = useState<SalesListRow | null>(null);
+  const [invoicePdfError, setInvoicePdfError] = useState("");
   const [expiredProduct, setExpiredProduct] = useState<SaleProduct | null>(null);
   const searchSequence = useRef(0);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -201,9 +211,16 @@ export default function SalesActions() {
     0,
   );
   const totalPrice = saleLines.reduce(
-    (total, line) => total + getQuantityTotal(line.quantity) * getUnitPrice(line.selectedBatches[0]?.unitPrice ?? "0"),
+    (total, line) => total + roundCurrency(getQuantityTotal(line.quantity) * getUnitPrice(line.selectedBatches[0]?.unitPrice ?? "0")),
     0,
   );
+  const hasPayAmount = payAmount.trim() !== "";
+  const parsedPayAmount = hasPayAmount ? roundCurrency(Number(payAmount)) : 0;
+  const validPayAmount = hasPayAmount
+    && Number.isFinite(parsedPayAmount)
+    && parsedPayAmount >= 0
+    && parsedPayAmount <= totalPrice;
+  const dueAmount = validPayAmount ? roundCurrency(Math.max(0, totalPrice - parsedPayAmount)) : 0;
   const matchingProductGroups = [...matchingProducts.reduce((groups, product) => {
     const groupKey = getProductGroupKey(product);
     const group = groups.get(groupKey) ?? [];
@@ -302,13 +319,72 @@ export default function SalesActions() {
     setMatchingProducts([]);
     setSelectedProductIds([]);
     setSaleLines([]);
+    setPayAmount("");
     setSearchTerm("");
     setKeyboardActiveGroupKey(null);
     setBatchSelectionLineId(null);
     setBatchSearchTerm("");
     setProductError("");
+    setSaleSaveError("");
     setIsSearchingProducts(false);
     setActiveSaleType(saleType);
+  }
+
+  function saveSale() {
+    if (!validPayAmount) {
+      setSaleSaveError("Pay amount must be between zero and the total price.");
+      return;
+    }
+
+    const completedLines = saleLines.filter(
+      (line) => line.selectedBatches.length > 0 && getQuantityTotal(line.quantity) > 0,
+    );
+    if (completedLines.length === 0) {
+      setSaleSaveError("Add at least one product and enter a quantity greater than zero.");
+      return;
+    }
+
+    const invoiceLines = completedLines.map((line) => {
+      const selectedBatch = line.selectedBatches[0];
+      const quantity = getQuantityTotal(line.quantity);
+      const unitPrice = getUnitPrice(selectedBatch.unitPrice);
+      return {
+        brand: line.product.brand,
+        details: [line.product.genericName, line.product.strength, line.product.unit, line.product.packSize]
+          .filter(Boolean)
+          .join(" · "),
+        batchNumber: line.selectedBatches.map((batch) => batch.batchNumber || "-").join(", "),
+        packSize: line.product.packSize || "-",
+        quantity,
+        unitPrice,
+        totalPrice: roundCurrency(quantity * unitPrice),
+      };
+    });
+
+    try {
+      const savedSale = persistSale(invoiceLines, parsedPayAmount);
+      setSaleSaveError("");
+      setActiveSaleType(null);
+      setSaleInvoice(savedSale);
+      setInvoicePdfError("");
+      try {
+        downloadSaleInvoicePdf(savedSale);
+      } catch (error) {
+        setInvoicePdfError(getErrorMessage(error));
+      }
+    } catch (error) {
+      setSaleSaveError(getErrorMessage(error));
+    }
+  }
+
+  function saveInvoicePdf() {
+    if (!saleInvoice) return;
+    try {
+      downloadSaleInvoicePdf(saleInvoice);
+      setInvoicePdfError("");
+    } catch (error) {
+      setInvoicePdfError(getErrorMessage(error));
+    }
   }
 
   return (
@@ -513,6 +589,13 @@ export default function SalesActions() {
                               inputMode="numeric"
                               value={line.quantity}
                               disabled={line.selectedBatches.length === 0}
+                              onFocus={() => {
+                                setSaleLines((current) => current.map((currentLine) =>
+                                  currentLine.id === line.id
+                                    ? { ...currentLine, quantity: "" }
+                                    : currentLine,
+                                ));
+                              }}
                               onChange={(event) => {
                                 const nextQuantity = event.currentTarget.value.replace(/\D/g, "");
                                 setSaleLines((current) => current.map((currentLine) =>
@@ -537,12 +620,45 @@ export default function SalesActions() {
               )}
             </div>
 
-            <footer style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "15px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-              <div style={{ display: "flex", gap: 24, color: "#405248", fontSize: 13 }}>
+            <footer style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "15px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 18, color: "#405248", fontSize: 13 }}>
                 <span>Total units: <strong>{totalUnits}</strong></span>
                 <span>Total price: <strong style={{ color: "#17704e" }}>{formatPrice(totalPrice)}</strong></span>
+                <label style={{ display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                  Pay Amount
+                  <input
+                    className="pay-amount-input"
+                    aria-label="Pay Amount"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    max={totalPrice}
+                    step="0.01"
+                    value={payAmount}
+                    onFocus={() => setPayAmount("")}
+                    onChange={(event) => setPayAmount(event.currentTarget.value)}
+                    style={{ ...inputStyle, width: 130, border: "1px solid #e5ebe7", outline: "none", padding: "7px 8px", fontSize: 12 }}
+                  />
+                </label>
+                <span style={{ display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                  Due
+                  <strong aria-live="polite" style={{ color: dueAmount > 0 ? "#ad4b43" : "#17704e", fontSize: 13 }}>
+                    {validPayAmount ? formatPrice(dueAmount) : hasPayAmount ? "Check pay amount" : "Enter pay amount"}
+                  </strong>
+                </span>
               </div>
-              <button type="button" onClick={() => setActiveSaleType(null)} style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {saleSaveError && <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>{saleSaveError}</p>}
+                <button type="button" onClick={() => setActiveSaleType(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
+                <button
+                  type="button"
+                  onClick={saveSale}
+                  disabled={!validPayAmount}
+                  style={{ border: 0, borderRadius: 6, background: validPayAmount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount ? "pointer" : "not-allowed" }}
+                >
+                  Save
+                </button>
+              </div>
             </footer>
           </section>
         </div>
@@ -629,6 +745,75 @@ export default function SalesActions() {
           </div>
         );
       })()}
+
+      {saleInvoice && (
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSaleInvoice(null);
+          }}
+          style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sale-invoice-title"
+            className="sale-invoice-print"
+            style={{ width: "min(760px, 100%)", maxHeight: "min(90vh, 850px)", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)", padding: 28 }}
+          >
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, paddingBottom: 18, borderBottom: "1px solid #e9eeea" }}>
+              <div>
+                <p style={{ margin: "0 0 5px", color: "#17704e", fontSize: 12, fontWeight: 700 }}>Pharmecy Cluster</p>
+                <h2 id="sale-invoice-title" style={{ margin: 0, color: "#20342a", fontSize: 22 }}>Sales invoice</h2>
+              </div>
+              <strong style={{ color: "#17704e", fontSize: 16 }}>{saleInvoice.invoice}</strong>
+            </header>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, margin: "18px 0", color: "#526158", fontSize: 12 }}>
+              <span>Customer: <strong>{saleInvoice.customer}</strong></span>
+              <span>{new Date(saleInvoice.createdAt).toLocaleString("en-BD")}</span>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead>
+                  <tr>
+                    {["Product", "Batch", "Quantity", "Unit price", "Total"].map((heading) => (
+                      <th key={heading} style={{ padding: "10px 8px", background: "#eff7f2", color: "#526158", fontSize: 11, whiteSpace: "nowrap" }}>{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {saleInvoice.lines?.map((line, index) => (
+                    <tr key={`${line.brand}-${index}`}>
+                      <td style={{ padding: "11px 8px", borderBottom: "1px solid #edf0ed", color: "#26352f", fontSize: 12 }}>
+                        <strong>{line.brand}</strong>
+                        {line.details && <small style={{ display: "block", marginTop: 3, color: "#77857d" }}>{line.details}</small>}
+                      </td>
+                      <td style={{ padding: "11px 8px", borderBottom: "1px solid #edf0ed", color: "#526158", fontSize: 12 }}>{line.batchNumber}</td>
+                      <td style={{ padding: "11px 8px", borderBottom: "1px solid #edf0ed", color: "#526158", fontSize: 12 }}>{line.quantity}</td>
+                      <td style={{ padding: "11px 8px", borderBottom: "1px solid #edf0ed", color: "#526158", fontSize: 12, whiteSpace: "nowrap" }}>{formatPrice(line.unitPrice)}</td>
+                      <td style={{ padding: "11px 8px", borderBottom: "1px solid #edf0ed", color: "#526158", fontSize: 12, whiteSpace: "nowrap" }}>{formatPrice(line.totalPrice)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18, color: "#17704e", fontSize: 16 }}>
+              <strong>Grand total: {formatPrice(saleInvoice.amount)}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 10, color: "#526158", fontSize: 13 }}>
+              <span>Pay Amount: <strong>{formatPrice(saleInvoice.paidAmount ?? saleInvoice.amount)}</strong></span>
+              <span style={{ color: (saleInvoice.dueAmount ?? 0) > 0 ? "#ad4b43" : "#17704e" }}>
+                Due: <strong>{formatPrice(saleInvoice.dueAmount ?? 0)}</strong>
+              </span>
+            </div>
+            <footer className="sale-invoice-print-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 24, paddingTop: 16, borderTop: "1px solid #e9eeea" }}>
+              {invoicePdfError && <p role="alert" style={{ margin: "0 auto 0 0", color: "#ad4b43", fontSize: 12 }}>{invoicePdfError}</p>}
+              <button type="button" onClick={() => window.print()} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Print invoice</button>
+              <button type="button" onClick={saveInvoicePdf} style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Save PDF</button>
+              <button type="button" onClick={() => setSaleInvoice(null)} style={{ border: 0, borderRadius: 6, background: "#eef2ef", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {activeSaleType && expiredProduct && (
         <div
