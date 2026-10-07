@@ -136,6 +136,8 @@ export default function SalesActions() {
   const [matchingProducts, setMatchingProducts] = useState<SaleProduct[]>([]);
   const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
   const [payAmount, setPayAmount] = useState("");
+  const [discountType, setDiscountType] = useState<"flat" | "percent">("flat");
+  const [discountValue, setDiscountValue] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [keyboardActiveGroupKey, setKeyboardActiveGroupKey] = useState<string | null>(null);
   const [batchSelectionLineId, setBatchSelectionLineId] = useState<string | null>(null);
@@ -214,13 +216,24 @@ export default function SalesActions() {
     (total, line) => total + roundCurrency(getQuantityTotal(line.quantity) * getUnitPrice(line.selectedBatches[0]?.unitPrice ?? "0")),
     0,
   );
+  const hasDiscountValue = discountValue.trim() !== "";
+  const parsedDiscountValue = hasDiscountValue ? Number(discountValue) : 0;
+  const validDiscount = !hasDiscountValue
+    || (Number.isFinite(parsedDiscountValue)
+      && parsedDiscountValue >= 0
+      && (discountType === "percent" ? parsedDiscountValue <= 100 : parsedDiscountValue <= totalPrice));
+  const discountAmount = validDiscount
+    ? roundCurrency(discountType === "percent" ? totalPrice * parsedDiscountValue / 100 : parsedDiscountValue)
+    : 0;
+  const payableAmount = roundCurrency(Math.max(0, totalPrice - discountAmount));
   const hasPayAmount = payAmount.trim() !== "";
   const parsedPayAmount = hasPayAmount ? roundCurrency(Number(payAmount)) : 0;
   const validPayAmount = hasPayAmount
     && Number.isFinite(parsedPayAmount)
     && parsedPayAmount >= 0
-    && parsedPayAmount <= totalPrice;
-  const dueAmount = validPayAmount ? roundCurrency(Math.max(0, totalPrice - parsedPayAmount)) : 0;
+    && validDiscount;
+  const dueAmount = validPayAmount ? roundCurrency(Math.max(0, payableAmount - parsedPayAmount)) : 0;
+  const changeCash = validPayAmount ? roundCurrency(Math.max(0, parsedPayAmount - payableAmount)) : 0;
   const matchingProductGroups = [...matchingProducts.reduce((groups, product) => {
     const groupKey = getProductGroupKey(product);
     const group = groups.get(groupKey) ?? [];
@@ -320,6 +333,8 @@ export default function SalesActions() {
     setSelectedProductIds([]);
     setSaleLines([]);
     setPayAmount("");
+    setDiscountType("flat");
+    setDiscountValue("");
     setSearchTerm("");
     setKeyboardActiveGroupKey(null);
     setBatchSelectionLineId(null);
@@ -331,8 +346,14 @@ export default function SalesActions() {
   }
 
   function saveSale() {
+    if (!validDiscount) {
+      setSaleSaveError(discountType === "percent"
+        ? "Discount must be between zero and 100%."
+        : "Discount cannot be greater than the total price.");
+      return;
+    }
     if (!validPayAmount) {
-      setSaleSaveError("Pay amount must be between zero and the total price.");
+      setSaleSaveError("Pay amount must be zero or greater.");
       return;
     }
 
@@ -362,7 +383,7 @@ export default function SalesActions() {
     });
 
     try {
-      const savedSale = persistSale(invoiceLines, parsedPayAmount);
+      const savedSale = persistSale(invoiceLines, parsedPayAmount, discountAmount);
       setSaleSaveError("");
       setActiveSaleType(null);
       setSaleInvoice(savedSale);
@@ -457,7 +478,8 @@ export default function SalesActions() {
               </button>
             </div>
 
-            <div style={{ minHeight: 0, overflowY: "auto", padding: 24 }}>
+            <div className="new-sale-content" style={{ minHeight: 0, overflowY: "auto", padding: 24 }}>
+              <div className="new-sale-products">
               {(productError || inventorySnapshot.error) && <p role="alert" style={{ margin: "0 0 14px", color: "#ad4b43", fontSize: 13 }}>{productError || inventorySnapshot.error}</p>}
               <div style={{ position: "relative", marginBottom: 18 }}>
                 <label htmlFor="sale-product-search" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, color: "#405248", fontSize: 12, fontWeight: 650 }}>
@@ -519,10 +541,10 @@ export default function SalesActions() {
                 <div style={{ display: "grid", gap: 10, overflowX: "auto" }}>
                   <div
                     aria-hidden="true"
-                    style={{ display: "grid", gridTemplateColumns: "150px 100px minmax(200px, 1.5fr) 90px 95px 95px 90px 110px 28px", alignItems: "center", gap: 12, minWidth: 1100, padding: "0 0 8px", borderBottom: "1px solid #e5ebe6", color: "#77857d", fontSize: 10, fontWeight: 650 }}
+                    style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "0 0 8px", borderBottom: "1px solid #e5ebe6", color: "#77857d", fontSize: 10, fontWeight: 650 }}
                   >
-                    {["Brand Name", "Batch Number", "Details", "Pack Size", "Box Price", "Unit Price", "Quantity", "Total Price", ""].map((heading, index) => (
-                      <span key={`${heading}-${index}`} style={{ textAlign: index >= 4 && index <= 5 ? "right" : "left" }}>{heading}</span>
+                    {["Brand Name", "Pack Size", "Box Price", "Unit Price", "Quantity", "Total Price", "Actions"].map((heading, index) => (
+                      <span key={`${heading}-${index}`}>{heading}</span>
                     ))}
                   </div>
                   {saleLines.map((line) => {
@@ -530,39 +552,33 @@ export default function SalesActions() {
                     const selectedBatch = line.selectedBatches[0];
                     const boxPrice = getUnitPrice(selectedBatch?.boxPrice ?? "0");
                     const unitPrice = getUnitPrice(selectedBatch?.unitPrice ?? "0");
-                    const usedBatchIds = new Set(saleLines
-                      .filter((otherLine) => otherLine.id !== line.id && getProductGroupKey(otherLine.product) === getProductGroupKey(line.product))
-                      .flatMap((otherLine) => otherLine.selectedBatches.map((batch) => batch.id))
-                      .filter((id): id is string => Boolean(id)));
                     const expiredBatches = line.batchOptions.filter((batch) => batch.isExpired);
-                    const hasAnotherAvailableBatch = line.batchOptions.some((batch) =>
-                      !batch.isExpired
-                      && !line.selectedBatches.some((selected) => selected.id === batch.id)
-                      && !usedBatchIds.has(batch.id),
-                    );
                     return (
                       <div key={line.id}>
-                        <article style={{ display: "grid", gridTemplateColumns: "150px 100px minmax(200px, 1.5fr) 90px 95px 95px 90px 110px 28px", alignItems: "center", gap: 12, minWidth: 1100, padding: "4px 0" }}>
+                      <article style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "4px 0" }}>
                           <div style={{ minWidth: 0 }}>
-                            <strong style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.brand}</strong>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
-                              {line.selectedBatches.length > 0 ? line.selectedBatches.map((batch) => (
+                          <strong style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {[line.product.brand, line.product.strength].filter(Boolean).join(" · ")}
+                          </strong>
+                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}>
+                              {line.selectedBatches.map((batch) => (
                                 <small key={batch.id} style={{ borderRadius: 4, background: "#eef6f1", padding: "3px 5px", color: "#17704e", fontSize: 10, whiteSpace: "nowrap" }}>
                                   {batch.batchNumber || "-"}
                                 </small>
-                              )) : (
+                              ))}
+                              {line.selectedBatches.length === 0 && (
                                 <small style={{ color: "#77857d", fontSize: 10 }}>Batch not selected</small>
                               )}
+                              <button
+                                type="button"
+                                aria-label={`Add or edit batches for ${line.product.brand}`}
+                                title="Add or edit batches"
+                                onClick={() => openBatchSelection(line)}
+                                style={{ display: "inline-grid", placeItems: "center", width: 18, height: 18, border: "1px solid #cfe4d7", borderRadius: 999, background: "#f4faf6", color: "#17704e", padding: 0, fontSize: 14, lineHeight: 1, cursor: "pointer" }}
+                              >
+                                +
+                              </button>
                             </div>
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <button
-                              type="button"
-                              onClick={() => openBatchSelection(line)}
-                              style={{ border: 0, outline: "none", background: "transparent", color: "#17704e", padding: "7px 0", fontSize: 11, cursor: "pointer" }}
-                            >
-                              {line.selectedBatches.length > 0 ? "Edit batches" : "Select batch"}
-                            </button>
                             {expiredBatches.length > 0 && (
                               <button
                                 type="button"
@@ -572,16 +588,10 @@ export default function SalesActions() {
                                 Expaired batch info
                               </button>
                             )}
-                            {hasAnotherAvailableBatch && selectedBatch && (
-                              <small style={{ display: "block", color: "#77857d", fontSize: 10 }}>More batches available</small>
-                            )}
                           </div>
-                          <span style={{ overflow: "hidden", color: "#77857d", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {[line.product.genericName, line.product.strength, line.product.unit].filter(Boolean).join(" · ") || line.product.medicineName}
-                          </span>
                           <span style={{ overflow: "hidden", color: "#526158", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.packSize || "-"}</span>
-                          <span style={{ color: "#405248", fontSize: 12, textAlign: "right" }}>{formatPrice(boxPrice)}</span>
-                          <span style={{ color: "#405248", fontSize: 12, textAlign: "right" }}>{formatPrice(unitPrice)}</span>
+                          <span style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(boxPrice)}</span>
+                          <span style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(unitPrice)}</span>
                           <label style={{ color: "#77857d", fontSize: 10 }}>
                             <input
                               aria-label={`${line.product.brand} quantity`}
@@ -605,56 +615,120 @@ export default function SalesActions() {
                                 ));
                               }}
                               placeholder={line.selectedBatches.length > 0 ? "0" : "Select batch first"}
-                              style={{ ...inputStyle, display: "block", width: "100%", padding: "7px 5px", opacity: line.selectedBatches.length > 0 ? 1 : 0.55 }}
+                              style={{ ...inputStyle, display: "block", width: "100%", padding: "7px 5px", textAlign: "left", opacity: line.selectedBatches.length > 0 ? 1 : 0.55 }}
                             />
                           </label>
-                          <div style={{ textAlign: "right" }}>
+                          <div style={{ textAlign: "left" }}>
                             <strong style={{ color: "#17704e", fontSize: 12 }}>{formatPrice(unitPrice * quantity)}</strong>
                           </div>
-                          <button type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => removeProduct(line.id)} style={{ border: 0, background: "transparent", color: "#ad4b43", fontSize: 18, cursor: "pointer" }}>×</button>
+                          <button type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => removeProduct(line.id)} style={{ justifySelf: "start", border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "4px 9px", fontSize: 12, cursor: "pointer" }}>Delete</button>
                         </article>
                       </div>
                     );
                   })}
                 </div>
               )}
+              </div>
+
+              <aside className="new-sale-summary" aria-label="Bill summary" style={{ display: "grid", alignContent: "start", gap: 14, padding: 16, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+                <div style={{ display: "grid", gap: 10, color: "#526158", fontSize: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Total units</span>
+                    <strong style={{ color: "#26352f" }}>{totalUnits}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Total price</span>
+                    <strong style={{ color: "#17704e" }}>{formatPrice(totalPrice)}</strong>
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <span style={{ color: "#526158", fontSize: 11, fontWeight: 650 }}>Discount</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {(["flat", "percent"] as const).map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          aria-pressed={discountType === type}
+                          onClick={() => {
+                            setDiscountType(type);
+                            setDiscountValue("");
+                            setSaleSaveError("");
+                          }}
+                          style={{ border: `1px solid ${discountType === type ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: discountType === type ? "#eef8f2" : "#fff", color: discountType === type ? "#17704e" : "#526158", padding: "6px 8px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}
+                        >
+                          {type === "flat" ? "Flat (৳)" : "%"}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      aria-label={`Discount ${discountType === "flat" ? "amount" : "percentage"}`}
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max={discountType === "percent" ? 100 : totalPrice}
+                      step="0.01"
+                      value={discountValue}
+                      onChange={(event) => {
+                        setDiscountValue(event.currentTarget.value);
+                        setSaleSaveError("");
+                      }}
+                      placeholder={discountType === "flat" ? "Enter amount" : "Enter percentage"}
+                      style={{ ...inputStyle, width: "100%", padding: "7px 8px", fontSize: 12 }}
+                    />
+                    {!validDiscount && (
+                      <span role="alert" style={{ color: "#ad4b43", fontSize: 11 }}>
+                        {discountType === "percent" ? "Discount cannot exceed 100%." : "Discount cannot exceed total price."}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Discount amount</span>
+                    <strong style={{ color: "#526158" }}>−{formatPrice(discountAmount)}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, paddingTop: 8, borderTop: "1px solid #e5ebe7" }}>
+                    <strong style={{ color: "#26352f" }}>Net Total</strong>
+                    <strong style={{ color: "#17704e" }}>{formatPrice(payableAmount)}</strong>
+                  </div>
+                  <label style={{ display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                    Pay Amount
+                    <input
+                      className="pay-amount-input"
+                      aria-label="Pay Amount"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      value={payAmount}
+                      onFocus={() => setPayAmount("")}
+                      onChange={(event) => setPayAmount(event.currentTarget.value)}
+                      style={{ ...inputStyle, width: "100%", border: "1px solid #e5ebe7", outline: "none", padding: "7px 8px", fontSize: 12 }}
+                    />
+                  </label>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Due</span>
+                    <strong aria-live="polite" style={{ color: dueAmount > 0 ? "#ad4b43" : "#17704e" }}>
+                      {validPayAmount ? formatPrice(dueAmount) : hasPayAmount ? "Check pay amount" : "Enter pay amount"}
+                    </strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Change Cash</span>
+                    <strong aria-live="polite" style={{ color: "#17704e" }}>
+                      {validPayAmount ? formatPrice(changeCash) : hasPayAmount ? "Check pay amount" : "Enter pay amount"}
+                    </strong>
+                  </div>
+                </div>
+              </aside>
             </div>
 
-            <footer style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "15px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 18, color: "#405248", fontSize: 13 }}>
-                <span>Total units: <strong>{totalUnits}</strong></span>
-                <span>Total price: <strong style={{ color: "#17704e" }}>{formatPrice(totalPrice)}</strong></span>
-                <label style={{ display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
-                  Pay Amount
-                  <input
-                    className="pay-amount-input"
-                    aria-label="Pay Amount"
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    max={totalPrice}
-                    step="0.01"
-                    value={payAmount}
-                    onFocus={() => setPayAmount("")}
-                    onChange={(event) => setPayAmount(event.currentTarget.value)}
-                    style={{ ...inputStyle, width: 130, border: "1px solid #e5ebe7", outline: "none", padding: "7px 8px", fontSize: 12 }}
-                  />
-                </label>
-                <span style={{ display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
-                  Due
-                  <strong aria-live="polite" style={{ color: dueAmount > 0 ? "#ad4b43" : "#17704e", fontSize: 13 }}>
-                    {validPayAmount ? formatPrice(dueAmount) : hasPayAmount ? "Check pay amount" : "Enter pay amount"}
-                  </strong>
-                </span>
-              </div>
+            <footer style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, padding: "15px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+              {saleSaveError && <p role="alert" style={{ margin: "0 auto 0 0", color: "#ad4b43", fontSize: 12 }}>{saleSaveError}</p>}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {saleSaveError && <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>{saleSaveError}</p>}
                 <button type="button" onClick={() => setActiveSaleType(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
                 <button
                   type="button"
                   onClick={saveSale}
-                  disabled={!validPayAmount}
-                  style={{ border: 0, borderRadius: 6, background: validPayAmount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount ? "pointer" : "not-allowed" }}
+                  disabled={!validPayAmount || !validDiscount}
+                  style={{ border: 0, borderRadius: 6, background: validPayAmount && validDiscount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount && validDiscount ? "pointer" : "not-allowed" }}
                 >
                   Save
                 </button>
@@ -796,13 +870,22 @@ export default function SalesActions() {
                 </tbody>
               </table>
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18, color: "#17704e", fontSize: 16 }}>
-              <strong>Grand total: {formatPrice(saleInvoice.amount)}</strong>
+            <div style={{ display: "grid", justifyItems: "end", gap: 6, marginTop: 18, color: "#526158", fontSize: 13 }}>
+              {saleInvoice.discountAmount ? (
+                <>
+                  <span>Subtotal: <strong>{formatPrice(saleInvoice.subtotalAmount ?? saleInvoice.amount)}</strong></span>
+                  <span>Discount: <strong>−{formatPrice(saleInvoice.discountAmount)}</strong></span>
+                </>
+              ) : null}
+              <strong style={{ color: "#17704e", fontSize: 16 }}>Grand total: {formatPrice(saleInvoice.amount)}</strong>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 10, color: "#526158", fontSize: 13 }}>
               <span>Pay Amount: <strong>{formatPrice(saleInvoice.paidAmount ?? saleInvoice.amount)}</strong></span>
               <span style={{ color: (saleInvoice.dueAmount ?? 0) > 0 ? "#ad4b43" : "#17704e" }}>
                 Due: <strong>{formatPrice(saleInvoice.dueAmount ?? 0)}</strong>
+              </span>
+              <span style={{ color: "#17704e" }}>
+                Change Cash: <strong>{formatPrice(Math.max(0, (saleInvoice.paidAmount ?? saleInvoice.amount) - saleInvoice.amount))}</strong>
               </span>
             </div>
             <footer className="sale-invoice-print-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 24, paddingTop: 16, borderTop: "1px solid #e9eeea" }}>

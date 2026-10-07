@@ -85,19 +85,31 @@ export function downloadSaleInvoicePdf(sale: SalesListRow) {
     document.line(left, y - 2, right, y - 2);
   }
 
-  if (y + 25 > bottom) {
+  const subtotal = sale.subtotalAmount ?? sale.amount;
+  const discount = sale.discountAmount ?? 0;
+  const paidAmount = sale.paidAmount ?? sale.amount;
+  const changeCash = Math.max(0, paidAmount - sale.amount);
+  const summaryRows = [
+    { label: "Subtotal", amount: subtotal, color: [82, 97, 88] },
+    ...(discount > 0 ? [{ label: "Discount", amount: -discount, color: [82, 97, 88] }] : []),
+    { label: "Grand total", amount: sale.amount, color: [23, 112, 78] },
+    { label: "Pay amount", amount: paidAmount, color: [82, 97, 88] },
+    { label: "Due", amount: sale.dueAmount ?? 0, color: (sale.dueAmount ?? 0) > 0 ? [173, 75, 67] : [23, 112, 78] },
+    ...(changeCash > 0 ? [{ label: "Change cash", amount: changeCash, color: [23, 112, 78] }] : []),
+  ];
+  if (y + summaryRows.length * 6 + 8 > bottom) {
     document.addPage();
     y = 20;
   }
-  document.setFont("helvetica", "bold");
-  document.setFontSize(11);
-  document.setTextColor(23, 112, 78);
-  document.text(`Grand total: ${formatAmount(sale.amount)}`, right, y + 5, { align: "right" });
-  document.setFont("helvetica", "normal");
-  document.setFontSize(9);
-  document.setTextColor(82, 97, 88);
-  document.text(`Pay amount: ${formatAmount(sale.paidAmount ?? sale.amount)}`, right, y + 11, { align: "right" });
-  document.setTextColor((sale.dueAmount ?? 0) > 0 ? 173 : 23, (sale.dueAmount ?? 0) > 0 ? 75 : 112, (sale.dueAmount ?? 0) > 0 ? 67 : 78);
-  document.text(`Due: ${formatAmount(sale.dueAmount ?? 0)}`, right, y + 17, { align: "right" });
+  summaryRows.forEach((row, index) => {
+    const isGrandTotal = row.label === "Grand total";
+    document.setFont("helvetica", isGrandTotal ? "bold" : "normal");
+    document.setFontSize(isGrandTotal ? 11 : 9);
+    document.setTextColor(row.color[0], row.color[1], row.color[2]);
+    const amount = row.amount < 0
+      ? `-${formatAmount(Math.abs(row.amount))}`
+      : formatAmount(row.amount);
+    document.text(`${row.label}: ${amount}`, right, y + 5 + index * 6, { align: "right" });
+  });
   document.save(`${sale.invoice}.pdf`);
 }

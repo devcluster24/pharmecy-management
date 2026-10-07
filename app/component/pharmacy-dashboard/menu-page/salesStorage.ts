@@ -17,6 +17,8 @@ export type SalesListRow = {
   items: number;
   time: string;
   amount: number;
+  subtotalAmount?: number;
+  discountAmount?: number;
   paidAmount?: number;
   dueAmount?: number;
   payment: string;
@@ -44,6 +46,8 @@ function isSalesListRow(value: unknown): value is SalesListRow {
     && typeof row.time === "string"
     && typeof row.amount === "number"
     && Number.isFinite(row.amount)
+    && (!("subtotalAmount" in row) || (typeof row.subtotalAmount === "number" && Number.isFinite(row.subtotalAmount)))
+    && (!("discountAmount" in row) || (typeof row.discountAmount === "number" && Number.isFinite(row.discountAmount)))
     && (!("paidAmount" in row) || (typeof row.paidAmount === "number" && Number.isFinite(row.paidAmount)))
     && (!("dueAmount" in row) || (typeof row.dueAmount === "number" && Number.isFinite(row.dueAmount)))
     && typeof row.payment === "string"
@@ -109,11 +113,13 @@ export function subscribeToSalesList(listener: () => void) {
   };
 }
 
-export function persistSale(lines: SalesInvoiceItem[], paidAmount: number) {
+export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, discountAmount = 0) {
   if (
     lines.length === 0
     || !Number.isFinite(paidAmount)
     || paidAmount < 0
+    || !Number.isFinite(discountAmount)
+    || discountAmount < 0
     || lines.some((line) =>
       !Number.isInteger(line.quantity)
       || line.quantity < 1
@@ -130,11 +136,14 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number) {
   if (!Number.isFinite(amount)) {
     throw new Error("The sale total is invalid. Check the product prices and try again.");
   }
-  if (paidAmount > amount) {
-    throw new Error("Pay amount cannot be greater than the total price.");
+  const roundedSubtotal = Number(amount.toFixed(2));
+  const roundedDiscount = Number(discountAmount.toFixed(2));
+  if (roundedDiscount > roundedSubtotal) {
+    throw new Error("Discount cannot be greater than the total price.");
   }
-  const dueAmount = Number((amount - paidAmount).toFixed(2));
+  const payableAmount = Number((roundedSubtotal - roundedDiscount).toFixed(2));
   const roundedPaidAmount = Number(paidAmount.toFixed(2));
+  const dueAmount = Number(Math.max(0, payableAmount - roundedPaidAmount).toFixed(2));
 
   const existingRows = readSalesListRows();
   const lastInvoiceNumber = existingRows.reduce((highest, row) => {
@@ -149,7 +158,9 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number) {
     customer: "Walk-in customer",
     items: lines.length,
     time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-    amount,
+    amount: payableAmount,
+    subtotalAmount: roundedSubtotal,
+    discountAmount: roundedDiscount,
     paidAmount: roundedPaidAmount,
     dueAmount,
     payment: dueAmount > 0 ? "Due" : "Paid",

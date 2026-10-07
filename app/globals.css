@@ -30,6 +30,42 @@ body {
   outline: none;
 }
 
+.pay-amount-input {
+  appearance: textfield;
+}
+
+.pay-amount-input::-webkit-inner-spin-button,
+.pay-amount-input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.new-sale-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  align-items: start;
+  gap: 24px;
+}
+
+.new-sale-products {
+  min-width: 0;
+}
+
+.new-sale-summary {
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 760px) {
+  .new-sale-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-sale-summary {
+    position: static;
+  }
+}
+
 @media print {
   body * {
     visibility: hidden !important;
