@@ -2,6 +2,7 @@ export const dashboardNavItems = [
   { label: "Overview", slug: "", icon: "◫", href: "/dashboard" },
   { label: "Product Management", slug: "product-management", icon: "▣", href: "/dashboard/product-management" },
   { label: "Sales", slug: "sales", icon: "৳", href: "/dashboard/sales" },
+  { label: "Invoice", slug: "invoice", icon: "▧", href: "/dashboard/invoice" },
   { label: "Purchase", slug: "purchase", icon: "↙", href: "/dashboard/purchase" },
   { label: "Inventory", slug: "inventory", icon: "▤", href: "/dashboard/inventory" },
   { label: "Return System", slug: "returns", icon: "↶", href: "/dashboard/returns" },

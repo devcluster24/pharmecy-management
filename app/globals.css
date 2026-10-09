@@ -40,29 +40,65 @@ body {
   -webkit-appearance: none;
 }
 
+.discount-input:focus {
+  border-color: transparent !important;
+  outline: none;
+}
+
+.discount-input {
+  appearance: textfield;
+}
+
+.discount-input::-webkit-inner-spin-button,
+.discount-input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
 .new-sale-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 250px;
   align-items: start;
   gap: 24px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.new-sale-form {
+  height: calc(100vh - 145px);
+  min-height: 320px;
 }
 
 .new-sale-products {
   min-width: 0;
 }
 
+.new-sale-search {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 6px 0;
+  background: #fff;
+}
+
 .new-sale-summary {
   position: sticky;
   top: 0;
+  z-index: 2;
 }
 
 @media (max-width: 760px) {
+  .new-sale-form {
+    height: calc(100vh - 155px);
+  }
+
   .new-sale-content {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .new-sale-summary {
-    position: static;
+    top: 68px;
   }
 }
 

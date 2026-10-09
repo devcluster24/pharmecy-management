@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import {
   persistPlaceOrderListRows,
   persistPurchaseListRows,
+  calculateTotalQuantity,
   calculateUnitPurchasePrice,
   emptyPurchaseListSnapshot,
   getPlaceOrderListSnapshot,
@@ -202,9 +203,19 @@ function mergeReceivedRows(
       + (parseOrderPrice(incomingRow.quantity ?? "") ?? 0);
     const totalPrice = (parseOrderPrice(existingRow.totalPrice ?? "") ?? 0)
       + (parseOrderPrice(incomingRow.totalPrice ?? "") ?? 0);
+    let availableQuantity: number | undefined;
+    if (existingRow.availableQuantity !== undefined) {
+      const currentAvailable = Number(existingRow.availableQuantity);
+      const receivedQuantity = calculateTotalQuantity(incomingRow.packSize, incomingRow.quantity ?? "");
+      if (!Number.isFinite(currentAvailable) || currentAvailable < 0 || receivedQuantity === null) {
+        throw new Error(`Could not update available stock for ${existingRow.brand}, batch ${existingRow.batchNumber}.`);
+      }
+      availableQuantity = currentAvailable + receivedQuantity;
+    }
     rows[existingIndex] = {
       ...existingRow,
       quantity: formatOrderPrice(quantity),
+      ...(availableQuantity !== undefined ? { availableQuantity: String(availableQuantity) } : {}),
       totalPrice: formatOrderPrice(totalPrice),
       updatedAt,
       unitPurchasePrice: calculateUnitPurchasePrice(

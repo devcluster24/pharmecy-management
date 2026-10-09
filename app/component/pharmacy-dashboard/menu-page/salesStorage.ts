@@ -1,3 +1,9 @@
+import {
+  getPurchaseRowsAfterSale,
+  notifyPurchaseListRowsChanged,
+  PURCHASE_STORAGE_KEY,
+} from "./purchaseStorage";
+
 export const SALES_STORAGE_KEY = "pharmecy-sales-list-v1";
 
 export type SalesInvoiceItem = {
@@ -19,6 +25,9 @@ export type SalesListRow = {
   amount: number;
   subtotalAmount?: number;
   discountAmount?: number;
+  taxRate?: number;
+  taxAmount?: number;
+  cashRoundingAmount?: number;
   paidAmount?: number;
   dueAmount?: number;
   payment: string;
@@ -35,6 +44,13 @@ export const emptySalesListSnapshot: SalesListSnapshot = { rows: [], error: "" }
 const salesListUpdatedEvent = "pharmecy-sales-list-updated";
 let cachedSnapshot: SalesListSnapshot | null = null;
 
+export function getCashRoundingAmount(amount: number) {
+  if (!Number.isFinite(amount)) {
+    throw new Error("The amount to round must be a valid number.");
+  }
+  return Number((Math.round(amount) - amount).toFixed(2));
+}
+
 function isSalesListRow(value: unknown): value is SalesListRow {
   if (!value || typeof value !== "object") return false;
   const row = value as Record<string, unknown>;
@@ -48,6 +64,9 @@ function isSalesListRow(value: unknown): value is SalesListRow {
     && Number.isFinite(row.amount)
     && (!("subtotalAmount" in row) || (typeof row.subtotalAmount === "number" && Number.isFinite(row.subtotalAmount)))
     && (!("discountAmount" in row) || (typeof row.discountAmount === "number" && Number.isFinite(row.discountAmount)))
+    && (!("taxRate" in row) || (typeof row.taxRate === "number" && Number.isFinite(row.taxRate) && row.taxRate >= 0 && row.taxRate <= 100))
+    && (!("taxAmount" in row) || (typeof row.taxAmount === "number" && Number.isFinite(row.taxAmount) && row.taxAmount >= 0))
+    && (!("cashRoundingAmount" in row) || (typeof row.cashRoundingAmount === "number" && Number.isFinite(row.cashRoundingAmount) && Math.abs(row.cashRoundingAmount) <= 0.5))
     && (!("paidAmount" in row) || (typeof row.paidAmount === "number" && Number.isFinite(row.paidAmount)))
     && (!("dueAmount" in row) || (typeof row.dueAmount === "number" && Number.isFinite(row.dueAmount)))
     && typeof row.payment === "string"
@@ -113,13 +132,16 @@ export function subscribeToSalesList(listener: () => void) {
   };
 }
 
-export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, discountAmount = 0) {
+export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, discountAmount = 0, taxRate = 0) {
   if (
     lines.length === 0
     || !Number.isFinite(paidAmount)
     || paidAmount < 0
     || !Number.isFinite(discountAmount)
     || discountAmount < 0
+    || !Number.isFinite(taxRate)
+    || taxRate < 0
+    || taxRate > 100
     || lines.some((line) =>
       !Number.isInteger(line.quantity)
       || line.quantity < 1
@@ -141,7 +163,12 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
   if (roundedDiscount > roundedSubtotal) {
     throw new Error("Discount cannot be greater than the total price.");
   }
-  const payableAmount = Number((roundedSubtotal - roundedDiscount).toFixed(2));
+  const roundedTaxRate = Number(taxRate.toFixed(2));
+  const taxBaseAmount = Number((roundedSubtotal - roundedDiscount).toFixed(2));
+  const roundedTaxAmount = Number((taxBaseAmount * roundedTaxRate / 100).toFixed(2));
+  const netAmount = Number((taxBaseAmount + roundedTaxAmount).toFixed(2));
+  const cashRoundingAmount = getCashRoundingAmount(netAmount);
+  const payableAmount = Number((netAmount + cashRoundingAmount).toFixed(2));
   const roundedPaidAmount = Number(paidAmount.toFixed(2));
   const dueAmount = Number(Math.max(0, payableAmount - roundedPaidAmount).toFixed(2));
 
@@ -161,6 +188,9 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
     amount: payableAmount,
     subtotalAmount: roundedSubtotal,
     discountAmount: roundedDiscount,
+    taxRate: roundedTaxRate,
+    taxAmount: roundedTaxAmount,
+    cashRoundingAmount,
     paidAmount: roundedPaidAmount,
     dueAmount,
     payment: dueAmount > 0 ? "Due" : "Paid",
@@ -168,8 +198,28 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
     lines,
   };
   const rows = [row, ...existingRows];
+  const purchaseRows = getPurchaseRowsAfterSale(lines);
+  const previousPurchaseData = localStorage.getItem(PURCHASE_STORAGE_KEY);
+  const previousSalesData = localStorage.getItem(SALES_STORAGE_KEY);
 
-  localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(rows));
+  try {
+    localStorage.setItem(PURCHASE_STORAGE_KEY, JSON.stringify(purchaseRows));
+    localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(rows));
+  } catch (error) {
+    try {
+      if (previousPurchaseData === null) localStorage.removeItem(PURCHASE_STORAGE_KEY);
+      else localStorage.setItem(PURCHASE_STORAGE_KEY, previousPurchaseData);
+      if (previousSalesData === null) localStorage.removeItem(SALES_STORAGE_KEY);
+      else localStorage.setItem(SALES_STORAGE_KEY, previousSalesData);
+    } catch (rollbackError) {
+      throw new Error(
+        `Could not complete the sale and could not restore saved inventory: ${rollbackError instanceof Error ? rollbackError.message : "unknown storage error"}`,
+      );
+    }
+    throw error;
+  }
+
+  notifyPurchaseListRowsChanged(purchaseRows);
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(salesListUpdatedEvent));
   return row;

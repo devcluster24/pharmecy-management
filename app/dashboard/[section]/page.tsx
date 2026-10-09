@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { ComponentType } from "react";
 import CustomerManagementPage from "../../component/pharmacy-dashboard/menu-page/CustomerManagementPage";
+import InvoicePage from "../../component/pharmacy-dashboard/menu-page/InvoicePage";
 import InventoryPage from "../../component/pharmacy-dashboard/menu-page/InventoryPage";
 import ProductManagementPage from "../../component/pharmacy-dashboard/menu-page/ProductManagementPage";
 import PurchasePage from "../../component/pharmacy-dashboard/menu-page/PurchasePage";
@@ -15,6 +16,7 @@ import { dashboardNavItems } from "../../component/pharmacy-dashboard/navigation
 const sectionPages: Record<string, ComponentType> = {
   "product-management": ProductManagementPage,
   sales: SalesPage,
+  invoice: InvoicePage,
   purchase: PurchasePage,
   inventory: InventoryPage,
   returns: ReturnSystemPage,

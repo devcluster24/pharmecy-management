@@ -5,6 +5,8 @@ import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage"
 import {
   emptyPurchaseListSnapshot,
   getPurchaseListSnapshot,
+  getAvailablePurchaseQuantity,
+  calculatePackQuantity,
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
@@ -24,15 +26,26 @@ const receiveOrderColumns = [
   "Generic",
   "Strength",
   "Dosage Form",
-  "Quantity",
+  "Box Quantity",
   "Pack Size",
+  "Total Quantity",
   "Pack Price",
   "Exp Date",
   "Actions",
 ];
 const ORDERS_PER_PAGE = 10;
-type InventoryListType = "inventory" | "expire-soon" | "expaired" | "low-stock";
+type InventoryListType = "inventory" | "expire-soon" | "expaired" | "low-stock" | "out-of-stock";
 type ExpiryMonthFilter = 1 | 2 | 3;
+
+function getCurrentPackQuantity(row: PurchaseListRow) {
+  const totalQuantity = getAvailablePurchaseQuantity(row);
+  const currentQuantity = totalQuantity === null
+    ? null
+    : calculatePackQuantity(row.packSize, totalQuantity);
+  return currentQuantity?.toLocaleString("en-BD", { maximumFractionDigits: 4 })
+    ?? row.quantity
+    ?? "-";
+}
 
 function formatDateTime(row: PurchaseListRow) {
   const timestamp = Date.parse(row.updatedAt ?? "");
@@ -95,13 +108,13 @@ export default function InventoryPage() {
       : activeList === "low-stock"
         ? lowStockEnabled
           ? sortedRows.filter((row) => {
-            const rawQuantity = row.quantity?.trim();
-            if (!rawQuantity) return false;
-            const quantity = Number(rawQuantity);
-            return Number.isFinite(quantity) && quantity <= threshold;
+            const totalQuantity = getAvailablePurchaseQuantity(row);
+            return totalQuantity !== null && totalQuantity <= threshold;
           })
           : []
-        : sortedRows;
+        : activeList === "out-of-stock"
+          ? sortedRows.filter((row) => getAvailablePurchaseQuantity(row) === 0)
+          : sortedRows;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const rows = normalizedSearchQuery
     ? listRows.filter((row) => [
@@ -129,7 +142,9 @@ export default function InventoryPage() {
           ? lowStockEnabled
             ? `Items with quantity equal to or below ${threshold} units.`
             : "Low Stock Not Working: enter and save a threshold greater than 0 in Settings."
-          : "Review stock received from your suppliers.",
+          : activeList === "out-of-stock"
+            ? "Items with zero quantity."
+            : "Review stock received from your suppliers.",
     errorMessage: purchaseList.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
     action: "Adjust stock",
     metrics: [],
@@ -144,16 +159,17 @@ export default function InventoryPage() {
         row.genericName,
         row.strength,
         row.dosageForm,
-        row.quantity ?? "-",
+        getCurrentPackQuantity(row),
         row.packSize,
+        getAvailablePurchaseQuantity(row)?.toLocaleString("en-BD") ?? "-",
         row.packPrice,
         row.expDate,
       ];
       return [
         ...cells.map((value, index) => (
           <span key={`${row.id}-${index}`} style={{
-            ...(activeList === "expaired" || (activeList === "low-stock" && index === 8) ? { color: "#dc2626" } : {}),
-            ...(activeList === "low-stock" && index === 8 ? { fontWeight: 700 } : {}),
+            ...(activeList === "expaired" || ((activeList === "low-stock" || activeList === "out-of-stock") && index === 10) ? { color: "#dc2626" } : {}),
+            ...((activeList === "low-stock" || activeList === "out-of-stock") && index === 10 ? { fontWeight: 700 } : {}),
           }}>
             {value}
           </span>
@@ -201,6 +217,7 @@ export default function InventoryPage() {
     <DashboardSectionPage
       sectionSlug="inventory"
       data={pageData}
+      hideAction
       listTitle=""
       searchValue={searchQuery}
       onSearchChange={setSearchQuery}
@@ -231,6 +248,7 @@ export default function InventoryPage() {
             ["expire-soon", "Expire Soon"],
             ["expaired", "Expaired"],
             ["low-stock", "Low Stock"],
+            ["out-of-stock", "Out of Stock"],
           ] as const).map(([listType, label]) => (
             <button
               key={listType}
@@ -273,8 +291,9 @@ export default function InventoryPage() {
               ["Generic", selectedRow.genericName],
               ["Strength", selectedRow.strength],
               ["Dosage Form", selectedRow.dosageForm],
-              ["Quantity", selectedRow.quantity ?? "-"],
+              ["Box Quantity", getCurrentPackQuantity(selectedRow)],
               ["Pack Size", selectedRow.packSize],
+              ["Total Quantity", getAvailablePurchaseQuantity(selectedRow)?.toLocaleString("en-BD") ?? "-"],
               ["Pack Price", selectedRow.packPrice],
               ["Exp Date", selectedRow.expDate],
             ].map(([label, value]) => (

@@ -87,11 +87,15 @@ export function downloadSaleInvoicePdf(sale: SalesListRow) {
 
   const subtotal = sale.subtotalAmount ?? sale.amount;
   const discount = sale.discountAmount ?? 0;
+  const taxAmount = sale.taxAmount ?? 0;
+  const cashRoundingAmount = sale.cashRoundingAmount ?? 0;
   const paidAmount = sale.paidAmount ?? sale.amount;
   const changeCash = Math.max(0, paidAmount - sale.amount);
   const summaryRows = [
-    { label: "Subtotal", amount: subtotal, color: [82, 97, 88] },
+    ...(discount > 0 || taxAmount > 0 ? [{ label: "Subtotal", amount: subtotal, color: [82, 97, 88] }] : []),
     ...(discount > 0 ? [{ label: "Discount", amount: -discount, color: [82, 97, 88] }] : []),
+    ...(taxAmount > 0 ? [{ label: `VAT/TAX (${sale.taxRate ?? 0}%)`, amount: taxAmount, color: [82, 97, 88] }] : []),
+    ...(cashRoundingAmount !== 0 ? [{ label: "Cash rounding", amount: cashRoundingAmount, color: [82, 97, 88] }] : []),
     { label: "Grand total", amount: sale.amount, color: [23, 112, 78] },
     { label: "Pay amount", amount: paidAmount, color: [82, 97, 88] },
     { label: "Due", amount: sale.dueAmount ?? 0, color: (sale.dueAmount ?? 0) > 0 ? [173, 75, 67] : [23, 112, 78] },

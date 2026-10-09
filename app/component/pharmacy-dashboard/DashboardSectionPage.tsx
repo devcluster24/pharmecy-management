@@ -48,7 +48,11 @@ export default function DashboardSectionPage({
   return (
     <div style={{ minHeight: "100vh", background: "#f8f8f7", color: "#202624", fontFamily: "Inter, Arial, sans-serif" }}>
       <header
+        className="dashboard-navbar"
         style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 30,
           minHeight: 62,
           display: "flex",
           alignItems: "center",
@@ -71,19 +75,30 @@ export default function DashboardSectionPage({
 
       <div style={{ display: "flex", minHeight: "calc(100vh - 62px)" }}>
         <Sidebar />
-        <main style={{ flex: 1, minWidth: 0, padding: "32px clamp(18px, 4vw, 48px) 48px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
-            <div>
-              <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {navItem.label}</div>
-              <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{navItem.label}</h1>
-              <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>{data.description}</p>
+        <main
+          className={sectionSlug === "sales" ? "dashboard-main-sales" : undefined}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: sectionSlug === "sales" ? "12px clamp(18px, 4vw, 48px) 12px" : "32px clamp(18px, 4vw, 48px) 48px",
+          }}
+        >
+          {sectionSlug !== "sales" && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
+              <div>
+                <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {navItem.label}</div>
+                <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{navItem.label}</h1>
+                {data.description && (
+                  <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>{data.description}</p>
+                )}
+              </div>
+              {!hideAction && (actionContent ?? (
+                <button type="button" style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
+                  {data.action}
+                </button>
+              ))}
             </div>
-            {!hideAction && (actionContent ?? (
-              <button type="button" style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
-                {data.action}
-              </button>
-            ))}
-          </div>
+          )}
 
           {data.errorMessage && (
             <p role="alert" style={{ margin: "0 0 18px", color: "#b34b43", fontSize: 13 }}>

@@ -8,6 +8,10 @@ import {
   LOW_STOCK_THRESHOLD_STORAGE_KEY,
   saveLowStockThreshold as persistLowStockThreshold,
 } from "./lowStockStorage";
+import {
+  getVatTaxSettingsSnapshot,
+  saveVatTaxDefaultRate,
+} from "./vatTaxStorage";
 
 const settingsMenus = [
   { id: "pharmacy-store", label: "Pharmacy Store" },
@@ -17,7 +21,7 @@ const settingsMenus = [
   { id: "profile", label: "Profile" },
 ] as const;
 
-const pharmacyStoreSubmenus = ["Product Management", "Inventory"] as const;
+const pharmacyStoreSubmenus = ["Product Management", "Inventory", "VAT/TAX"] as const;
 
 type SettingsProfile = {
   photoUrl: string;
@@ -62,6 +66,9 @@ export default function SettingPage() {
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [lowStockMessage, setLowStockMessage] = useState("");
   const [lowStockError, setLowStockError] = useState("");
+  const [vatTaxRate, setVatTaxRate] = useState("0");
+  const [vatTaxMessage, setVatTaxMessage] = useState("");
+  const [vatTaxError, setVatTaxError] = useState("");
   const [profileState, setProfileState] = useState<ProfileState>({
     status: "loading",
     profile: null,
@@ -128,6 +135,14 @@ export default function SettingPage() {
     setActiveStoreSubmenu(submenu);
     setLowStockMessage("");
     setLowStockError("");
+    setVatTaxMessage("");
+    setVatTaxError("");
+    if (submenu === "VAT/TAX") {
+      const settings = getVatTaxSettingsSnapshot();
+      setVatTaxRate(String(settings.defaultRate));
+      setVatTaxError(settings.error);
+      return;
+    }
     if (submenu !== "Inventory") return;
 
     try {
@@ -154,6 +169,25 @@ export default function SettingPage() {
     } catch (error) {
       setLowStockError(error instanceof Error ? error.message : "Could not save the low stock setting.");
       setLowStockMessage("");
+    }
+  }
+
+  function saveVatTaxSettings() {
+    const rate = Number(vatTaxRate);
+    if (vatTaxRate.trim() === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+      setVatTaxError("Enter a VAT/TAX rate between 0 and 100%.");
+      setVatTaxMessage("");
+      return;
+    }
+
+    try {
+      saveVatTaxDefaultRate(rate);
+      setVatTaxRate(String(Number(rate.toFixed(2))));
+      setVatTaxError("");
+      setVatTaxMessage("Default VAT/TAX rate saved.");
+    } catch (error) {
+      setVatTaxError(error instanceof Error ? error.message : "Could not save VAT/TAX settings.");
+      setVatTaxMessage("");
     }
   }
 
@@ -230,6 +264,51 @@ export default function SettingPage() {
               </nav>
               <section aria-live="polite" style={{ flex: "1 1 0", minWidth: 0, minHeight: 80, color: "#26352f", fontSize: 15, fontWeight: 600 }}>
                 {activeStoreSubmenu === "Product Management" && <p style={{ margin: 0 }}>Hello Product Management</p>}
+                {activeStoreSubmenu === "VAT/TAX" && (
+                  <section aria-labelledby="vat-tax-settings-title" style={{ width: "100%", maxWidth: 760, color: "#26352f" }}>
+                    <h2 id="vat-tax-settings-title" style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700 }}>VAT/TAX setup</h2>
+                    <p style={{ margin: "0 0 16px", color: "#687871", fontSize: 12, fontWeight: 400, lineHeight: 1.6 }}>
+                      The default is 0% until you set it. Applicable VAT and supplementary-duty rates depend on product classification and current NBR rules; confirm the correct rate for your products before applying it. You can change the rate on each sale.
+                    </p>
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 24, alignItems: "center" }}>
+                      <div>
+                        <label htmlFor="vat-tax-default-rate" style={{ display: "grid", gap: 7, color: "#34453b", fontSize: 12, fontWeight: 600 }}>
+                          Default VAT/TAX rate (%)
+                          <input
+                            id="vat-tax-default-rate"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={vatTaxRate}
+                            onChange={(event) => {
+                              setVatTaxRate(event.currentTarget.value);
+                              setVatTaxMessage("");
+                              setVatTaxError("");
+                            }}
+                            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#26352f", padding: "9px 10px", fontSize: 13 }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={saveVatTaxSettings}
+                          style={{ marginTop: 12, border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <aside style={{ borderLeft: "2px solid #dce5df", paddingLeft: 16 }}>
+                        <h3 style={{ margin: 0, color: "#16845f", fontSize: 13, fontWeight: 700 }}>Per-sale adjustment</h3>
+                        <p style={{ margin: "8px 0 0", color: "#687871", fontSize: 12, fontWeight: 400, lineHeight: 1.6 }}>
+                          The saved rate is stored in this browser and prefilled for new sales on this device. A cashier can adjust it for an individual sale without changing this default.
+                        </p>
+                      </aside>
+                    </div>
+                    {vatTaxMessage && <p role="status" style={{ margin: "10px 0 0", color: "#16845f", fontSize: 12, fontWeight: 400 }}>{vatTaxMessage}</p>}
+                    {vatTaxError && <p role="alert" style={{ margin: "10px 0 0", color: "#b34b43", fontSize: 12, fontWeight: 400 }}>{vatTaxError}</p>}
+                  </section>
+                )}
                 {activeStoreSubmenu === "Inventory" && (
                   <section aria-labelledby="low-stock-title" style={{ width: "100%", color: "#26352f" }}>
                     <h2 id="low-stock-title" style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700 }}>Low Stock Management</h2>
