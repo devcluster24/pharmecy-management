@@ -183,10 +183,6 @@ function formatOrderPrice(value: number) {
   return String(Number(value.toFixed(4)));
 }
 
-function getDefaultSupplierName(company: string) {
-  return company.trim() ? `${company.trim()} Distributor` : "";
-}
-
 function getReceivedBatchKey(row: PurchaseListRow) {
   return JSON.stringify([
     row.supplier.trim().toLocaleLowerCase(),
@@ -321,7 +317,7 @@ export default function PurchaseCreateAction() {
   function getSavedSupplierContacts() {
     const seenContacts = new Set<string>();
     return purchaseListSnapshot.rows
-      .filter((row) => row.supplierContactName?.trim() && row.supplierPhone?.trim())
+      .filter((row) => row.supplierContactName?.trim())
       .sort((left, right) => Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? ""))
       .map((row) => ({
         name: row.supplierContactName?.trim() ?? "",
@@ -329,27 +325,12 @@ export default function PurchaseCreateAction() {
       }))
       .filter((contact) => {
         const key = `${contact.name.toLocaleLowerCase()}\u0000${contact.phone.replace(/\D/g, "")}`;
-        if (!contact.name || !contact.phone || seenContacts.has(key)) return false;
+        if (!contact.name || seenContacts.has(key)) return false;
         seenContacts.add(key);
         return true;
       });
   }
 
-  function getSavedSupplierContact(company: string) {
-    const normalizedCompany = company.trim().toLocaleLowerCase();
-    const companyContact = purchaseListSnapshot.rows.find((row) =>
-      row.supplier.trim().toLocaleLowerCase() === normalizedCompany
-      && row.supplierContactName?.trim()
-      && row.supplierPhone?.trim(),
-    );
-    if (companyContact) {
-      return {
-        name: companyContact.supplierContactName?.trim() ?? "",
-        phone: companyContact.supplierPhone?.trim() ?? "",
-      };
-    }
-    return getSavedSupplierContacts()[0];
-  }
   const selectedProductDetails = companySelections.flatMap((companySelection) => {
     const companyProducts = products.filter((product) => product.manufacturer.trim() === companySelection.company);
     return companySelection.brands
@@ -538,7 +519,7 @@ export default function PurchaseCreateAction() {
           id: `${order}-${companySelection.id}-${selection.id}-${index}`,
           order,
           supplier: companySelection.company,
-          supplierContactName: companySelection.supplierContactName.trim() || getDefaultSupplierName(companySelection.company),
+          supplierContactName: companySelection.supplierContactName.trim(),
           supplierPhone: companySelection.supplierPhone.trim(),
           orderDate,
           brand: product?.brand.trim() || product?.medicine_name.trim() || selection.customBrand,
@@ -566,8 +547,7 @@ export default function PurchaseCreateAction() {
         ...row,
         order,
         orderDate,
-        supplierContactName: companySelections.find((selection) => selection.company === row.supplier)?.supplierContactName.trim()
-          || getDefaultSupplierName(row.supplier),
+        supplierContactName: companySelections.find((selection) => selection.company === row.supplier)?.supplierContactName.trim() ?? "",
         supplierPhone: companySelections.find((selection) => selection.company === row.supplier)?.supplierPhone.trim() ?? "",
         orderPaidAmount: formatOrderPrice(receivePaidAmount),
         orderDueAmount: formatOrderPrice(receiveDueAmount),
@@ -1043,7 +1023,6 @@ export default function PurchaseCreateAction() {
   }
 
   function setCompanyAndResetBrands(companyId: number, company: string) {
-    const savedContact = getSavedSupplierContact(company);
     const currentSelection = companySelections.find((selection) => selection.id === companyId);
     const hasInvoiceBatches = currentSelection?.brands.some((brandSelection) => brandSelection.batches.length > 0) ?? false;
     if (currentSelection && currentSelection.company !== company && hasInvoiceBatches) {
@@ -1054,8 +1033,6 @@ export default function PurchaseCreateAction() {
         {
           ...createCompanySelection(newSelectionId, newBrand.id),
           company,
-          supplierContactName: savedContact?.name || getDefaultSupplierName(company),
-          supplierPhone: savedContact?.phone ?? "",
         },
       ]);
       setActiveCompanySelectionId(newSelectionId);
@@ -1072,8 +1049,8 @@ export default function PurchaseCreateAction() {
         ? {
             ...selection,
             company,
-            supplierContactName: savedContact?.name || getDefaultSupplierName(company),
-            supplierPhone: savedContact?.phone ?? "",
+            supplierContactName: "",
+            supplierPhone: "",
             companyDraft: "",
             isAddingCompany: false,
             brands: [brand],
@@ -1288,12 +1265,7 @@ export default function PurchaseCreateAction() {
                             aria-label={`Supplier Name for ${companySelection.company || "company"}`}
                             autoComplete="off"
                             value={companySelection.supplierContactName}
-                            onFocus={() => {
-                              setFocusedSupplierInput({ selectionId: companySelection.id, field: "name" });
-                              if (companySelection.supplierContactName === getDefaultSupplierName(companySelection.company)) {
-                                updateCompanySelection(companySelection.id, { supplierContactName: "" });
-                              }
-                            }}
+                            onFocus={() => setFocusedSupplierInput({ selectionId: companySelection.id, field: "name" })}
                             onChange={(event) => {
                               setFocusedSupplierInput({ selectionId: companySelection.id, field: "name" });
                               updateCompanySelection(companySelection.id, { supplierContactName: event.currentTarget.value });
@@ -1302,14 +1274,6 @@ export default function PurchaseCreateAction() {
                               setFocusedSupplierInput((current) =>
                                 current?.selectionId === companySelection.id && current.field === "name" ? null : current,
                               );
-                              setCompanySelections((current) => current.map((selection) =>
-                                selection.id === companySelection.id && !selection.supplierContactName.trim()
-                                  ? {
-                                      ...selection,
-                                      supplierContactName: getSavedSupplierContact(selection.company)?.name || getDefaultSupplierName(selection.company),
-                                    }
-                                  : selection,
-                              ));
                             }}
                             placeholder={`${companySelection.company || "Company"} Distributor`}
                             style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
