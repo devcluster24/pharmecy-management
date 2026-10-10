@@ -3,6 +3,7 @@ import {
   notifyPurchaseListRowsChanged,
   PURCHASE_STORAGE_KEY,
 } from "./purchaseStorage";
+import { getPharmacyDataJson, setPharmacyDataBatch } from "@/lib/pharmacy-data-sync";
 
 export const SALES_STORAGE_KEY = "pharmecy-sales-list-v1";
 
@@ -119,7 +120,7 @@ function isSalesListRow(value: unknown): value is SalesListRow {
 }
 
 export function readSalesListRows(): SalesListRow[] {
-  const storedRows = localStorage.getItem(SALES_STORAGE_KEY);
+  const storedRows = getPharmacyDataJson(SALES_STORAGE_KEY);
   if (!storedRows) return [];
 
   const parsed: unknown = JSON.parse(storedRows);
@@ -245,29 +246,13 @@ export function persistSale(
   };
   const rows = [row, ...existingRows];
   const purchaseRows = getPurchaseRowsAfterSale(lines);
-  const previousPurchaseData = localStorage.getItem(PURCHASE_STORAGE_KEY);
-  const previousSalesData = localStorage.getItem(SALES_STORAGE_KEY);
-
-  try {
-    localStorage.setItem(PURCHASE_STORAGE_KEY, JSON.stringify(purchaseRows));
-    localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(rows));
-  } catch (error) {
-    try {
-      if (previousPurchaseData === null) localStorage.removeItem(PURCHASE_STORAGE_KEY);
-      else localStorage.setItem(PURCHASE_STORAGE_KEY, previousPurchaseData);
-      if (previousSalesData === null) localStorage.removeItem(SALES_STORAGE_KEY);
-      else localStorage.setItem(SALES_STORAGE_KEY, previousSalesData);
-    } catch (rollbackError) {
-      throw new Error(
-        `Could not complete the sale and could not restore saved inventory: ${rollbackError instanceof Error ? rollbackError.message : "unknown storage error"}`,
-      );
-    }
-    throw error;
-  }
-
   notifyPurchaseListRowsChanged(purchaseRows);
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(salesListUpdatedEvent));
+  setPharmacyDataBatch({
+    [PURCHASE_STORAGE_KEY]: purchaseRows,
+    [SALES_STORAGE_KEY]: rows,
+  });
   return row;
 }
 
@@ -341,8 +326,8 @@ export function addSalePaymentAcrossInvoices(
     updatedRows[invoiceIndex] = updatedInvoices[allocationIndex];
   });
 
-  localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(updatedRows));
   cachedSnapshot = { rows: updatedRows, error: "" };
   window.dispatchEvent(new Event(salesListUpdatedEvent));
+  setPharmacyDataBatch({ [SALES_STORAGE_KEY]: updatedRows });
   return updatedInvoices;
 }

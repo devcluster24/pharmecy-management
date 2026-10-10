@@ -13,6 +13,7 @@ import {
   getPaymentMethodsSnapshot,
   subscribeToPaymentMethods,
 } from "./paymentMethodsStorage";
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
 const supplierStatusStorageKey = "pharmecy-supplier-status-v1";
 const supplierDueAdjustmentStorageKey = "pharmecy-supplier-due-adjustments-v1";
@@ -125,7 +126,7 @@ function getSupplierDueAdjustmentMap(value: unknown): Record<string, SupplierDue
 
 function readSupplierStatusSnapshot(): SupplierStatusSnapshot {
   try {
-    const storedStatuses = localStorage.getItem(supplierStatusStorageKey);
+    const storedStatuses = getPharmacyDataJson(supplierStatusStorageKey);
     return {
       statuses: storedStatuses ? getSupplierStatusMap(JSON.parse(storedStatuses)) : {},
       error: "",
@@ -137,7 +138,7 @@ function readSupplierStatusSnapshot(): SupplierStatusSnapshot {
 
 function readSupplierDueAdjustmentSnapshot(): SupplierDueAdjustmentSnapshot {
   try {
-    const storedAdjustments = localStorage.getItem(supplierDueAdjustmentStorageKey);
+    const storedAdjustments = getPharmacyDataJson(supplierDueAdjustmentStorageKey);
     return {
       adjustments: storedAdjustments
         ? getSupplierDueAdjustmentMap(JSON.parse(storedAdjustments))
@@ -151,7 +152,7 @@ function readSupplierDueAdjustmentSnapshot(): SupplierDueAdjustmentSnapshot {
 
 function readSupplierDuePaymentSnapshot(): SupplierDuePaymentSnapshot {
   try {
-    const storedPayments = localStorage.getItem(supplierDuePaymentStorageKey);
+    const storedPayments = getPharmacyDataJson(supplierDuePaymentStorageKey);
     return {
       payments: storedPayments
         ? getSupplierDueAdjustmentMap(JSON.parse(storedPayments))
@@ -184,53 +185,48 @@ function getSupplierDuePaymentSnapshot() {
 
 function subscribeToSupplierStatuses(listener: () => void) {
   supplierStatusListeners.add(listener);
-  function handleStorage(event: StorageEvent) {
-    if (event.key !== supplierStatusStorageKey && event.key !== null) return;
+  function handleUpdate() {
     cachedSupplierStatusSnapshot = readSupplierStatusSnapshot();
     supplierStatusListeners.forEach((notify) => notify());
   }
-  window.addEventListener("storage", handleStorage);
+  window.addEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   return () => {
     supplierStatusListeners.delete(listener);
-    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   };
 }
 
 function subscribeToSupplierDueAdjustments(listener: () => void) {
   supplierDueAdjustmentListeners.add(listener);
-  function handleStorage(event: StorageEvent) {
-    if (event.key !== supplierDueAdjustmentStorageKey && event.key !== null) return;
+  function handleUpdate() {
     cachedSupplierDueAdjustmentSnapshot = readSupplierDueAdjustmentSnapshot();
     supplierDueAdjustmentListeners.forEach((notify) => notify());
   }
-  window.addEventListener("storage", handleStorage);
+  window.addEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   return () => {
     supplierDueAdjustmentListeners.delete(listener);
-    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   };
 }
 
 function subscribeToSupplierDuePayments(listener: () => void) {
   supplierDuePaymentListeners.add(listener);
-  function handleStorage(event: StorageEvent) {
-    if (event.key !== supplierDuePaymentStorageKey && event.key !== null) return;
+  function handleUpdate() {
     cachedSupplierDuePaymentSnapshot = readSupplierDuePaymentSnapshot();
     supplierDuePaymentListeners.forEach((notify) => notify());
   }
-  window.addEventListener("storage", handleStorage);
+  window.addEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   return () => {
     supplierDuePaymentListeners.delete(listener);
-    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(supplierDueLedgerUpdatedEvent, handleUpdate);
   };
 }
 
 function saveSupplierStatus(key: string, status: SupplierStatus) {
   const currentSnapshot = getSupplierStatusSnapshot();
   const statuses = { ...currentSnapshot.statuses, [key]: status };
-  localStorage.setItem(supplierStatusStorageKey, JSON.stringify(statuses));
   cachedSupplierStatusSnapshot = { statuses, error: "" };
-  supplierStatusListeners.forEach((notify) => notify());
-  window.dispatchEvent(new Event(supplierDueLedgerUpdatedEvent));
+  setPharmacyDataJson(supplierStatusStorageKey, JSON.stringify(statuses));
 }
 
 function saveSupplierDuePayment(key: string, amount: number, paymentMethod: string) {
@@ -242,10 +238,8 @@ function saveSupplierDuePayment(key: string, amount: number, paymentMethod: stri
       { amount, createdAt: new Date().toISOString(), paymentMethod },
     ],
   };
-  localStorage.setItem(supplierDuePaymentStorageKey, JSON.stringify(payments));
   cachedSupplierDuePaymentSnapshot = { payments, error: "" };
-  supplierDuePaymentListeners.forEach((notify) => notify());
-  window.dispatchEvent(new Event(supplierDueLedgerUpdatedEvent));
+  setPharmacyDataJson(supplierDuePaymentStorageKey, JSON.stringify(payments));
 }
 
 export default function SupplierManagementPage() {

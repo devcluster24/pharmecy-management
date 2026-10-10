@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase/client";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import {
-  LOW_STOCK_THRESHOLD_STORAGE_KEY,
+  getLowStockThresholdSnapshot,
   saveLowStockThreshold as persistLowStockThreshold,
 } from "./lowStockStorage";
 import {
@@ -269,8 +269,9 @@ export default function SettingPage() {
     if (submenu !== "Inventory") return;
 
     try {
-      const savedThreshold = window.localStorage.getItem(LOW_STOCK_THRESHOLD_STORAGE_KEY);
-      setLowStockThreshold(savedThreshold ?? "");
+      const snapshot = getLowStockThresholdSnapshot();
+      setLowStockThreshold(snapshot.threshold);
+      setLowStockError(snapshot.error);
     } catch (error) {
       setLowStockError(error instanceof Error ? error.message : "Could not load the low stock setting.");
     }

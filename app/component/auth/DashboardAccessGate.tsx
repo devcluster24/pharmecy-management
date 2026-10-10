@@ -95,7 +95,7 @@ export default function DashboardAccessGate({
           } catch (error) {
             if (active) {
               const reason = error instanceof Error ? error.message : "Unknown Supabase error.";
-              setMessage(`Could not load or import this pharmacy's data: ${reason} Apply migration supabase/migrations/20261011000000_pharmacy_app_data.sql in the Supabase project, then retry.`);
+              setMessage(`Could not load this pharmacy's Supabase data: ${reason} Apply migration supabase/migrations/20261011000000_pharmacy_app_data.sql in the Supabase project, then retry.`);
               setAccessState("failed");
             }
             return;
@@ -112,8 +112,17 @@ export default function DashboardAccessGate({
     }
 
     void checkAccess();
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        if (active) {
+          setAccessState("checking");
+          setCheckAttempt((attempt) => attempt + 1);
+        }
+      }
+    });
     return () => {
       active = false;
+      authListener.subscription.unsubscribe();
     };
   }, [checkAttempt, requiredRole, router]);
 

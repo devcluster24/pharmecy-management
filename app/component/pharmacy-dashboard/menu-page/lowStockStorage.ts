@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const LOW_STOCK_THRESHOLD_STORAGE_KEY = "pharmecy-low-stock-threshold-v1";
 
 export type LowStockThresholdSnapshot = {
@@ -18,7 +20,7 @@ export function getLowStockThresholdSnapshot() {
 
   try {
     cachedSnapshot = {
-      threshold: window.localStorage.getItem(LOW_STOCK_THRESHOLD_STORAGE_KEY) ?? "",
+      threshold: getPharmacyDataJson(LOW_STOCK_THRESHOLD_STORAGE_KEY) ?? "",
       error: "",
     };
   } catch (error) {
@@ -52,7 +54,7 @@ export function subscribeToLowStockThreshold(listener: () => void) {
 }
 
 export function saveLowStockThreshold(value: string) {
-  window.localStorage.setItem(LOW_STOCK_THRESHOLD_STORAGE_KEY, value);
+  setPharmacyDataJson(LOW_STOCK_THRESHOLD_STORAGE_KEY, value);
   cachedSnapshot = { threshold: value, error: "" };
   window.dispatchEvent(new Event(lowStockThresholdUpdatedEvent));
 }

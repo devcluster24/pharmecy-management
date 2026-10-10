@@ -3,6 +3,7 @@ import {
   PURCHASE_STORAGE_KEY,
   type PurchaseListRow,
 } from "./purchaseStorage";
+import { getPharmacyDataJson, setPharmacyDataBatch, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
 export const RETURNS_STORAGE_KEY = "pharmecy-return-records-v1";
 
@@ -59,7 +60,7 @@ function isReturnRecord(value: unknown): value is ReturnRecord {
 
 function readSnapshot(): ReturnsSnapshot {
   try {
-    const stored = window.localStorage.getItem(RETURNS_STORAGE_KEY);
+    const stored = getPharmacyDataJson(RETURNS_STORAGE_KEY);
     if (!stored) return emptyReturnsSnapshot;
     const parsed: unknown = JSON.parse(stored);
     if (!Array.isArray(parsed) || !parsed.every(isReturnRecord)) {
@@ -103,7 +104,7 @@ export function saveReturnRecords(rows: ReturnRecord[]) {
   if (!rows.every(isReturnRecord)) {
     throw new Error("Return record data is invalid.");
   }
-  window.localStorage.setItem(RETURNS_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(RETURNS_STORAGE_KEY, JSON.stringify(rows));
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(returnsUpdatedEvent));
 }
@@ -113,26 +114,11 @@ export function saveReturnRecordsAndInventory(rows: ReturnRecord[], purchaseRows
     throw new Error("Return record data is invalid.");
   }
 
-  const previousReturnData = window.localStorage.getItem(RETURNS_STORAGE_KEY);
-  const previousPurchaseData = window.localStorage.getItem(PURCHASE_STORAGE_KEY);
-  try {
-    window.localStorage.setItem(PURCHASE_STORAGE_KEY, JSON.stringify(purchaseRows));
-    window.localStorage.setItem(RETURNS_STORAGE_KEY, JSON.stringify(rows));
-  } catch (error) {
-    try {
-      if (previousPurchaseData === null) window.localStorage.removeItem(PURCHASE_STORAGE_KEY);
-      else window.localStorage.setItem(PURCHASE_STORAGE_KEY, previousPurchaseData);
-      if (previousReturnData === null) window.localStorage.removeItem(RETURNS_STORAGE_KEY);
-      else window.localStorage.setItem(RETURNS_STORAGE_KEY, previousReturnData);
-    } catch (rollbackError) {
-      throw new Error(
-        `Could not save the return and could not restore saved data: ${rollbackError instanceof Error ? rollbackError.message : "unknown storage error"}`,
-      );
-    }
-    throw error;
-  }
-
   notifyPurchaseListRowsChanged(purchaseRows);
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(returnsUpdatedEvent));
+  setPharmacyDataBatch({
+    [PURCHASE_STORAGE_KEY]: purchaseRows,
+    [RETURNS_STORAGE_KEY]: rows,
+  });
 }

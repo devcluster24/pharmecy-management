@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const PURCHASE_STORAGE_KEY = "pharmecy-purchase-list-v1";
 export const PLACE_ORDER_STORAGE_KEY = "pharmecy-place-order-list-v1";
 
@@ -287,7 +289,8 @@ export function getPurchaseRowsAfterSale(lines: SaleStockLine[]) {
 }
 
 function readRows(storageKey: string): PurchaseListRow[] {
-  const storedRows = localStorage.getItem(storageKey);
+  const dataKey = storageKey === PURCHASE_STORAGE_KEY ? PURCHASE_STORAGE_KEY : PLACE_ORDER_STORAGE_KEY;
+  const storedRows = getPharmacyDataJson(dataKey);
   if (!storedRows) return [];
 
   const parsed: unknown = JSON.parse(storedRows);
@@ -346,7 +349,7 @@ export const subscribeToPurchaseList = subscribeToPurchaseLists;
 export const subscribeToPlaceOrderList = subscribeToPurchaseLists;
 
 export function persistPurchaseListRows(rows: PurchaseListRow[]) {
-  localStorage.setItem(PURCHASE_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(PURCHASE_STORAGE_KEY, JSON.stringify(rows));
   notifyPurchaseListRowsChanged(rows);
 }
 
@@ -356,7 +359,7 @@ export function notifyPurchaseListRowsChanged(rows: PurchaseListRow[]) {
 }
 
 export function persistPlaceOrderListRows(rows: PurchaseListRow[]) {
-  localStorage.setItem(PLACE_ORDER_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(PLACE_ORDER_STORAGE_KEY, JSON.stringify(rows));
   cachedPlaceOrderSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(purchaseListUpdatedEvent));
 }

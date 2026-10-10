@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const VAT_TAX_SETTINGS_STORAGE_KEY = "pharmecy-vat-tax-settings-v1";
 
 export type VatTaxSettingsSnapshot = {
@@ -15,7 +17,7 @@ let cachedSnapshot: VatTaxSettingsSnapshot | null = null;
 
 function readSnapshot(): VatTaxSettingsSnapshot {
   try {
-    const storedSettings = window.localStorage.getItem(VAT_TAX_SETTINGS_STORAGE_KEY);
+    const storedSettings = getPharmacyDataJson(VAT_TAX_SETTINGS_STORAGE_KEY);
     if (!storedSettings) return emptyVatTaxSettingsSnapshot;
 
     const parsed: unknown = JSON.parse(storedSettings);
@@ -71,7 +73,7 @@ export function saveVatTaxDefaultRate(defaultRate: number) {
   }
 
   const settings = { defaultRate: Number(defaultRate.toFixed(2)) };
-  window.localStorage.setItem(VAT_TAX_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  setPharmacyDataJson(VAT_TAX_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   cachedSnapshot = { ...settings, error: "" };
   window.dispatchEvent(new Event(vatTaxSettingsUpdatedEvent));
 }

@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const PAYMENT_METHODS_STORAGE_KEY = "pharmecy-payment-methods-v1";
 
 export type PaymentMethod =
@@ -32,7 +34,7 @@ function isPaymentMethod(value: unknown): value is PaymentMethod {
 
 function readSnapshot(): PaymentMethodsSnapshot {
   try {
-    const storedMethods = window.localStorage.getItem(PAYMENT_METHODS_STORAGE_KEY);
+    const storedMethods = getPharmacyDataJson(PAYMENT_METHODS_STORAGE_KEY);
     if (!storedMethods) return emptyPaymentMethodsSnapshot;
     const parsed: unknown = JSON.parse(storedMethods);
     if (!Array.isArray(parsed) || !parsed.every(isPaymentMethod)) {
@@ -76,7 +78,7 @@ export function savePaymentMethods(rows: PaymentMethod[]) {
   if (!rows.every(isPaymentMethod)) {
     throw new Error("Payment method data is invalid.");
   }
-  window.localStorage.setItem(PAYMENT_METHODS_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(PAYMENT_METHODS_STORAGE_KEY, JSON.stringify(rows));
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(paymentMethodsUpdatedEvent));
 }

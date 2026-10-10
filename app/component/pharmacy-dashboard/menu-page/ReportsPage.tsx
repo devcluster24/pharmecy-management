@@ -32,6 +32,7 @@ import {
   subscribeToExpenses,
 } from "./expensesStorage";
 import { isInventoryItemExpired } from "./inventoryExpiry";
+import { getPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
 type ReportPeriod = "today" | "this-week" | "this-month" | "last-month" | "custom";
 type DateRange = { start: Date; end: Date };
@@ -132,8 +133,8 @@ function parseDueEntries(value: unknown): Record<string, DueEntry[]> {
 
 function readSupplierDueLedgerSnapshot(): SupplierDueLedgerSnapshot {
   try {
-    const adjustments = localStorage.getItem(supplierDueAdjustmentStorageKey);
-    const payments = localStorage.getItem(supplierDuePaymentStorageKey);
+    const adjustments = getPharmacyDataJson(supplierDueAdjustmentStorageKey);
+    const payments = getPharmacyDataJson(supplierDuePaymentStorageKey);
     return {
       adjustments: adjustments ? parseDueEntries(JSON.parse(adjustments)) : {},
       payments: payments ? parseDueEntries(JSON.parse(payments)) : {},

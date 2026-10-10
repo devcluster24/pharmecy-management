@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const RETURN_DEDUCTION_SETTINGS_STORAGE_KEY = "pharmecy-return-deduction-settings-v1";
 
 export type ReturnDeductionSettingsSnapshot = {
@@ -15,7 +17,7 @@ let cachedSnapshot: ReturnDeductionSettingsSnapshot | null = null;
 
 function readSnapshot(): ReturnDeductionSettingsSnapshot {
   try {
-    const storedSettings = window.localStorage.getItem(RETURN_DEDUCTION_SETTINGS_STORAGE_KEY);
+    const storedSettings = getPharmacyDataJson(RETURN_DEDUCTION_SETTINGS_STORAGE_KEY);
     if (!storedSettings) return emptyReturnDeductionSettingsSnapshot;
 
     const parsed: unknown = JSON.parse(storedSettings);
@@ -71,7 +73,7 @@ export function saveReturnDeductionDefaultRate(defaultRate: number) {
   }
 
   const settings = { defaultRate: Number(defaultRate.toFixed(2)) };
-  window.localStorage.setItem(RETURN_DEDUCTION_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  setPharmacyDataJson(RETURN_DEDUCTION_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   cachedSnapshot = { ...settings, error: "" };
   window.dispatchEvent(new Event(returnDeductionSettingsUpdatedEvent));
 }

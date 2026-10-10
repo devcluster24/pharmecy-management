@@ -81,10 +81,6 @@ const CATALOG_PAGE_SIZE = 1000;
 const IMPORT_BATCH_SIZE = 500;
 const DEFAULT_PRODUCT_PAGE_SIZE = 25;
 
-const storageKeys = {
-  products: "pharmacy-cluster-products",
-};
-
 type NewProductNameFields = {
   id: string;
   brandName: string;
@@ -395,48 +391,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         if (authError || !user) throw authError ?? new Error("Sign in to load your product list.");
 
-        const localProductsRaw = localStorage.getItem(storageKeys.products);
-        const parsedLocalProducts: Product[] = localProductsRaw
-          ? (JSON.parse(localProductsRaw) as Product[])
-          : [];
-
         setPharmacyUserId(user.id);
-        let sharedCatalog: CatalogProductRow[] | undefined;
-
-        if (parsedLocalProducts.length) {
-          const knownProducts = await loadAllPharmacyProducts(user.id);
-          sharedCatalog = await loadAllCatalogRows();
-          const productsToMigrate: Product[] = [];
-
-          for (const localProduct of parsedLocalProducts) {
-            const existing = knownProducts.find((product) =>
-              product.id === localProduct.id ||
-              (getProductIdentityKey(product) !== null && getProductIdentityKey(product) === getProductIdentityKey(localProduct)),
-            );
-            if (existing) continue;
-
-            const matchingCatalogRow = sharedCatalog.find((row) => {
-              if (knownProducts.some((product) => product.sourceCatalogId === row.id)) return false;
-              return getProductIdentityKey(localProduct) === getProductIdentityKey(mapCatalogRowToProduct(row));
-            });
-            const productToSave = {
-              ...localProduct,
-              id: knownProducts.some((product) => product.id === localProduct.id) ? createProductId() : localProduct.id,
-              sourceCatalogId: localProduct.sourceCatalogId ?? matchingCatalogRow?.id,
-            };
-            productsToMigrate.push(productToSave);
-            knownProducts.push(productToSave);
-          }
-
-          if (productsToMigrate.length) {
-            const { error } = await supabase
-              .from("pharmacy_catalog_products")
-              .upsert(productsToMigrate.map((product) => mapProductToPharmacyRow(product, user.id)), { onConflict: "owner_user_id,id" });
-            if (error) throw error;
-            localStorage.removeItem(storageKeys.products);
-          }
-        }
-
         const firstPage = await loadPharmacyProductPage(user.id, 1, DEFAULT_PRODUCT_PAGE_SIZE, "");
         if (!active) return;
         setProducts(firstPage.products);

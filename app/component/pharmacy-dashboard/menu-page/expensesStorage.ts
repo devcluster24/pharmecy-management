@@ -1,3 +1,5 @@
+import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+
 export const EXPENSES_STORAGE_KEY = "pharmecy-expenses-v1";
 
 export type ExpenseRecord = {
@@ -35,7 +37,7 @@ function isExpenseRecord(value: unknown): value is ExpenseRecord {
 }
 
 function readExpenses(): ExpenseRecord[] {
-  const saved = window.localStorage.getItem(EXPENSES_STORAGE_KEY);
+  const saved = getPharmacyDataJson(EXPENSES_STORAGE_KEY);
   if (!saved) return [];
   const parsed: unknown = JSON.parse(saved);
   if (!Array.isArray(parsed) || !parsed.every(isExpenseRecord)) {
@@ -79,7 +81,7 @@ export function subscribeToExpenses(listener: () => void) {
 }
 
 function saveExpenses(rows: ExpenseRecord[]) {
-  window.localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(EXPENSES_STORAGE_KEY, JSON.stringify(rows));
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(expensesUpdatedEvent));
 }
