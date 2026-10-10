@@ -16,6 +16,8 @@ import {
   subscribeToPaymentMethods,
 } from "./paymentMethodsStorage";
 
+const CUSTOMERS_PER_PAGE = 10;
+
 const pageData: SectionData = {
   description: "Review customer invoices and outstanding balances.",
   action: "",
@@ -112,6 +114,7 @@ export default function CustomerManagementPage() {
   const [adjustMessage, setAdjustMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeList, setActiveList] = useState<"customers" | "due">("customers");
+  const [currentPage, setCurrentPage] = useState(1);
   const [detailModal, setDetailModal] = useState<{
     type: "invoices" | "payments" | "collect-due";
     customer: CustomerInvoiceGroup;
@@ -312,6 +315,12 @@ export default function CustomerManagementPage() {
         </button>,
       ]);
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / CUSTOMERS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageRows = rows.slice(
+    (safeCurrentPage - 1) * CUSTOMERS_PER_PAGE,
+    safeCurrentPage * CUSTOMERS_PER_PAGE,
+  );
   const data: SectionData = {
     ...pageData,
     errorMessage: sales.error || undefined,
@@ -319,12 +328,39 @@ export default function CustomerManagementPage() {
       ? pageData.columns
       : ["Customer Name & Phone Number", "Last Invoice Date", "View Invoices", "Total Visit Time", "Total Bill Amount", "Total Paid", "Total Due"],
     listTitle: "",
-    listFooter: activeList === "due" ? (
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
-        <span>Showing {rows.length} records</span>
-        <strong style={{ color: "#ad4b43", fontSize: 12 }}>Total Due Amount: {formatPrice(totalDueAmount)}</strong>
+    listFooter: (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+        <span>
+          {rows.length === 0
+            ? "Showing 0 records"
+            : `Showing ${(safeCurrentPage - 1) * CUSTOMERS_PER_PAGE + 1}-${Math.min(safeCurrentPage * CUSTOMERS_PER_PAGE, rows.length)} of ${rows.length} records`}
+        </span>
+        {activeList === "due" && (
+          <strong style={{ color: "#ad4b43", fontSize: 12 }}>Total Due Amount: {formatPrice(totalDueAmount)}</strong>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            aria-label="Previous page"
+            disabled={safeCurrentPage <= 1}
+            onClick={() => setCurrentPage(safeCurrentPage - 1)}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer", opacity: safeCurrentPage <= 1 ? 0.5 : 1 }}
+          >
+            Previous
+          </button>
+          <span>Page {safeCurrentPage} of {totalPages}</span>
+          <button
+            type="button"
+            aria-label="Next page"
+            disabled={safeCurrentPage >= totalPages}
+            onClick={() => setCurrentPage(safeCurrentPage + 1)}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer", opacity: safeCurrentPage >= totalPages ? 0.5 : 1 }}
+          >
+            Next
+          </button>
+        </div>
       </div>
-    ) : undefined,
+    ),
     listNavigation: (
       <div role="group" aria-label="Customer list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
         {([
@@ -338,6 +374,7 @@ export default function CustomerManagementPage() {
             onClick={() => {
               setActiveList(listType);
               setSearchQuery("");
+              setCurrentPage(1);
             }}
             style={{ border: 0, background: "transparent", color: activeList === listType ? "#16845f" : "#687871", padding: 0, fontSize: 12, fontWeight: 650, textDecoration: activeList === listType ? "underline" : "none", textUnderlineOffset: 4, cursor: "pointer" }}
           >
@@ -346,7 +383,7 @@ export default function CustomerManagementPage() {
         ))}
       </div>
     ),
-    rows,
+    rows: pageRows,
   };
 
   return (
@@ -357,7 +394,10 @@ export default function CustomerManagementPage() {
       listTitle={data.listTitle}
       listNavigation={data.listNavigation}
       searchValue={searchQuery}
-      onSearchChange={setSearchQuery}
+      onSearchChange={(value) => {
+        setSearchQuery(value);
+        setCurrentPage(1);
+      }}
       content={selectedInvoice ? (
         <div
           onMouseDown={(event) => {

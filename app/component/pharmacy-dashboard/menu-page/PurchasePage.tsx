@@ -141,9 +141,13 @@ export default function PurchasePage() {
         <div key={`${order}-actions`} style={{ display: "flex", alignItems: "center", gap: 10 }}>{viewButton}</div>,
       ];
     }),
-    listFooter: orders.length > ORDERS_PER_PAGE ? (
+    listFooter: (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
-        <span>Showing {(currentPage - 1) * ORDERS_PER_PAGE + 1}-{Math.min(currentPage * ORDERS_PER_PAGE, orders.length)} of {orders.length} orders</span>
+        <span>
+          {orders.length === 0
+            ? "Showing 0 orders"
+            : `Showing ${(currentPage - 1) * ORDERS_PER_PAGE + 1}-${Math.min(currentPage * ORDERS_PER_PAGE, orders.length)} of ${orders.length} orders`}
+        </span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
@@ -162,7 +166,7 @@ export default function PurchasePage() {
           >Next</button>
         </div>
       </div>
-    ) : undefined,
+    ),
   };
 
   return (

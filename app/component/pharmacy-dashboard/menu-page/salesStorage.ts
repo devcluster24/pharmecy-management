@@ -14,6 +14,7 @@ export type SalesInvoiceItem = {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  unitPurchasePrice?: number;
 };
 
 export type SalesPaymentEntry = {
@@ -107,7 +108,12 @@ function isSalesListRow(value: unknown): value is SalesListRow {
           && typeof line.unitPrice === "number"
           && Number.isFinite(line.unitPrice)
           && typeof line.totalPrice === "number"
-          && Number.isFinite(line.totalPrice);
+          && Number.isFinite(line.totalPrice)
+          && (!("unitPurchasePrice" in line) || (
+            typeof line.unitPurchasePrice === "number"
+            && Number.isFinite(line.unitPurchasePrice)
+            && line.unitPurchasePrice >= 0
+          ));
       })
     ));
 }
@@ -181,7 +187,9 @@ export function persistSale(
       || !Number.isFinite(line.unitPrice)
       || line.unitPrice < 0
       || !Number.isFinite(line.totalPrice)
-      || line.totalPrice < 0,
+      || line.totalPrice < 0
+      || (line.unitPurchasePrice !== undefined
+        && (!Number.isFinite(line.unitPurchasePrice) || line.unitPurchasePrice < 0)),
     )
   ) {
     throw new Error("Add at least one product with a valid quantity before saving the sale.");

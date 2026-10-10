@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { ComponentType } from "react";
 import CustomerManagementPage from "../../component/pharmacy-dashboard/menu-page/CustomerManagementPage";
+import ExpensesPage from "../../component/pharmacy-dashboard/menu-page/ExpensesPage";
 import InvoicePage from "../../component/pharmacy-dashboard/menu-page/InvoicePage";
 import InventoryPage from "../../component/pharmacy-dashboard/menu-page/InventoryPage";
 import ProductManagementPage from "../../component/pharmacy-dashboard/menu-page/ProductManagementPage";
@@ -23,6 +24,7 @@ const sectionPages: Record<string, ComponentType> = {
   customers: CustomerManagementPage,
   suppliers: SupplierManagementPage,
   reports: ReportsPage,
+  expenses: ExpensesPage,
   staff: StaffManagementPage,
   settings: SettingPage,
 };

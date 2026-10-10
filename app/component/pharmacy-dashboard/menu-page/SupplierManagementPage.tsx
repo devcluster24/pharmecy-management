@@ -8,16 +8,23 @@ import {
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
+import {
+  emptyPaymentMethodsSnapshot,
+  getPaymentMethodsSnapshot,
+  subscribeToPaymentMethods,
+} from "./paymentMethodsStorage";
 
 const supplierStatusStorageKey = "pharmecy-supplier-status-v1";
 const supplierDueAdjustmentStorageKey = "pharmecy-supplier-due-adjustments-v1";
 const supplierDuePaymentStorageKey = "pharmecy-supplier-due-payments-v1";
+const supplierDueLedgerUpdatedEvent = "pharmecy-supplier-dues-updated";
+const SUPPLIERS_PER_PAGE = 10;
 type SupplierStatus = "Active" | "Inactive";
 type SupplierStatusSnapshot = { statuses: Record<string, SupplierStatus>; error: string };
 const emptySupplierStatusSnapshot: SupplierStatusSnapshot = { statuses: {}, error: "" };
 let cachedSupplierStatusSnapshot: SupplierStatusSnapshot | null = null;
 const supplierStatusListeners = new Set<() => void>();
-type SupplierDueAdjustment = { amount: number; createdAt: string };
+type SupplierDueAdjustment = { amount: number; createdAt: string; paymentMethod?: string };
 type SupplierDueAdjustmentSnapshot = {
   adjustments: Record<string, SupplierDueAdjustment[]>;
   error: string;
@@ -98,7 +105,8 @@ function isSupplierDueAdjustment(value: unknown): value is SupplierDueAdjustment
     && Number.isFinite(adjustment.amount)
     && adjustment.amount > 0
     && typeof adjustment.createdAt === "string"
-    && Number.isFinite(Date.parse(adjustment.createdAt));
+    && Number.isFinite(Date.parse(adjustment.createdAt))
+    && (!("paymentMethod" in adjustment) || typeof adjustment.paymentMethod === "string");
 }
 
 function getSupplierDueAdjustmentMap(value: unknown): Record<string, SupplierDueAdjustment[]> {
@@ -222,20 +230,22 @@ function saveSupplierStatus(key: string, status: SupplierStatus) {
   localStorage.setItem(supplierStatusStorageKey, JSON.stringify(statuses));
   cachedSupplierStatusSnapshot = { statuses, error: "" };
   supplierStatusListeners.forEach((notify) => notify());
+  window.dispatchEvent(new Event(supplierDueLedgerUpdatedEvent));
 }
 
-function saveSupplierDuePayment(key: string, amount: number) {
+function saveSupplierDuePayment(key: string, amount: number, paymentMethod: string) {
   const currentSnapshot = getSupplierDuePaymentSnapshot();
   const payments = {
     ...currentSnapshot.payments,
     [key]: [
       ...(currentSnapshot.payments[key] ?? []),
-      { amount, createdAt: new Date().toISOString() },
+      { amount, createdAt: new Date().toISOString(), paymentMethod },
     ],
   };
   localStorage.setItem(supplierDuePaymentStorageKey, JSON.stringify(payments));
   cachedSupplierDuePaymentSnapshot = { payments, error: "" };
   supplierDuePaymentListeners.forEach((notify) => notify());
+  window.dispatchEvent(new Event(supplierDueLedgerUpdatedEvent));
 }
 
 export default function SupplierManagementPage() {
@@ -259,13 +269,20 @@ export default function SupplierManagementPage() {
     getSupplierDuePaymentSnapshot,
     () => emptySupplierDuePaymentSnapshot,
   );
+  const paymentMethodsSnapshot = useSyncExternalStore(
+    subscribeToPaymentMethods,
+    getPaymentMethodsSnapshot,
+    () => emptyPaymentMethodsSnapshot,
+  );
   const supplierStatuses = supplierStatusData.statuses;
   const [selectedSupplierKey, setSelectedSupplierKey] = useState<string | null>(null);
   const [selectedDueSupplierKey, setSelectedDueSupplierKey] = useState<string | null>(null);
   const [dueAdjustmentAmount, setDueAdjustmentAmount] = useState("");
+  const [selectedDuePaymentMethod, setSelectedDuePaymentMethod] = useState("cash");
   const [dueAdjustmentError, setDueAdjustmentError] = useState("");
   const [statusSaveError, setStatusSaveError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [paginationState, setPaginationState] = useState({ key: "", page: 1 });
 
   const suppliers = useMemo(() => {
     const supplierMap = new Map<string, Omit<SupplierSummary, "orders" | "purchaseAmount" | "paidAmount" | "dueAmount" | "dueAdjustments" | "duePayments">>();
@@ -334,10 +351,30 @@ export default function SupplierManagementPage() {
       return nameMatches || phoneMatches;
     })
     : suppliers;
+  const paginationKey = `${normalizedSearchQuery}:${filteredSuppliers.map((supplier) => supplier.key).join("|")}`;
+  const totalPages = Math.max(1, Math.ceil(filteredSuppliers.length / SUPPLIERS_PER_PAGE));
+  const currentPage = Math.min(
+    paginationState.key === paginationKey ? paginationState.page : 1,
+    totalPages,
+  );
+  const pageSuppliers = filteredSuppliers.slice(
+    (currentPage - 1) * SUPPLIERS_PER_PAGE,
+    currentPage * SUPPLIERS_PER_PAGE,
+  );
   const parsedDuePaymentAmount = parseAmount(dueAdjustmentAmount) ?? 0;
   const duePaymentPreviewAmount = selectedDueSupplier && parsedDuePaymentAmount <= selectedDueSupplier.dueAmount
     ? parsedDuePaymentAmount
     : 0;
+  const duePaymentMethodOptions = [
+    { value: "cash", label: "Cash" },
+    ...paymentMethodsSnapshot.rows.map((method) => ({
+      value: `${method.type}:${method.id}`,
+      label: method.type === "mobile" ? method.name : method.bankName,
+    })),
+  ];
+  const effectiveDuePaymentMethod = duePaymentMethodOptions.some((option) => option.value === selectedDuePaymentMethod)
+    ? selectedDuePaymentMethod
+    : "cash";
   const activeSupplierCount = suppliers.filter((supplier) => (supplierStatuses[supplier.key] ?? "Active") === "Active").length;
   const inactiveSupplierCount = suppliers.length - activeSupplierCount;
   const totalPurchaseAmount = suppliers.reduce((total, supplier) => total + supplier.purchaseAmount, 0);
@@ -356,6 +393,7 @@ export default function SupplierManagementPage() {
   function openDueAdjustment(supplierKey: string) {
     setSelectedDueSupplierKey(supplierKey);
     setDueAdjustmentAmount("");
+    setSelectedDuePaymentMethod("cash");
     setDueAdjustmentError("");
   }
 
@@ -375,9 +413,11 @@ export default function SupplierManagementPage() {
     }
 
     try {
-      saveSupplierDuePayment(selectedDueSupplier.key, Number(amount.toFixed(2)));
+      const paymentMethod = duePaymentMethodOptions.find((option) => option.value === effectiveDuePaymentMethod)?.label ?? "Cash";
+      saveSupplierDuePayment(selectedDueSupplier.key, Number(amount.toFixed(2)), paymentMethod);
       setSelectedDueSupplierKey(null);
       setDueAdjustmentAmount("");
+      setSelectedDuePaymentMethod("cash");
     } catch {
       setDueAdjustmentError("Supplier due adjustment could not be saved.");
     }
@@ -393,7 +433,7 @@ export default function SupplierManagementPage() {
       { label: "Due Amount", value: formatCurrency(totalDueAmount), detail: "Outstanding supplier due" },
     ],
     columns: ["Supplier Name & Phone Number", "All Order Number", "Total Purchase Amount", "Total Due Amount", "Current Status"],
-    rows: filteredSuppliers.map((supplier) => {
+    rows: pageSuppliers.map((supplier) => {
       const status = supplierStatuses[supplier.key] ?? "Active";
       const dueText = formatCurrency(supplier.dueAmount);
       return [
@@ -431,7 +471,37 @@ export default function SupplierManagementPage() {
         </button>,
       ];
     }),
-    errorMessage: [purchaseList.error, supplierStatusData.error, supplierDueAdjustmentData.error, supplierDuePaymentData.error, statusSaveError].filter(Boolean).join(" "),
+    listFooter: (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+        <span>
+          {filteredSuppliers.length === 0
+            ? "Showing 0 suppliers"
+            : `Showing ${(currentPage - 1) * SUPPLIERS_PER_PAGE + 1}-${Math.min(currentPage * SUPPLIERS_PER_PAGE, filteredSuppliers.length)} of ${filteredSuppliers.length} suppliers`}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            aria-label="Previous page"
+            disabled={currentPage <= 1}
+            onClick={() => setPaginationState({ key: paginationKey, page: currentPage - 1 })}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: currentPage <= 1 ? "not-allowed" : "pointer", opacity: currentPage <= 1 ? 0.5 : 1 }}
+          >
+            Previous
+          </button>
+          <span>Page {currentPage} of {totalPages}</span>
+          <button
+            type="button"
+            aria-label="Next page"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPaginationState({ key: paginationKey, page: currentPage + 1 })}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: currentPage >= totalPages ? "not-allowed" : "pointer", opacity: currentPage >= totalPages ? 0.5 : 1 }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    ),
+    errorMessage: [purchaseList.error, supplierStatusData.error, supplierDueAdjustmentData.error, supplierDuePaymentData.error, paymentMethodsSnapshot.error, statusSaveError].filter(Boolean).join(" "),
   };
 
   return (
@@ -567,6 +637,33 @@ export default function SupplierManagementPage() {
                       style={{ width: "100%", boxSizing: "border-box", border: "1px solid #dce5df", borderRadius: 6, padding: "10px 11px", color: "#26352f", fontSize: 13 }}
                     />
                   </label>
+                  {dueAdjustmentAmount.trim() && (
+                    <div role="group" aria-label="Choose payment method" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {duePaymentMethodOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={effectiveDuePaymentMethod === option.value}
+                          onClick={() => setSelectedDuePaymentMethod(option.value)}
+                          style={{
+                            border: `1px solid ${effectiveDuePaymentMethod === option.value ? "#179c70" : "#dce5df"}`,
+                            borderRadius: 5,
+                            background: effectiveDuePaymentMethod === option.value ? "#eef8f2" : "#fff",
+                            color: effectiveDuePaymentMethod === option.value ? "#17704e" : "#526158",
+                            padding: "6px 9px",
+                            fontSize: 11,
+                            fontWeight: 650,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {paymentMethodsSnapshot.error && dueAdjustmentAmount.trim() && (
+                    <p role="alert" style={{ margin: 0, color: "#b34b43", fontSize: 12 }}>{paymentMethodsSnapshot.error}</p>
+                  )}
                   <p style={{ margin: 0, color: "#77857d", fontSize: 11 }}>
                     This payment will increase Paid Amount and reduce Total Due Amount.
                   </p>
@@ -575,7 +672,7 @@ export default function SupplierManagementPage() {
                       <strong style={{ color: "#42524b", fontSize: 11 }}>Previous payments</strong>
                       {selectedDueSupplier.duePayments.slice().reverse().map((payment, index) => (
                         <div key={`${payment.createdAt}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "#77857d", fontSize: 11 }}>
-                          <span>{new Date(payment.createdAt).toLocaleString()}</span>
+                          <span>{new Date(payment.createdAt).toLocaleString()} · {payment.paymentMethod ?? "Not recorded"}</span>
                           <strong style={{ color: "#26352f" }}>{formatCurrency(payment.amount)}</strong>
                         </div>
                       ))}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import {
   persistPlaceOrderListRows,
@@ -257,7 +258,8 @@ function getErrorMessage(error: unknown) {
   return "Could not load products. Please try again.";
 }
 
-export default function PurchaseCreateAction() {
+export default function PurchaseCreateAction({ standalone = false }: { standalone?: boolean }) {
+  const router = useRouter();
   const purchaseListSnapshot = useSyncExternalStore(
     subscribeToPurchaseList,
     getPurchaseListSnapshot,
@@ -418,7 +420,7 @@ export default function PurchaseCreateAction() {
   const placeOrderTotal = placeOrderItems.reduce((total, item) => total + (parseOrderPrice(item.totalPrice) ?? 0), 0);
 
   useEffect(() => {
-    if (!isOpen && !isPlaceOrderOpen) return;
+    if (!isOpen && !isPlaceOrderOpen && !standalone) return;
 
     let active = true;
     async function loadProducts() {
@@ -462,9 +464,9 @@ export default function PurchaseCreateAction() {
     return () => {
       active = false;
     };
-  }, [isOpen, isPlaceOrderOpen]);
+  }, [isOpen, isPlaceOrderOpen, standalone]);
 
-  function closeModal() {
+  const closeModal = useCallback(() => {
     setIsOpen(false);
     setCompanySelections([createCompanySelection(0, 0)]);
     setActiveCompanySelectionId(0);
@@ -482,7 +484,8 @@ export default function PurchaseCreateAction() {
     setReceiveTaxRate("0");
     setReceivePaymentMethod("cash");
     setReceivePayAmount("");
-  }
+    if (standalone) router.push("/dashboard/purchase");
+  }, [router, standalone]);
 
   function receivePurchase() {
     if (!canReceivePurchase) return;
@@ -838,7 +841,7 @@ export default function PurchaseCreateAction() {
   }
 
   useEffect(() => {
-    if (!isOpen && !isPlaceOrderOpen) return;
+    if (!isOpen && !isPlaceOrderOpen && !standalone) return;
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (pendingBatchEntry) {
@@ -866,7 +869,7 @@ export default function PurchaseCreateAction() {
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isOpen, isPlaceOrderOpen, pendingBatchEntry]);
+  }, [isOpen, isPlaceOrderOpen, pendingBatchEntry, standalone, closeModal]);
 
   function saveBatchEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1087,42 +1090,48 @@ export default function PurchaseCreateAction() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button
-          type="button"
-          onClick={() => setIsPlaceOrderOpen(true)}
-          style={{ border: "1px solid #179c70", borderRadius: 7, background: "#fff", color: "#16845f", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}
-        >
-          Place Order
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}
-        >
-          Receive Order
-        </button>
-      </div>
-      {isOpen && (
+      {!standalone && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setIsPlaceOrderOpen(true)}
+            style={{ border: "1px solid #179c70", borderRadius: 7, background: "#fff", color: "#16845f", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}
+          >
+            Place Order
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard/purchase/receive-order")}
+            style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}
+          >
+            Receive Order
+          </button>
+        </div>
+      )}
+      {(isOpen || standalone) && (
         <div
-          onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}
-          style={{ position: "fixed", inset: "78px 32px 28px 102px", zIndex: 50, display: "grid", placeItems: "center", background: "rgba(15, 28, 21, 0.48)" }}
+          onMouseDown={standalone ? undefined : (event) => { if (event.target === event.currentTarget) closeModal(); }}
+          style={standalone
+            ? { width: "100%", minWidth: 0 }
+            : { position: "fixed", inset: "78px 32px 28px 102px", zIndex: 50, display: "grid", placeItems: "center", background: "transparent" }}
         >
           <section
-            role="dialog"
-            aria-modal="true"
+            role={standalone ? "region" : "dialog"}
+            aria-modal={!standalone}
             aria-labelledby="create-purchase-title"
-            style={{ display: "flex", flexDirection: "column", width: "min(1480px, 100%)", height: "100%", maxHeight: "100%", overflow: "hidden", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
+            style={standalone
+              ? { display: "flex", flexDirection: "column", width: "100%", minHeight: "70vh", overflow: "visible", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }
+              : { display: "flex", flexDirection: "column", width: "min(1280px, 100%)", height: "96%", maxHeight: "96%", overflow: "hidden", borderRadius: 10, background: "#fff" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="create-purchase-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Receive Order</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Select a company, then choose one of its products.</p>
               </div>
-              <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+              <button type="button" aria-label={standalone ? "Back to purchase" : "Close"} onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>{standalone ? "←" : "×"}</button>
             </div>
 
-            <div className="receive-order-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 290px", flex: 1, minHeight: 0, overflowY: "auto", alignItems: "start", gap: 16, padding: "22px 24px" }}>
+            <div className="receive-order-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 290px", flex: 1, minHeight: 0, overflowY: standalone ? "visible" : "auto", alignItems: "start", gap: 16, padding: "22px 24px" }}>
               <div style={{ minWidth: 0 }}>
               <div style={{ display: "grid", gap: 16 }}>
               {companySelections
@@ -1446,11 +1455,23 @@ export default function PurchaseCreateAction() {
               <>
                 <h3 style={{ margin: "0 0 10px", color: "#526158", fontSize: 13, fontWeight: 700 }}>Receive Invoice</h3>
                 <div style={{ margin: "0 0 18px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
-                  <table aria-label="Selected brand details" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left" }}>
+                  <table aria-label="Selected brand details" style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left" }}>
+                    <colgroup>
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "7%" }} />
+                      <col style={{ width: "7%" }} />
+                      <col style={{ width: "8%" }} />
+                      <col style={{ width: "8%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "12%" }} />
+                    </colgroup>
                     <thead>
                       <tr>
-                        {["Company Name", "Brand Name", "Batch Number", "Mfg Date", "Exp Date", "Box MRP", "Pack Size", "Unit Price", "Box Quantity", "Total Purchase Price", "Actions"].map((heading) => (
-                          <th key={heading} scope="col" style={{ padding: "7px 6px", borderBottom: "1px solid #dce5df", background: "#f4f7f5", color: "#687871", fontSize: 10, fontWeight: 650, whiteSpace: "nowrap" }}>{heading}</th>
+                        {["Company Name", "Brand Name", "Batch Number", "Date", "Box MRP", "Pack Size", "Unit Price", "Box Quantity", "Total Purchase Price", "Actions"].map((heading) => (
+                          <th key={heading} scope="col" style={{ padding: "6px 3px", borderBottom: "1px solid #dce5df", background: "#f4f7f5", color: "#687871", fontSize: 10, fontWeight: 650, whiteSpace: "normal", lineHeight: 1.2 }}>{heading}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1461,8 +1482,7 @@ export default function PurchaseCreateAction() {
                             companySelection.company,
                             batchIndex === 0 ? product?.brand || product?.medicine_name || selection.customBrand : "",
                             batch.batchNumber,
-                            formatMonthYear(batch.mfgDate),
-                            formatMonthYear(batch.expDate),
+                            `${formatMonthYear(batch.mfgDate)}\n${formatMonthYear(batch.expDate)}`,
                             batch.mrp,
                             batch.packSize,
                             getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
@@ -1470,8 +1490,8 @@ export default function PurchaseCreateAction() {
                             batch.totalPrice,
                             null,
                           ] as const).map((value, cellIndex) => (
-                            <td key={cellIndex} style={{ padding: "7px 6px", borderBottom: index === selectedBatchDetails.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {cellIndex === 10 ? (
+                            <td key={cellIndex} style={{ padding: cellIndex >= 4 && cellIndex <= 9 ? "6px 3px" : "7px 5px", borderBottom: index === selectedBatchDetails.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: cellIndex >= 4 && cellIndex <= 9 ? 10 : 11, whiteSpace: cellIndex === 3 ? "pre-line" : "nowrap", lineHeight: cellIndex === 3 ? 1.4 : undefined, overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {cellIndex === 9 ? (
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
                                   <button
@@ -1529,8 +1549,7 @@ export default function PurchaseCreateAction() {
                             row.supplier,
                             row.brand,
                             row.batchNumber,
-                            formatMonthYear(row.mfgDate),
-                            formatMonthYear(row.expDate),
+                            `${formatMonthYear(row.mfgDate)}\n${formatMonthYear(row.expDate)}`,
                             row.mrp ?? "",
                             row.packSize,
                             getUnitPrice(row.unitPrice, row.mrp, row.packSize),
@@ -1538,8 +1557,8 @@ export default function PurchaseCreateAction() {
                             row.totalPrice ?? "",
                             null,
                           ].map((value, cellIndex) => (
-                            <td key={cellIndex} style={{ padding: "7px 6px", borderBottom: index === receivedInvoiceRows.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {cellIndex === 10 ? (
+                            <td key={cellIndex} style={{ padding: cellIndex >= 4 && cellIndex <= 9 ? "6px 3px" : "7px 5px", borderBottom: index === receivedInvoiceRows.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: cellIndex >= 4 && cellIndex <= 9 ? 10 : 11, whiteSpace: cellIndex === 3 ? "pre-line" : "nowrap", lineHeight: cellIndex === 3 ? 1.4 : undefined, overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {cellIndex === 9 ? (
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
                                   <button

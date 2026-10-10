@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { initializePharmacyDataSync } from "@/lib/pharmacy-data-sync";
+import PharmacyDataSyncNotice from "./PharmacyDataSyncNotice";
 
 type RequiredRole = "pharmacy_user" | "admin";
 type AccessState = "checking" | "allowed" | "blocked" | "failed";
@@ -18,6 +20,7 @@ export default function DashboardAccessGate({
   const router = useRouter();
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [message, setMessage] = useState("");
+  const [checkAttempt, setCheckAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -86,6 +89,19 @@ export default function DashboardAccessGate({
           return;
         }
 
+        if (requiredRole === "pharmacy_user") {
+          try {
+            await initializePharmacyDataSync(user.id);
+          } catch (error) {
+            if (active) {
+              const reason = error instanceof Error ? error.message : "Unknown Supabase error.";
+              setMessage(`Could not load or import this pharmacy's data: ${reason} Apply migration supabase/migrations/20261011000000_pharmacy_app_data.sql in the Supabase project, then retry.`);
+              setAccessState("failed");
+            }
+            return;
+          }
+        }
+
         if (active) setAccessState("allowed");
       } catch (error) {
         if (active) {
@@ -99,14 +115,21 @@ export default function DashboardAccessGate({
     return () => {
       active = false;
     };
-  }, [requiredRole, router]);
+  }, [checkAttempt, requiredRole, router]);
 
   async function signOut() {
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
-  if (accessState === "allowed") return children;
+  if (accessState === "allowed") {
+    return (
+      <>
+        {children}
+        <PharmacyDataSyncNotice />
+      </>
+    );
+  }
 
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#f5f7f5", fontFamily: "Arial, sans-serif" }}>
@@ -116,9 +139,16 @@ export default function DashboardAccessGate({
           {accessState === "checking" ? "Please wait while we verify your account." : message}
         </p>
         {accessState !== "checking" && (
-          <button type="button" onClick={signOut} style={{ border: 0, borderRadius: 6, background: "#18845d", color: "#fff", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>
-            Sign out
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {accessState === "failed" && (
+              <button type="button" onClick={() => { setAccessState("checking"); setCheckAttempt((attempt) => attempt + 1); }} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#26352f", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>
+                Retry
+              </button>
+            )}
+            <button type="button" onClick={signOut} style={{ border: 0, borderRadius: 6, background: "#18845d", color: "#fff", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>
+              Sign out
+            </button>
+          </div>
         )}
       </section>
     </main>

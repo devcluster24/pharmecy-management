@@ -43,6 +43,7 @@ type SaleProduct = {
   expDate: string;
   isExpired: boolean;
   availableQuantity: number | null;
+  unitPurchasePrice: number | null;
 };
 
 type SaleBatchAllocation = {
@@ -79,6 +80,9 @@ function getErrorMessage(error: unknown) {
 function mapInventoryRow(row: PurchaseListRow): SaleProduct {
   const boxPrice = [row.mrp, row.productPackPrice, row.packPrice]
     .find((price) => Boolean(price?.trim() && price.trim() !== "-"));
+  const unitPurchasePrice = row.unitPurchasePrice?.trim() && row.unitPurchasePrice.trim() !== "-"
+    ? Number(row.unitPurchasePrice)
+    : Number.NaN;
   return {
     id: row.id,
     brand: row.brand.trim(),
@@ -93,6 +97,9 @@ function mapInventoryRow(row: PurchaseListRow): SaleProduct {
     expDate: row.expDate,
     isExpired: isInventoryItemExpired(row.expDate),
     availableQuantity: getAvailablePurchaseQuantity(row),
+    unitPurchasePrice: Number.isFinite(unitPurchasePrice) && unitPurchasePrice >= 0
+      ? unitPurchasePrice
+      : null,
   };
 }
 
@@ -493,6 +500,7 @@ export default function SalesActions() {
           quantity,
           unitPrice,
           totalPrice: roundCurrency(quantity * unitPrice),
+          ...(batch.unitPurchasePrice !== null ? { unitPurchasePrice: batch.unitPurchasePrice } : {}),
         };
       }),
     );

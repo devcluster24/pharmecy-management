@@ -10,6 +10,8 @@ import {
 } from "./salesStorage";
 import { downloadSaleInvoicePdf } from "./saleInvoicePdf";
 
+const INVOICES_PER_PAGE = 10;
+
 const basePageData: SectionData = {
   description: "Saved sales invoices.",
   action: "",
@@ -31,6 +33,7 @@ export default function InvoicePage() {
   const [searchValue, setSearchValue] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<SalesListRow | null>(null);
   const [invoiceActionError, setInvoiceActionError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -78,10 +81,46 @@ export default function InvoicePage() {
         sale.payment,
       ];
     });
+  const totalPages = Math.max(1, Math.ceil(rows.length / INVOICES_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageRows = rows.slice(
+    (safeCurrentPage - 1) * INVOICES_PER_PAGE,
+    safeCurrentPage * INVOICES_PER_PAGE,
+  );
   const data: SectionData = {
     ...basePageData,
     errorMessage: sales.error || undefined,
-    rows,
+    rows: pageRows,
+    listFooter: (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+        <span>
+          {rows.length === 0
+            ? "Showing 0 invoices"
+            : `Showing ${(safeCurrentPage - 1) * INVOICES_PER_PAGE + 1}-${Math.min(safeCurrentPage * INVOICES_PER_PAGE, rows.length)} of ${rows.length} invoices`}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            aria-label="Previous page"
+            disabled={safeCurrentPage <= 1}
+            onClick={() => setCurrentPage(safeCurrentPage - 1)}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer", opacity: safeCurrentPage <= 1 ? 0.5 : 1 }}
+          >
+            Previous
+          </button>
+          <span>Page {safeCurrentPage} of {totalPages}</span>
+          <button
+            type="button"
+            aria-label="Next page"
+            disabled={safeCurrentPage >= totalPages}
+            onClick={() => setCurrentPage(safeCurrentPage + 1)}
+            style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer", opacity: safeCurrentPage >= totalPages ? 0.5 : 1 }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    ),
   };
 
   return (
@@ -164,7 +203,10 @@ export default function InvoicePage() {
         </div>
       ) : null}
       searchValue={searchValue}
-      onSearchChange={setSearchValue}
+      onSearchChange={(value) => {
+        setSearchValue(value);
+        setCurrentPage(1);
+      }}
     />
   );
 }

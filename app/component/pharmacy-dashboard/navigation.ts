@@ -9,6 +9,7 @@ export const dashboardNavItems = [
   { label: "Customer Management", slug: "customers", icon: "♙", href: "/dashboard/customers" },
   { label: "Supplier Management", slug: "suppliers", icon: "▱", href: "/dashboard/suppliers" },
   { label: "Reports", slug: "reports", icon: "▥", href: "/dashboard/reports" },
+  { label: "Expenses", slug: "expenses", icon: "↗", href: "/dashboard/expenses" },
   { label: "Staff Management", slug: "staff", icon: "♧", href: "/dashboard/staff" },
   { label: "Setting", slug: "settings", icon: "⚙", href: "/dashboard/settings" },
 ] as const;

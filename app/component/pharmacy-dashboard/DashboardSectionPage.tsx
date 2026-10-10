@@ -21,6 +21,7 @@ export default function DashboardSectionPage({
   data,
   actionContent,
   hideAction = false,
+  hidePageHeader = false,
   content,
   listTitle,
   listNavigation,
@@ -32,6 +33,7 @@ export default function DashboardSectionPage({
   data: SectionData;
   actionContent?: ReactNode;
   hideAction?: boolean;
+  hidePageHeader?: boolean;
   content?: ReactNode;
   listTitle?: string;
   listNavigation?: ReactNode;
@@ -80,10 +82,14 @@ export default function DashboardSectionPage({
           style={{
             flex: 1,
             minWidth: 0,
-            padding: sectionSlug === "sales" ? "12px clamp(18px, 4vw, 48px) 12px" : "32px clamp(18px, 4vw, 48px) 48px",
+            padding: sectionSlug === "sales"
+              ? "12px clamp(18px, 4vw, 48px) 12px"
+              : hidePageHeader
+                ? "8px clamp(18px, 4vw, 48px) 24px"
+                : "32px clamp(18px, 4vw, 48px) 48px",
           }}
         >
-          {sectionSlug !== "sales" && (
+          {sectionSlug !== "sales" && !hidePageHeader && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
               <div>
                 <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {navItem.label}</div>
