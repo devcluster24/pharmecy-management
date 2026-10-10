@@ -88,6 +88,25 @@ body {
   z-index: 2;
 }
 
+.receive-order-company-fields {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 8px 0;
+  background: #fbfcfb;
+}
+
+.receive-order-summary {
+  z-index: 4;
+}
+
+@media (max-width: 1100px) {
+  .receive-order-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+}
+
 @media (max-width: 760px) {
   .new-sale-form {
     height: calc(100vh - 155px);

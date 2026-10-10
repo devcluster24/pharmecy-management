@@ -26,6 +26,8 @@ export type PurchaseListRow = {
   unitPurchasePrice?: string;
   productId?: string;
   productPackPrice?: string;
+  orderPaidAmount?: string;
+  orderDueAmount?: string;
   updatedAt?: string;
 };
 
@@ -104,6 +106,8 @@ function isPurchaseListRow(value: unknown): value is PurchaseListRow {
     && (!("mrp" in value) || typeof value.mrp === "string")
     && (!("productId" in value) || typeof value.productId === "string")
     && (!("productPackPrice" in value) || typeof value.productPackPrice === "string")
+    && (!("orderPaidAmount" in value) || typeof value.orderPaidAmount === "string")
+    && (!("orderDueAmount" in value) || typeof value.orderDueAmount === "string")
     && (!("updatedAt" in value) || typeof value.updatedAt === "string");
 }
 

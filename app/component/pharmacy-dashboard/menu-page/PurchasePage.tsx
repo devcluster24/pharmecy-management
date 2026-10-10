@@ -28,6 +28,7 @@ const receiveOrderColumns = [
   "Date & Time",
   "Order Number",
   "Supplier",
+  "Supplier Name & Phone Number",
   "Total Purchase Amount",
   "Actions",
 ];
@@ -56,6 +57,7 @@ export default function PurchasePage() {
   );
   const [activeList, setActiveList] = useState<ListType>("place");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const [selectedPriceOrder, setSelectedPriceOrder] = useState<string | null>(null);
   const [paginationState, setPaginationState] = useState({ key: "", page: 1 });
   const placeOrders = useMemo(() => groupPurchaseOrders(placeOrderList.rows), [placeOrderList.rows]);
   const receiveOrders = useMemo(() => groupPurchaseOrders(purchaseList.rows), [purchaseList.rows]);
@@ -91,10 +93,23 @@ export default function PurchasePage() {
       );
       if (activeList === "receive") {
         const updatedDate = updatedAt > 0 ? new Date(updatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : rows[0]?.orderDate ?? "";
+        const supplierContacts = [...new Map(rows.map((row) => {
+          const name = row.supplierContactName?.trim() ?? "";
+          const phone = row.supplierPhone?.trim() ?? "";
+          return [`${name.toLocaleLowerCase()}\u0000${phone.replace(/\D/g, "")}`, { name, phone }];
+        })).values()];
         return [
           updatedDate,
           order,
           suppliers,
+          <div key={`${order}-supplier-contacts`} style={{ display: "grid", gap: 3 }}>
+            {supplierContacts.map((contact, index) => (
+              <span key={`${contact.name}-${contact.phone}-${index}`} style={{ display: "grid", gap: 2 }}>
+                <span>{contact.name || "-"}</span>
+                {contact.phone && <span style={{ color: "#77857d", fontSize: 10 }}>{contact.phone}</span>}
+              </span>
+            ))}
+          </div>,
           formatCurrency(getOrderTotal(rows)),
           <div key={`${order}-actions`} style={{ display: "flex", alignItems: "center", gap: 10 }}>{viewButton}</div>,
         ];
@@ -106,19 +121,22 @@ export default function PurchasePage() {
         const quantity = Number(row.quantity);
         return Number.isFinite(quantity) ? total + quantity : total;
       }, 0);
+      const brandCount = new Set(rows.map((row) => row.brand.trim().toLocaleLowerCase()).filter(Boolean)).size;
       return [
         orderDateTime,
         order,
         suppliers,
         totalBoxQuantity.toLocaleString("en-BD", { maximumFractionDigits: 4 }),
-        <span key={`${order}-box-prices`} style={{ display: "grid", gap: 3 }}>
-          {[...new Map(rows.map((row) => [
-            `${row.brand}\u0000${row.packPrice}`,
-            { brand: row.brand, price: Number(row.packPrice) },
-          ])).values()].map(({ brand, price }) => (
-            <span key={`${brand}-${price}`}>{brand}: {Number.isFinite(price) ? formatCurrency(price) : "-"}</span>
-          ))}
-        </span>,
+        brandCount > 0 ? (
+          <button
+            key={`${order}-view-items`}
+            type="button"
+            onClick={() => setSelectedPriceOrder(order)}
+            style={{ border: "1px solid #b9dfd0", borderRadius: 5, background: "#fff", color: "#16845f", padding: "5px 9px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}
+          >
+            View {brandCount} Items
+          </button>
+        ) : "-",
         formatCurrency(getOrderTotal(rows)),
         <div key={`${order}-actions`} style={{ display: "flex", alignItems: "center", gap: 10 }}>{viewButton}</div>,
       ];
@@ -166,6 +184,7 @@ export default function PurchasePage() {
                 onClick={() => {
                   setActiveList(listType);
                   setSelectedOrder(null);
+                  setSelectedPriceOrder(null);
                 }}
                 style={{ border: 0, background: "transparent", color: activeList === listType ? "#16845f" : "#687871", padding: 0, fontSize: 12, fontWeight: 650, textDecoration: activeList === listType ? "underline" : "none", textUnderlineOffset: 4, cursor: "pointer" }}
               >
@@ -176,6 +195,49 @@ export default function PurchasePage() {
         }
         actionContent={<PurchaseCreateAction />}
       />
+      {selectedPriceOrder && (
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedPriceOrder(null);
+          }}
+          style={{ position: "fixed", inset: 0, zIndex: 75, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.56)" }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="place-order-items-title"
+            style={{ width: "min(620px, 100%)", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
+              <h2 id="place-order-items-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Order Items · {selectedPriceOrder}</h2>
+              <button type="button" aria-label="Close order items" onClick={() => setSelectedPriceOrder(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+            </div>
+            <div style={{ overflow: "auto", padding: 18 }}>
+              <table aria-label={`Items in purchase order ${selectedPriceOrder}`} style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead>
+                  <tr>
+                    {["Brand Name", "Strength", "Purchase Price (Box)"].map((heading) => (
+                      <th key={heading} style={{ padding: "10px 12px", borderBottom: "1px solid #dce5df", background: "#f4f7f5", color: "#687871", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(placeOrders.find((order) => order.order === selectedPriceOrder)?.rows ?? []).map((row) => (
+                    <tr key={row.id}>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #e8ede9", color: "#34453b", fontSize: 12 }}>{row.brand}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #e8ede9", color: "#687871", fontSize: 12 }}>{row.strength}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #e8ede9", color: "#34453b", fontSize: 12, whiteSpace: "nowrap" }}>{Number.isFinite(Number(row.packPrice)) ? formatCurrency(Number(row.packPrice)) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", borderTop: "1px solid #e9eeea", padding: "12px 18px" }}>
+              <button type="button" onClick={() => setSelectedPriceOrder(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 12px", fontSize: 12, cursor: "pointer" }}>Close</button>
+            </div>
+          </section>
+        </div>
+      )}
       {selectedOrder && (
         <div
           onMouseDown={(event) => {

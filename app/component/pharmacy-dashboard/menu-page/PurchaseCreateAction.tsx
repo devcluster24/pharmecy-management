@@ -17,6 +17,11 @@ import {
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
+import {
+  emptyPaymentMethodsSnapshot,
+  getPaymentMethodsSnapshot,
+  subscribeToPaymentMethods,
+} from "./paymentMethodsStorage";
 
 type PurchaseProduct = {
   id: string;
@@ -144,6 +149,12 @@ function displayValue(value: string | undefined) {
   return value?.trim() || "-";
 }
 
+function getUnitPrice(unitPrice: string | undefined, mrp: string | undefined, packSize: string) {
+  const savedUnitPrice = unitPrice?.trim();
+  if (savedUnitPrice && savedUnitPrice !== "-") return savedUnitPrice;
+  return calculateUnitPurchasePrice(packSize, mrp ?? "", "1");
+}
+
 function formatMonthYear(value: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(value);
   return match ? `${match[2]}/${match[1].slice(-2)}` : value;
@@ -195,12 +206,12 @@ function mergeReceivedRows(
   const updatedAt = new Date().toISOString();
 
   rows.forEach((row, index) => {
-    const key = getReceivedBatchKey(row);
+    const key = `${row.order}\u0000${getReceivedBatchKey(row)}`;
     if (!rowIndexesByBatch.has(key)) rowIndexesByBatch.set(key, index);
   });
 
   for (const incomingRow of incomingRows) {
-    const key = getReceivedBatchKey(incomingRow);
+    const key = `${incomingRow.order}\u0000${getReceivedBatchKey(incomingRow)}`;
     const existingIndex = rowIndexesByBatch.get(key);
     if (existingIndex === undefined) {
       rowIndexesByBatch.set(key, rows.length);
@@ -261,6 +272,11 @@ export default function PurchaseCreateAction() {
     getPlaceOrderListSnapshot,
     () => emptyPurchaseListSnapshot,
   );
+  const paymentMethodsSnapshot = useSyncExternalStore(
+    subscribeToPaymentMethods,
+    getPaymentMethodsSnapshot,
+    () => emptyPaymentMethodsSnapshot,
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [isPlaceOrderOpen, setIsPlaceOrderOpen] = useState(false);
   const [products, setProducts] = useState<PurchaseProduct[]>([]);
@@ -268,17 +284,26 @@ export default function PurchaseCreateAction() {
     createCompanySelection(0, 0),
   ]);
   const [activeCompanySelectionId, setActiveCompanySelectionId] = useState(0);
-  const [isCompanyListOpen, setIsCompanyListOpen] = useState(false);
-  const [focusedSupplierNameId, setFocusedSupplierNameId] = useState<number | null>(null);
+  const [focusedSupplierInput, setFocusedSupplierInput] = useState<{
+    selectionId: number;
+    field: "name" | "phone";
+  } | null>(null);
   const [nextCompanySelectionId, setNextCompanySelectionId] = useState(1);
   const [nextBrandSelectionId, setNextBrandSelectionId] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [pendingBatchEntry, setPendingBatchEntry] = useState<PendingBatchEntry | null>(null);
+  const [batchPurchasePriceMode, setBatchPurchasePriceMode] = useState<"flat" | "percent">("flat");
+  const [batchPurchasePriceRate, setBatchPurchasePriceRate] = useState("");
   const expDateInputRef = useRef<HTMLInputElement>(null);
   const mrpInputRef = useRef<HTMLInputElement>(null);
   const focusedBatchFieldRef = useRef<{ field: EditableBatchField; originalValue: string } | null>(null);
   const [pendingOrderReceipts, setPendingOrderReceipts] = useState<PendingOrderReceipt[]>([]);
+  const [receiveDiscountType, setReceiveDiscountType] = useState<"flat" | "percent">("flat");
+  const [receiveDiscountValue, setReceiveDiscountValue] = useState("");
+  const [receiveTaxRate, setReceiveTaxRate] = useState("0");
+  const [receivePaymentMethod, setReceivePaymentMethod] = useState("cash");
+  const [receivePayAmount, setReceivePayAmount] = useState("");
   const [batchEntryError, setBatchEntryError] = useState("");
   const [purchaseSaveError, setPurchaseSaveError] = useState("");
   const [placeOrderCompany, setPlaceOrderCompany] = useState("");
@@ -293,14 +318,10 @@ export default function PurchaseCreateAction() {
       .sort((left, right) => left.localeCompare(right)),
     [products],
   );
-  function getSavedSupplierContacts(company: string) {
-    const normalizedCompany = company.trim().toLocaleLowerCase();
+  function getSavedSupplierContacts() {
     const seenContacts = new Set<string>();
     return purchaseListSnapshot.rows
-      .filter((row) =>
-        row.supplier.trim().toLocaleLowerCase() === normalizedCompany
-        && row.supplierContactName?.trim(),
-      )
+      .filter((row) => row.supplierContactName?.trim() && row.supplierPhone?.trim())
       .sort((left, right) => Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? ""))
       .map((row) => ({
         name: row.supplierContactName?.trim() ?? "",
@@ -308,14 +329,26 @@ export default function PurchaseCreateAction() {
       }))
       .filter((contact) => {
         const key = `${contact.name.toLocaleLowerCase()}\u0000${contact.phone.replace(/\D/g, "")}`;
-        if (!contact.name || seenContacts.has(key)) return false;
+        if (!contact.name || !contact.phone || seenContacts.has(key)) return false;
         seenContacts.add(key);
         return true;
       });
   }
 
   function getSavedSupplierContact(company: string) {
-    return getSavedSupplierContacts(company)[0];
+    const normalizedCompany = company.trim().toLocaleLowerCase();
+    const companyContact = purchaseListSnapshot.rows.find((row) =>
+      row.supplier.trim().toLocaleLowerCase() === normalizedCompany
+      && row.supplierContactName?.trim()
+      && row.supplierPhone?.trim(),
+    );
+    if (companyContact) {
+      return {
+        name: companyContact.supplierContactName?.trim() ?? "",
+        phone: companyContact.supplierPhone?.trim() ?? "",
+      };
+    }
+    return getSavedSupplierContacts()[0];
   }
   const selectedProductDetails = companySelections.flatMap((companySelection) => {
     const companyProducts = products.filter((product) => product.manufacturer.trim() === companySelection.company);
@@ -332,9 +365,8 @@ export default function PurchaseCreateAction() {
   );
   const pendingOrderReceiptRows = pendingOrderReceipts.flatMap((receipt) => receipt.rows);
   const pendingOrderReceiptIds = new Set(pendingOrderReceipts.map((receipt) => receipt.sourceRowId));
-  const canReceivePurchase = (selectedBatchDetails.length > 0 || pendingOrderReceiptRows.length > 0)
-    && companySelections.every((selection) => !selection.isAddingCompany)
-    && !isLoading;
+  const hasReceiveInvoiceRows = selectedBatchDetails.length > 0 || pendingOrderReceiptRows.length > 0;
+  const canReceivePurchase = hasReceiveInvoiceRows && !isLoading;
   const activeCompanyName = companySelections.find((selection) => selection.id === activeCompanySelectionId)?.company;
   const ongoingOrderRows = activeCompanyName
     ? placeOrderListSnapshot.rows.filter((row) =>
@@ -343,9 +375,65 @@ export default function PurchaseCreateAction() {
       !pendingOrderReceiptIds.has(row.id),
     )
     : [];
-  const receivedInvoiceRows = activeCompanyName
-    ? pendingOrderReceiptRows.filter((row) => row.supplier === activeCompanyName)
-    : [];
+  const receivedInvoiceRows = pendingOrderReceiptRows;
+  const receiveSummaryLines = [
+    ...selectedBatchDetails.map(({ batch }) => ({
+      quantity: parseOrderPrice(batch.quantity) ?? 0,
+      amount: parseOrderPrice(batch.totalPrice) ?? 0,
+    })),
+    ...pendingOrderReceiptRows.map((row) => ({
+      quantity: parseOrderPrice(row.quantity ?? "") ?? 0,
+      amount: parseOrderPrice(row.totalPrice ?? "") ?? 0,
+    })),
+  ];
+  const receiveSummaryCompanyCount = new Set([
+    ...companySelections.map((selection) => selection.company.trim().toLocaleLowerCase()).filter(Boolean),
+    ...pendingOrderReceiptRows.map((row) => row.supplier.trim().toLocaleLowerCase()).filter(Boolean),
+  ]).size;
+  const receiveSummaryBrandCount = new Set([
+    ...selectedProductDetails.map(({ companySelection, selection, product }) =>
+      `${companySelection.company}\u0000${product?.brand || product?.medicine_name || selection.customBrand}`.toLocaleLowerCase(),
+    ),
+    ...pendingOrderReceiptRows.map((row) => `${row.supplier}\u0000${row.brand}`.toLocaleLowerCase()),
+  ]).size;
+  const receiveSummaryQuantity = receiveSummaryLines.reduce((total, line) => total + line.quantity, 0);
+  const receiveSummaryTotal = receiveSummaryLines.reduce((total, line) => total + line.amount, 0);
+  const parsedReceiveDiscount = receiveDiscountValue.trim() ? Number(receiveDiscountValue) : 0;
+  const validReceiveDiscount = Number.isFinite(parsedReceiveDiscount)
+    && parsedReceiveDiscount >= 0
+    && (receiveDiscountType === "percent" ? parsedReceiveDiscount <= 100 : parsedReceiveDiscount <= receiveSummaryTotal);
+  const receiveDiscountAmount = validReceiveDiscount
+    ? Number((receiveDiscountType === "percent"
+      ? receiveSummaryTotal * parsedReceiveDiscount / 100
+      : parsedReceiveDiscount).toFixed(2))
+    : 0;
+  const receiveTaxBase = Math.max(0, receiveSummaryTotal - receiveDiscountAmount);
+  const parsedReceiveTaxRate = receiveTaxRate.trim() ? Number(receiveTaxRate) : 0;
+  const validReceiveTaxRate = Number.isFinite(parsedReceiveTaxRate)
+    && parsedReceiveTaxRate >= 0
+    && parsedReceiveTaxRate <= 100;
+  const receiveTaxAmount = validReceiveTaxRate
+    ? Number((receiveTaxBase * parsedReceiveTaxRate / 100).toFixed(2))
+    : 0;
+  const receiveSubTotal = Number((receiveTaxBase + receiveTaxAmount).toFixed(2));
+  const parsedReceivePayAmount = receivePayAmount.trim() ? Number(receivePayAmount) : 0;
+  const validReceivePayAmount = Number.isFinite(parsedReceivePayAmount)
+    && parsedReceivePayAmount >= 0
+    && parsedReceivePayAmount <= receiveSubTotal;
+  const receivePaidAmount = validReceivePayAmount ? Number(parsedReceivePayAmount.toFixed(2)) : 0;
+  const receiveDueAmount = validReceivePayAmount
+    ? Number(Math.max(0, receiveSubTotal - receivePaidAmount).toFixed(2))
+    : receiveSubTotal;
+  const receivePaymentMethodOptions = [
+    { value: "cash", label: "Cash" },
+    ...paymentMethodsSnapshot.rows.map((method) => ({
+      value: `${method.type}:${method.id}`,
+      label: method.type === "mobile" ? method.name : method.bankName,
+    })),
+  ];
+  const effectiveReceivePaymentMethod = receivePaymentMethodOptions.some((option) => option.value === receivePaymentMethod)
+    ? receivePaymentMethod
+    : "cash";
   const placeOrderTotal = placeOrderItems.reduce((total, item) => total + (parseOrderPrice(item.totalPrice) ?? 0), 0);
 
   useEffect(() => {
@@ -380,7 +468,6 @@ export default function PurchaseCreateAction() {
         setProducts(rows);
         setCompanySelections([createCompanySelection(0, 0)]);
         setActiveCompanySelectionId(0);
-        setIsCompanyListOpen(false);
         setNextCompanySelectionId(1);
         setNextBrandSelectionId(1);
       } catch (error) {
@@ -400,18 +487,40 @@ export default function PurchaseCreateAction() {
     setIsOpen(false);
     setCompanySelections([createCompanySelection(0, 0)]);
     setActiveCompanySelectionId(0);
-    setIsCompanyListOpen(false);
     setNextCompanySelectionId(1);
     setNextBrandSelectionId(1);
     setPendingBatchEntry(null);
+    setBatchPurchasePriceMode("flat");
+    setBatchPurchasePriceRate("");
     setPendingOrderReceipts([]);
     setBatchEntryError("");
     setErrorMessage("");
     setPurchaseSaveError("");
+    setReceiveDiscountType("flat");
+    setReceiveDiscountValue("");
+    setReceiveTaxRate("0");
+    setReceivePaymentMethod("cash");
+    setReceivePayAmount("");
   }
 
   function receivePurchase() {
     if (!canReceivePurchase) return;
+    if (!validReceiveDiscount) {
+      setPurchaseSaveError("Enter a valid discount amount.");
+      return;
+    }
+    if (!validReceiveTaxRate) {
+      setPurchaseSaveError("Enter a VAT/Tax rate from 0 to 100.");
+      return;
+    }
+    if (!validReceivePayAmount) {
+      setPurchaseSaveError("Enter a payment amount between 0 and the subtotal.");
+      return;
+    }
+    if (paymentMethodsSnapshot.error) {
+      setPurchaseSaveError("Could not load payment methods. Please try again.");
+      return;
+    }
     try {
       const receiveRows = readPurchaseListRows();
       const nextOrderNumber = receiveRows.reduce((maxNumber, row) => {
@@ -446,7 +555,9 @@ export default function PurchaseCreateAction() {
           packPrice: batch.purchasePrice,
           productPackPrice: product?.pack_price,
           unitPurchasePrice: calculateUnitPurchasePrice(batch.packSize, batch.totalPrice, batch.quantity),
-          unitPrice: displayValue(product?.unit_price),
+          unitPrice: getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+          orderPaidAmount: formatOrderPrice(receivePaidAmount),
+          orderDueAmount: formatOrderPrice(receiveDueAmount),
           productId: product?.id,
           status: "Received",
         })),
@@ -458,13 +569,17 @@ export default function PurchaseCreateAction() {
         supplierContactName: companySelections.find((selection) => selection.company === row.supplier)?.supplierContactName.trim()
           || getDefaultSupplierName(row.supplier),
         supplierPhone: companySelections.find((selection) => selection.company === row.supplier)?.supplierPhone.trim() ?? "",
+        orderPaidAmount: formatOrderPrice(receivePaidAmount),
+        orderDueAmount: formatOrderPrice(receiveDueAmount),
       }));
       const updatedRows = mergeReceivedRows(receiveRows, [...newRows, ...stagedOrderRows]);
       persistPurchaseListRows(updatedRows);
       if (pendingOrderReceipts.length > 0) {
         const receivedPlaceOrders = new Map(pendingOrderReceipts.map((receipt) => {
           const receivedBatchKeys = new Set(receipt.rows.map(getReceivedBatchKey));
-          const matchingRows = updatedRows.filter((row) => receivedBatchKeys.has(getReceivedBatchKey(row)));
+          const matchingRows = updatedRows.filter(
+            (row) => row.order === order && receivedBatchKeys.has(getReceivedBatchKey(row)),
+          );
           const quantity = matchingRows.reduce(
             (total, row) => total + (parseOrderPrice(row.quantity ?? "") ?? 0),
             0,
@@ -588,6 +703,8 @@ export default function PurchaseCreateAction() {
     batches: BatchDetails[] = [],
   ) {
     const product = products.find((item) => item.id === brand.productId);
+    setBatchPurchasePriceMode("flat");
+    setBatchPurchasePriceRate("");
     setPendingBatchEntry({
       companySelectionId,
       brandSelectionId,
@@ -612,6 +729,8 @@ export default function PurchaseCreateAction() {
         (item.brand.trim() || item.medicine_name.trim()) === row.brand &&
         item.strength === row.strength,
       );
+    setBatchPurchasePriceMode("flat");
+    setBatchPurchasePriceRate("");
     setPendingBatchEntry({
       companySelectionId: -1,
       brandSelectionId: -1,
@@ -648,7 +767,55 @@ export default function PurchaseCreateAction() {
     value: string,
   ) {
     if (!pendingBatchEntry) return;
-    setPendingBatchEntry((current) => current ? { ...current, [field]: value } : current);
+    setPendingBatchEntry((current) => {
+      if (!current) return current;
+      if (field === "mrp" && batchPurchasePriceMode === "percent") {
+        const price = getPurchasePriceFromRate(value, batchPurchasePriceRate);
+        const quantity = parseOrderPrice(current.quantity);
+        return {
+          ...current,
+          mrp: value,
+          purchasePrice: price ?? "",
+          totalPrice: price !== null && quantity !== null
+            ? formatOrderPrice(quantity * Number(price))
+            : "",
+        };
+      }
+      return { ...current, [field]: value };
+    });
+    setBatchEntryError("");
+  }
+
+  function getPurchasePriceFromRate(mrpValue: string, rateValue: string) {
+    const mrp = parseOrderPrice(mrpValue);
+    const rate = parseOrderPrice(rateValue);
+    if (mrp === null || rate === null || rate > 100) return null;
+    return formatOrderPrice(Number((mrp * (1 - rate / 100)).toFixed(2)));
+  }
+
+  function getCurrentBatchPurchasePrice() {
+    if (!pendingBatchEntry) return null;
+    if (batchPurchasePriceMode === "percent") {
+      return getPurchasePriceFromRate(pendingBatchEntry.mrp, batchPurchasePriceRate);
+    }
+    const price = parseOrderPrice(pendingBatchEntry.purchasePrice);
+    return price === null ? null : formatOrderPrice(price);
+  }
+
+  function updateBatchPurchasePriceRate(rateValue: string) {
+    setBatchPurchasePriceRate(rateValue);
+    setPendingBatchEntry((current) => {
+      if (!current) return current;
+      const purchasePrice = getPurchasePriceFromRate(current.mrp, rateValue);
+      const quantity = parseOrderPrice(current.quantity);
+      return {
+        ...current,
+        purchasePrice: purchasePrice ?? "",
+        totalPrice: purchasePrice !== null && quantity !== null
+          ? formatOrderPrice(quantity * Number(purchasePrice))
+          : "",
+      };
+    });
     setBatchEntryError("");
   }
 
@@ -725,12 +892,21 @@ export default function PurchaseCreateAction() {
     event.preventDefault();
     if (!pendingBatchEntry) return;
     let batches = pendingBatchEntry.batches;
+    const product = products.find((item) => item.id === pendingBatchEntry.productId);
+    const defaultMrp = pendingBatchEntry.placeOrderRow?.mrp
+      || (product?.pack_price.trim() && product.pack_price !== "-" ? product.pack_price : "");
+    const defaultPackSize = pendingBatchEntry.placeOrderRow?.packSize
+      || product?.pack_size.trim()
+      || "";
     const batchNumber = pendingBatchEntry.batchNumber.trim();
     const hasCurrentBatchValues = batchNumber ||
       pendingBatchEntry.mfgDate ||
       pendingBatchEntry.expDate ||
+      pendingBatchEntry.mrp !== defaultMrp ||
+      pendingBatchEntry.packSize !== defaultPackSize ||
       pendingBatchEntry.quantity ||
       pendingBatchEntry.purchasePrice ||
+      (batchPurchasePriceMode === "percent" && batchPurchasePriceRate) ||
       pendingBatchEntry.totalPrice;
     if (hasCurrentBatchValues) {
       if (!batchNumber || !pendingBatchEntry.mfgDate || !pendingBatchEntry.expDate) {
@@ -747,23 +923,27 @@ export default function PurchaseCreateAction() {
         setBatchEntryError("Exp Date must be after Mfg Date.");
         return;
       }
+      if (batchPurchasePriceMode === "percent" && getPurchasePriceFromRate(pendingBatchEntry.mrp, batchPurchasePriceRate) === null) {
+        setBatchEntryError("Enter a discount percentage from 0 to 100 and a valid Box MRP.");
+        return;
+      }
       const quantity = parseOrderPrice(pendingBatchEntry.quantity);
       const purchasePrice = parseOrderPrice(pendingBatchEntry.purchasePrice);
       const totalPrice = parseOrderPrice(pendingBatchEntry.totalPrice);
       if (
+        (pendingBatchEntry.mrp && parseOrderPrice(pendingBatchEntry.mrp) === null) ||
         (pendingBatchEntry.quantity && (quantity === null || quantity <= 0)) ||
         (pendingBatchEntry.purchasePrice && purchasePrice === null) ||
         (pendingBatchEntry.totalPrice && totalPrice === null)
       ) {
-        setBatchEntryError("Enter valid non-negative numbers for Box Quantity, Purchase Price (Box), and Total Price.");
+        setBatchEntryError("Enter a valid non-negative Box MRP, Box Quantity, Purchase Price (Box), and Total Price.");
         return;
       }
-      const product = products.find((item) => item.id === pendingBatchEntry.productId);
       batches = [...batches, {
         batchNumber,
         mfgDate,
         expDate,
-        mrp: pendingBatchEntry.mrp,
+        mrp: pendingBatchEntry.mrp.trim(),
         packSize: pendingBatchEntry.packSize.trim() || product?.pack_size.trim() || pendingBatchEntry.placeOrderRow?.packSize || "-",
         quantity: pendingBatchEntry.quantity,
         purchasePrice: pendingBatchEntry.purchasePrice,
@@ -797,7 +977,7 @@ export default function PurchaseCreateAction() {
         expDate: batch.expDate,
         mrp: batch.mrp,
         packSize: batch.packSize,
-        unitPrice: sourceRow.unitPrice,
+        unitPrice: getUnitPrice(sourceRow.unitPrice, batch.mrp, batch.packSize),
         quantity: batch.quantity || sourceRow.quantity || "",
         totalPrice: batch.totalPrice || sourceRow.totalPrice || "",
         unitPurchasePrice: calculateUnitPurchasePrice(
@@ -819,13 +999,39 @@ export default function PurchaseCreateAction() {
       return;
     }
 
-    updateBrandSelection(pendingBatchEntry.companySelectionId, pendingBatchEntry.brandSelectionId, {
-      productId: pendingBatchEntry.productId,
-      customBrand: pendingBatchEntry.customBrand,
-      brandDraft: "",
-      isAddingBrand: false,
-      batches,
-    });
+    const companySelection = companySelections.find((selection) => selection.id === pendingBatchEntry.companySelectionId);
+    const hasUnusedBrandSearch = companySelection?.brands.some((selection) =>
+      selection.id !== pendingBatchEntry.brandSelectionId
+      && !selection.productId
+      && !selection.customBrand
+      && !selection.isAddingBrand,
+    ) ?? false;
+    const newBrandSearch = hasUnusedBrandSearch
+      ? undefined
+      : createBrandSelection(nextBrandSelectionId);
+    if (newBrandSearch) setNextBrandSelectionId((current) => current + 1);
+    setCompanySelections((current) => current.map((selection) =>
+      selection.id === pendingBatchEntry.companySelectionId
+        ? {
+            ...selection,
+            brands: [
+              ...selection.brands.map((brand) =>
+                brand.id === pendingBatchEntry.brandSelectionId
+                  ? {
+                      ...brand,
+                      productId: pendingBatchEntry.productId,
+                      customBrand: pendingBatchEntry.customBrand,
+                      brandDraft: "",
+                      isAddingBrand: false,
+                      batches,
+                    }
+                  : brand,
+              ),
+              ...(newBrandSearch ? [newBrandSearch] : []),
+            ],
+          }
+        : selection,
+    ));
     setPendingBatchEntry(null);
     setBatchEntryError("");
   }
@@ -837,8 +1043,29 @@ export default function PurchaseCreateAction() {
   }
 
   function setCompanyAndResetBrands(companyId: number, company: string) {
-    const brand = createBrandSelection(nextBrandSelectionId);
     const savedContact = getSavedSupplierContact(company);
+    const currentSelection = companySelections.find((selection) => selection.id === companyId);
+    const hasInvoiceBatches = currentSelection?.brands.some((brandSelection) => brandSelection.batches.length > 0) ?? false;
+    if (currentSelection && currentSelection.company !== company && hasInvoiceBatches) {
+      const newSelectionId = nextCompanySelectionId;
+      const newBrand = createBrandSelection(nextBrandSelectionId);
+      setCompanySelections((current) => [
+        ...current,
+        {
+          ...createCompanySelection(newSelectionId, newBrand.id),
+          company,
+          supplierContactName: savedContact?.name || getDefaultSupplierName(company),
+          supplierPhone: savedContact?.phone ?? "",
+        },
+      ]);
+      setActiveCompanySelectionId(newSelectionId);
+      setNextCompanySelectionId((current) => current + 1);
+      setNextBrandSelectionId((current) => current + 1);
+      setFocusedSupplierInput(null);
+      return;
+    }
+
+    const brand = createBrandSelection(nextBrandSelectionId);
     setNextBrandSelectionId((current) => current + 1);
     setCompanySelections((current) => current.map((selection) =>
       selection.id === companyId
@@ -853,7 +1080,7 @@ export default function PurchaseCreateAction() {
           }
         : selection,
     ));
-    setFocusedSupplierNameId(null);
+    setFocusedSupplierInput(null);
   }
 
   function updateBrandSelection(companyId: number, brandId: number, updates: Partial<Omit<BrandSelection, "id">>) {
@@ -881,42 +1108,6 @@ export default function PurchaseCreateAction() {
     setNextBrandSelectionId((current) => current + 1);
   }
 
-  function removeCompanySelection(companyId: number) {
-    const remainingSelections = companySelections.filter((selection) => selection.id !== companyId);
-    if (remainingSelections.length === 0) {
-      const replacement = createCompanySelection(nextCompanySelectionId, nextBrandSelectionId);
-      setCompanySelections([replacement]);
-      setActiveCompanySelectionId(replacement.id);
-      setNextCompanySelectionId((current) => current + 1);
-      setNextBrandSelectionId((current) => current + 1);
-    } else {
-      setCompanySelections(remainingSelections);
-      if (activeCompanySelectionId === companyId) {
-        setActiveCompanySelectionId(
-          (remainingSelections.find((selection) => selection.company) ?? remainingSelections[0]).id,
-        );
-      }
-    }
-    setIsCompanyListOpen(false);
-  }
-
-  function addBrandSelection(companyId: number) {
-    const companySelection = companySelections.find((selection) => selection.id === companyId);
-    if (
-      !companySelection ||
-      companySelection.brands.some((brand) => !brand.productId && !brand.customBrand || brand.isAddingBrand)
-    ) {
-      return;
-    }
-
-    setCompanySelections((current) => current.map((companySelection) =>
-      companySelection.id === companyId
-        ? { ...companySelection, brands: [...companySelection.brands, createBrandSelection(nextBrandSelectionId)] }
-        : companySelection,
-    ));
-    setNextBrandSelectionId((current) => current + 1);
-  }
-
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -938,13 +1129,13 @@ export default function PurchaseCreateAction() {
       {isOpen && (
         <div
           onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}
-          style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
+          style={{ position: "fixed", inset: "78px 32px 28px 102px", zIndex: 50, display: "grid", placeItems: "center", background: "rgba(15, 28, 21, 0.48)" }}
         >
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-purchase-title"
-            style={{ width: "min(1120px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
+            style={{ display: "flex", flexDirection: "column", width: "min(1480px, 100%)", height: "100%", maxHeight: "100%", overflow: "hidden", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
@@ -954,7 +1145,9 @@ export default function PurchaseCreateAction() {
               <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
 
-            <div style={{ display: "grid", gap: 16, padding: "22px 24px" }}>
+            <div className="receive-order-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 290px", flex: 1, minHeight: 0, overflowY: "auto", alignItems: "start", gap: 16, padding: "22px 24px" }}>
+              <div style={{ minWidth: 0 }}>
+              <div style={{ display: "grid", gap: 16 }}>
               {companySelections
                 .filter((selection) => selection.id === activeCompanySelectionId)
                 .map((companySelection) => {
@@ -965,15 +1158,45 @@ export default function PurchaseCreateAction() {
                     const rightBrand = right.brand.trim() || right.medicine_name.trim();
                     return leftBrand.localeCompare(rightBrand) || left.strength.localeCompare(right.strength);
                   });
-                const savedSupplierContacts = getSavedSupplierContacts(companySelection.company);
-                const supplierSearch = companySelection.supplierContactName.trim().toLocaleLowerCase();
-                const supplierSuggestions = focusedSupplierNameId === companySelection.id
+                const savedSupplierContacts = getSavedSupplierContacts();
+                const activeSupplierField = focusedSupplierInput?.selectionId === companySelection.id
+                  ? focusedSupplierInput.field
+                  : null;
+                const supplierSearch = activeSupplierField === "phone"
+                  ? companySelection.supplierPhone.replace(/\D/g, "")
+                  : companySelection.supplierContactName.trim().toLocaleLowerCase();
+                const supplierSuggestions = activeSupplierField && supplierSearch
                   ? savedSupplierContacts.filter((contact) =>
-                    !supplierSearch
-                    || contact.name.toLocaleLowerCase().includes(supplierSearch)
-                    || contact.phone.toLocaleLowerCase().includes(supplierSearch),
+                    activeSupplierField === "phone"
+                      ? contact.phone.replace(/\D/g, "").includes(supplierSearch)
+                      : contact.name.toLocaleLowerCase().includes(supplierSearch),
                   ).slice(0, 5)
                   : [];
+                const renderSupplierSuggestions = (field: "name" | "phone") =>
+                  activeSupplierField === field && supplierSuggestions.length > 0 ? (
+                    <div role="listbox" aria-label="Saved supplier contacts" style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 26, display: "grid", maxHeight: 160, overflowY: "auto", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 22px rgba(20, 35, 27, 0.14)" }}>
+                      {supplierSuggestions.map((contact) => (
+                        <button
+                          key={`${contact.name}-${contact.phone}`}
+                          type="button"
+                          role="option"
+                          aria-selected="false"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            updateCompanySelection(companySelection.id, {
+                              supplierContactName: contact.name,
+                              supplierPhone: contact.phone,
+                            });
+                            setFocusedSupplierInput(null);
+                          }}
+                          style={{ display: "grid", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#34453b", padding: "7px 9px", textAlign: "left", cursor: "pointer" }}
+                        >
+                          <span style={{ fontSize: 12 }}>{contact.name}</span>
+                          <span style={{ color: "#77857d", fontSize: 10 }}>{contact.phone}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null;
                 const companiesSelectedElsewhere = new Set(companySelections
                   .filter((selection) => selection.id !== companySelection.id)
                   .map((selection) => selection.company));
@@ -983,9 +1206,10 @@ export default function PurchaseCreateAction() {
                 );
 
                 return (
-                  <section key={companySelection.id} aria-label="Purchase company" style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.85fr) minmax(320px, 1.4fr)", gap: 18, padding: 16, border: "1px solid #dce5df", borderRadius: 8, background: "#fbfcfb" }}>
-                    <div style={{ display: "grid", alignContent: "start", gap: 7, color: "#526158", fontSize: 12, fontWeight: 600 }}>
-                      <span>Company Name</span>
+                  <section key={companySelection.id} aria-label="Purchase company" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 14, padding: 16, border: "1px solid #dce5df", borderRadius: 8, background: "#fbfcfb" }}>
+                    <div className="receive-order-company-fields" style={{ display: "grid", gridTemplateColumns: "minmax(190px, 1.2fr) minmax(170px, 1fr) minmax(150px, 0.8fr) auto", alignItems: "end", gap: 10, color: "#526158", fontSize: 12, fontWeight: 600 }}>
+                      <div style={{ display: "grid", alignContent: "start", gap: 7 }}>
+                      <span style={{ color: "#526158", fontSize: 11, fontWeight: 600 }}>Company Name</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                           <input
@@ -1056,7 +1280,8 @@ export default function PurchaseCreateAction() {
                           >+</button>
                         )}
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.8fr)", gap: 8 }}>
+                      </div>
+                      <div style={{ display: "contents" }}>
                         <label style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
                           Supplier Name
                           <input
@@ -1064,12 +1289,19 @@ export default function PurchaseCreateAction() {
                             autoComplete="off"
                             value={companySelection.supplierContactName}
                             onFocus={() => {
-                              setFocusedSupplierNameId(companySelection.id);
-                              updateCompanySelection(companySelection.id, { supplierContactName: "" });
+                              setFocusedSupplierInput({ selectionId: companySelection.id, field: "name" });
+                              if (companySelection.supplierContactName === getDefaultSupplierName(companySelection.company)) {
+                                updateCompanySelection(companySelection.id, { supplierContactName: "" });
+                              }
                             }}
-                            onChange={(event) => updateCompanySelection(companySelection.id, { supplierContactName: event.currentTarget.value })}
+                            onChange={(event) => {
+                              setFocusedSupplierInput({ selectionId: companySelection.id, field: "name" });
+                              updateCompanySelection(companySelection.id, { supplierContactName: event.currentTarget.value });
+                            }}
                             onBlur={() => {
-                              setFocusedSupplierNameId(null);
+                              setFocusedSupplierInput((current) =>
+                                current?.selectionId === companySelection.id && current.field === "name" ? null : current,
+                              );
                               setCompanySelections((current) => current.map((selection) =>
                                 selection.id === companySelection.id && !selection.supplierContactName.trim()
                                   ? {
@@ -1082,92 +1314,36 @@ export default function PurchaseCreateAction() {
                             placeholder={`${companySelection.company || "Company"} Distributor`}
                             style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
                           />
-                          {supplierSuggestions.length > 0 && (
-                            <div role="listbox" aria-label={`Saved suppliers for ${companySelection.company}`} style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 26, display: "grid", maxHeight: 160, overflowY: "auto", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 22px rgba(20, 35, 27, 0.14)" }}>
-                              {supplierSuggestions.map((contact) => (
-                                <button
-                                  key={`${contact.name}-${contact.phone}`}
-                                  type="button"
-                                  role="option"
-                                  aria-selected="false"
-                                  onMouseDown={(event) => event.preventDefault()}
-                                  onClick={() => {
-                                    updateCompanySelection(companySelection.id, {
-                                      supplierContactName: contact.name,
-                                      supplierPhone: contact.phone,
-                                    });
-                                    setFocusedSupplierNameId(null);
-                                  }}
-                                  style={{ display: "grid", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#34453b", padding: "7px 9px", textAlign: "left", cursor: "pointer" }}
-                                >
-                                  <span style={{ fontSize: 12 }}>{contact.name}</span>
-                                  {contact.phone && <span style={{ color: "#77857d", fontSize: 10 }}>{contact.phone}</span>}
-                                </button>
-                              ))}
-                            </div>
-                          )}
+                          {renderSupplierSuggestions("name")}
                         </label>
-                        <label style={{ display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
+                        <label style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
                           Phone Number
                           <input
                             aria-label={`Supplier Phone Number for ${companySelection.company || "company"}`}
                             type="tel"
                             inputMode="tel"
+                            autoComplete="off"
                             value={companySelection.supplierPhone}
-                            onChange={(event) => updateCompanySelection(companySelection.id, { supplierPhone: event.currentTarget.value })}
+                            onFocus={() => setFocusedSupplierInput({ selectionId: companySelection.id, field: "phone" })}
+                            onChange={(event) => {
+                              setFocusedSupplierInput({ selectionId: companySelection.id, field: "phone" });
+                              updateCompanySelection(companySelection.id, { supplierPhone: event.currentTarget.value });
+                            }}
+                            onBlur={() => {
+                              setFocusedSupplierInput((current) =>
+                                current?.selectionId === companySelection.id && current.field === "phone" ? null : current,
+                              );
+                            }}
                             placeholder="Phone number"
                             style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
                           />
+                          {renderSupplierSuggestions("phone")}
                         </label>
                       </div>
                     </div>
 
                     <div style={{ display: "grid", alignContent: "start", gap: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                        <span style={{ color: "#526158", fontSize: 12, fontWeight: 600 }}>Brand Name</span>
-                        <div style={{ position: "relative" }}>
-                          <button
-                            type="button"
-                            aria-haspopup="true"
-                            aria-expanded={isCompanyListOpen}
-                            onClick={() => setIsCompanyListOpen((current) => !current)}
-                            style={{ border: 0, background: "transparent", color: "#16845f", padding: 0, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                          >Company List ▾</button>
-                          {isCompanyListOpen && (
-                            <div aria-label="Company List" style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20, display: "grid", gap: 2, minWidth: 220, maxHeight: 260, overflowY: "auto", padding: 6, border: "1px solid #dce5df", borderRadius: 7, background: "#fff", boxShadow: "0 12px 32px rgba(20, 35, 27, 0.16)" }}>
-                              {companySelections.filter((item) => item.company).map((item) => (
-                                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <button
-                                    type="button"
-                                    aria-pressed={item.id === companySelection.id}
-                                    onClick={() => {
-                                      setActiveCompanySelectionId(item.id);
-                                      setIsCompanyListOpen(false);
-                                    }}
-                                    style={{ flex: 1, minWidth: 0, border: 0, borderRadius: 4, background: item.id === companySelection.id ? "#eaf7f1" : "#fff", color: "#34453b", padding: "8px 9px", fontSize: 12, textAlign: "left", cursor: "pointer" }}
-                                  >{item.company}</button>
-                                  <button
-                                    type="button"
-                                    aria-label={`Delete ${item.company} and its selected brand data`}
-                                    title={`Delete ${item.company}`}
-                                    onClick={() => removeCompanySelection(item.id)}
-                                    style={{ width: 26, height: 26, border: 0, borderRadius: 4, background: "transparent", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
-                                  >×</button>
-                                </div>
-                              ))}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsCompanyListOpen(false);
-                                  addCompanySelection();
-                                }}
-                                disabled={!companySelection.company || isLoading}
-                                style={{ border: 0, borderTop: "1px solid #edf0ed", background: "#fff", color: "#16845f", padding: "9px", fontSize: 12, textAlign: "left", cursor: "pointer" }}
-                              >+ Add company</button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <span style={{ color: "#526158", fontSize: 12, fontWeight: 600 }}>Brand Name</span>
                       {companySelection.brands
                         .filter((selection) => (!selection.productId && !selection.customBrand) || selection.isAddingBrand)
                         .map((selection, brandIndex) => (
@@ -1259,14 +1435,6 @@ export default function PurchaseCreateAction() {
                           )}
                         </div>
                       ))}
-                      {companySelection.company && !companySelection.isAddingCompany && (
-                        <button
-                          type="button"
-                          onClick={() => addBrandSelection(companySelection.id)}
-                          disabled={companySelection.brands.some((brand) => (!brand.productId && !brand.customBrand) || brand.isAddingBrand)}
-                          style={{ justifySelf: "start", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#16845f", padding: "7px 10px", fontSize: 12, fontWeight: 600, cursor: companySelection.brands.some((brand) => (!brand.productId && !brand.customBrand) || brand.isAddingBrand) ? "not-allowed" : "pointer", opacity: companySelection.brands.some((brand) => (!brand.productId && !brand.customBrand) || brand.isAddingBrand) ? 0.55 : 1 }}
-                        >+ Add another brand</button>
-                      )}
                     </div>
                   </section>
                 );
@@ -1312,13 +1480,13 @@ export default function PurchaseCreateAction() {
 
             {(selectedBatchDetails.length > 0 || receivedInvoiceRows.length > 0) && (
               <>
-                <h3 style={{ margin: "0 24px 10px", color: "#526158", fontSize: 13, fontWeight: 700 }}>Receive Invoice</h3>
-                <div style={{ margin: "0 24px 18px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
-                  <table aria-label="Selected brand details" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", textAlign: "left" }}>
+                <h3 style={{ margin: "0 0 10px", color: "#526158", fontSize: 13, fontWeight: 700 }}>Receive Invoice</h3>
+                <div style={{ margin: "0 0 18px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
+                  <table aria-label="Selected brand details" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left" }}>
                     <thead>
                       <tr>
-                        {["Brand Name", "Generic Name", "Strength", "Dosage Form", "Batch Number", "Mfg Date", "Exp Date", "Box MRP", "Pack Size", "Unit Price", "Pack Price", "Actions"].map((heading) => (
-                          <th key={heading} scope="col" style={{ padding: "10px 12px", borderBottom: "1px solid #dce5df", background: "#f4f7f5", color: "#687871", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{heading}</th>
+                        {["Company Name", "Brand Name", "Batch Number", "Mfg Date", "Exp Date", "Box MRP", "Pack Size", "Unit Price", "Box Quantity", "Total Purchase Price", "Actions"].map((heading) => (
+                          <th key={heading} scope="col" style={{ padding: "7px 6px", borderBottom: "1px solid #dce5df", background: "#f4f7f5", color: "#687871", fontSize: 10, fontWeight: 650, whiteSpace: "nowrap" }}>{heading}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1326,21 +1494,20 @@ export default function PurchaseCreateAction() {
                       {selectedBatchDetails.map(({ companySelection, selection, product, batch, batchIndex }, index) => (
                         <tr key={`${companySelection.id}-${selection.id}-${batchIndex}`}>
                           {([
+                            companySelection.company,
                             batchIndex === 0 ? product?.brand || product?.medicine_name || selection.customBrand : "",
-                            batchIndex === 0 ? product?.generic_name : "",
-                            batchIndex === 0 ? product?.strength : "",
-                            batchIndex === 0 ? product?.dosage_form : "",
                             batch.batchNumber,
                             formatMonthYear(batch.mfgDate),
                             formatMonthYear(batch.expDate),
                             batch.mrp,
                             batch.packSize,
-                            batchIndex === 0 ? product?.unit_price : "",
-                            batchIndex === 0 ? product?.pack_price : "",
+                            getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+                            batch.quantity,
+                            batch.totalPrice,
                             null,
                           ] as const).map((value, cellIndex) => (
-                            <td key={cellIndex} style={{ padding: "10px 12px", borderBottom: index === selectedBatchDetails.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 12, whiteSpace: "nowrap" }}>
-                              {cellIndex === 11 ? (
+                            <td key={cellIndex} style={{ padding: "7px 6px", borderBottom: index === selectedBatchDetails.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {cellIndex === 10 ? (
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
                                   <button
@@ -1353,7 +1520,7 @@ export default function PurchaseCreateAction() {
                                     style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
                                   >×</button>
                                 </div>
-                              ) : cellIndex === 4 ? (
+                              ) : cellIndex === 2 ? (
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span>{displayValue(value ?? undefined)}</span>
                                   {batchIndex === 0 && (
@@ -1375,6 +1542,18 @@ export default function PurchaseCreateAction() {
                                     >+</button>
                                   )}
                                 </div>
+                              ) : cellIndex === 1 ? (
+                                <div
+                                  title={batchIndex === 0 ? displayValue(product?.generic_name) : undefined}
+                                  style={{ display: "grid", gap: 3 }}
+                                >
+                                  <span>{displayValue(value ?? undefined)}</span>
+                                  {batchIndex === 0 && (
+                                    <span style={{ color: "#77857d", fontSize: 10 }}>
+                                      {[product?.strength, product?.dosage_form].filter((part) => part && part !== "-").join(" · ")}
+                                    </span>
+                                  )}
+                                </div>
                               ) : value === "" ? "" : displayValue(value ?? undefined)}
                             </td>
                           ))}
@@ -1383,21 +1562,20 @@ export default function PurchaseCreateAction() {
                       {receivedInvoiceRows.map((row, index) => (
                         <tr key={row.id}>
                           {[
+                            row.supplier,
                             row.brand,
-                            row.genericName,
-                            row.strength,
-                            row.dosageForm,
                             row.batchNumber,
                             formatMonthYear(row.mfgDate),
                             formatMonthYear(row.expDate),
                             row.mrp ?? "",
                             row.packSize,
-                            row.unitPrice,
-                            row.packPrice,
+                            getUnitPrice(row.unitPrice, row.mrp, row.packSize),
+                            row.quantity ?? "",
+                            row.totalPrice ?? "",
                             null,
                           ].map((value, cellIndex) => (
-                            <td key={cellIndex} style={{ padding: "10px 12px", borderBottom: index === receivedInvoiceRows.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 12, whiteSpace: "nowrap" }}>
-                              {cellIndex === 11 ? (
+                            <td key={cellIndex} style={{ padding: "7px 6px", borderBottom: index === receivedInvoiceRows.length - 1 ? 0 : "1px solid #e8ede9", color: "#34453b", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {cellIndex === 10 ? (
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
                                   <button
@@ -1415,6 +1593,13 @@ export default function PurchaseCreateAction() {
                                     style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
                                   >×</button>
                                 </div>
+                              ) : cellIndex === 1 ? (
+                                <div title={displayValue(row.genericName)} style={{ display: "grid", gap: 3 }}>
+                                  <span>{displayValue(row.brand)}</span>
+                                  <span style={{ color: "#77857d", fontSize: 10 }}>
+                                    {[row.strength, row.dosageForm].filter((part) => part && part !== "-").join(" · ")}
+                                  </span>
+                                </div>
                               ) : displayValue(value ?? undefined)}
                             </td>
                           ))}
@@ -1426,13 +1611,148 @@ export default function PurchaseCreateAction() {
               </>
             )}
             {purchaseSaveError && <p role="alert" style={{ margin: "0 24px 12px", color: "#b34b43", fontSize: 12 }}>{purchaseSaveError}</p>}
-            <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 24px 18px" }}>
-              <button
-                type="button"
-                onClick={receivePurchase}
-                disabled={!canReceivePurchase}
-                style={{ border: 0, borderRadius: 6, background: canReceivePurchase ? "#179c70" : "#aab7af", color: "#fff", padding: "10px 16px", fontSize: 12, fontWeight: 650, cursor: canReceivePurchase ? "pointer" : "not-allowed" }}
-              >Received</button>
+              </div>
+
+              <aside className="receive-order-summary" aria-label="Bill summary" style={{ position: "sticky", top: 0, alignSelf: "start", display: "grid", alignContent: "start", gap: 10, padding: 14, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+                <div style={{ display: "grid", gap: 8, color: "#526158", fontSize: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Total Company</span>
+                    <strong>{receiveSummaryCompanyCount}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Brands</span>
+                    <strong>{receiveSummaryBrandCount}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Box Quantity</span>
+                    <strong>{receiveSummaryQuantity.toLocaleString()}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, paddingTop: 8, borderTop: "1px solid #e5ebe7" }}>
+                    <strong style={{ color: "#26352f" }}>Total Purchase Price</strong>
+                    <strong style={{ color: "#17704e" }}>৳{receiveSummaryTotal.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div style={{ display: "grid", gap: 5 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ fontWeight: 650 }}>Discount</span>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {(["flat", "percent"] as const).map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            aria-pressed={receiveDiscountType === type}
+                            onClick={() => {
+                              setReceiveDiscountType(type);
+                              setReceiveDiscountValue("");
+                            }}
+                            style={{ border: `1px solid ${receiveDiscountType === type ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: receiveDiscountType === type ? "#eef8f2" : "#fff", color: receiveDiscountType === type ? "#17704e" : "#526158", padding: "4px 6px", fontSize: 10, fontWeight: 650, cursor: "pointer" }}
+                          >{type === "flat" ? "Flat ৳" : "%"}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 7 }}>
+                      <input
+                        className="discount-input"
+                        aria-label={`Discount ${receiveDiscountType === "flat" ? "amount" : "percentage"}`}
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max={receiveDiscountType === "percent" ? 100 : receiveSummaryTotal}
+                        step="0.01"
+                        value={receiveDiscountValue}
+                        onChange={(event) => setReceiveDiscountValue(event.currentTarget.value)}
+                        placeholder={receiveDiscountType === "flat" ? "Discount amount" : "Discount %"}
+                        style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
+                      />
+                      <strong style={{ color: "#526158", whiteSpace: "nowrap" }}>−৳{receiveDiscountAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    </div>
+                    {!validReceiveDiscount && (
+                      <span role="alert" style={{ color: "#b34b43", fontSize: 10 }}>
+                        {receiveDiscountType === "percent" ? "Discount cannot exceed 100%." : "Discount cannot exceed total purchase price."}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 7 }}>
+                    <label htmlFor="receive-tax-rate">VAT/Tax (%)</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        className="discount-input"
+                        id="receive-tax-rate"
+                        aria-label="VAT/Tax percentage"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={receiveTaxRate}
+                        onFocus={() => setReceiveTaxRate("")}
+                        onChange={(event) => setReceiveTaxRate(event.currentTarget.value)}
+                        style={{ ...fieldStyle, width: 64, padding: "5px 7px", fontSize: 12, textAlign: "right" }}
+                      />
+                      <strong style={{ whiteSpace: "nowrap" }}>+৳{receiveTaxAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+                  {!validReceiveTaxRate && (
+                    <span role="alert" style={{ color: "#b34b43", fontSize: 10 }}>VAT/Tax must be between zero and 100%.</span>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, paddingTop: 7, borderTop: "1px solid #e5ebe7" }}>
+                    <strong style={{ color: "#26352f" }}>Sub Total</strong>
+                    <strong style={{ color: "#17704e" }}>৳{receiveSubTotal.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div role="group" aria-label="Choose purchase payment method" style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {receivePaymentMethodOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={effectiveReceivePaymentMethod === option.value}
+                        onClick={() => setReceivePaymentMethod(option.value)}
+                        style={{ border: `1px solid ${effectiveReceivePaymentMethod === option.value ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: effectiveReceivePaymentMethod === option.value ? "#eef8f2" : "#fff", color: effectiveReceivePaymentMethod === option.value ? "#17704e" : "#526158", padding: "5px 7px", fontSize: 10, fontWeight: 650, cursor: "pointer" }}
+                      >{option.label}</button>
+                    ))}
+                  </div>
+                  {paymentMethodsSnapshot.error && (
+                    <span role="alert" style={{ color: "#b34b43", fontSize: 10 }}>{paymentMethodsSnapshot.error}</span>
+                  )}
+                  <label style={{ display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                    Payment
+                    <input
+                      className="pay-amount-input"
+                      aria-label="Payment amount"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max={receiveSubTotal}
+                      step="0.01"
+                      value={receivePayAmount}
+                      onFocus={() => setReceivePayAmount("")}
+                      onChange={(event) => setReceivePayAmount(event.currentTarget.value)}
+                      placeholder="Payment amount"
+                      style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
+                    />
+                  </label>
+                  {!validReceivePayAmount && (
+                    <span role="alert" style={{ color: "#b34b43", fontSize: 10 }}>
+                      {parsedReceivePayAmount > receiveSubTotal
+                        ? "Payment cannot exceed the Sub Total."
+                        : "Enter a valid non-negative payment amount."}
+                    </span>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Paid</span>
+                    <strong style={{ color: "#17704e" }}>৳{receivePaidAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>Due</span>
+                    <strong style={{ color: receiveDueAmount > 0 ? "#ad4b43" : "#17704e" }}>৳{receiveDueAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={receivePurchase}
+                  disabled={!canReceivePurchase}
+                  style={{ width: "100%", border: 0, borderRadius: 6, background: canReceivePurchase ? "#179c70" : "#aab7af", color: "#fff", padding: "10px 16px", fontSize: 12, fontWeight: 650, cursor: canReceivePurchase ? "pointer" : "not-allowed" }}
+                >Received</button>
+              </aside>
             </div>
 
             {pendingBatchEntry && (
@@ -1444,7 +1764,7 @@ export default function PurchaseCreateAction() {
                   role="dialog"
                   aria-modal="true"
                   aria-labelledby="purchase-batch-title"
-                  style={{ width: "min(680px, 100%)", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
+                  style={{ width: "min(680px, 100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
                 >
                   <div style={{ padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
                     <h2 id="purchase-batch-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Add Batch Details</h2>
@@ -1452,7 +1772,7 @@ export default function PurchaseCreateAction() {
                       {pendingBatchEntry.customBrand || products.find((product) => product.id === pendingBatchEntry.productId)?.brand || "Selected product"}
                     </p>
                   </div>
-                  <form onSubmit={saveBatchEntry} noValidate>
+                  <form onSubmit={saveBatchEntry} noValidate style={{ minHeight: 0, overflowY: "auto" }}>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, padding: "18px 24px" }}>
                       <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
                         Batch Number
@@ -1500,7 +1820,10 @@ export default function PurchaseCreateAction() {
                         Box MRP
                         <input
                           aria-label="Box MRP"
+                          type="number"
                           inputMode="decimal"
+                          min="0"
+                          step="0.01"
                           value={pendingBatchEntry.mrp}
                           onChange={(event) => updatePendingBatchField("mrp", event.target.value)}
                           onFocus={(event) => preservePendingBatchFieldOnFocus("mrp", event.currentTarget)}
@@ -1532,18 +1855,60 @@ export default function PurchaseCreateAction() {
                           style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
                         />
                       </label>
-                      <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
-                        Purchase Price (Box)
-                        <input
-                          aria-label="Purchase Price (Box)"
-                          inputMode="decimal"
-                          value={pendingBatchEntry.purchasePrice}
-                          onChange={(event) => updatePendingBatchField("purchasePrice", event.target.value)}
-                          onBlur={() => finishEditingBatchField("purchasePrice")}
-                          onFocus={(event) => preservePendingBatchFieldOnFocus("purchasePrice", event.currentTarget)}
-                          style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
-                        />
-                      </label>
+                      <div style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
+                        <span>Purchase Price (Box)</span>
+                        <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 5, padding: "4px 0", background: "#fff" }}>
+                          {(["flat", "percent"] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              aria-pressed={batchPurchasePriceMode === mode}
+                              onClick={() => {
+                                setBatchPurchasePriceMode(mode);
+                                if (mode === "percent") updateBatchPurchasePriceRate("");
+                              }}
+                              style={{ border: `1px solid ${batchPurchasePriceMode === mode ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: batchPurchasePriceMode === mode ? "#eef8f2" : "#fff", color: batchPurchasePriceMode === mode ? "#17704e" : "#526158", padding: "5px 8px", fontSize: 10, fontWeight: 650, cursor: "pointer" }}
+                            >{mode === "flat" ? "Flat ৳" : "%"}</button>
+                          ))}
+                          {batchPurchasePriceMode === "percent" && batchPurchasePriceRate.trim() !== "" && (
+                            <span aria-label="Discount percentage and calculated purchase price" style={{ alignSelf: "center", color: "#526158", fontSize: 12, fontWeight: 700 }}>
+                              {getCurrentBatchPurchasePrice() !== null ? `৳${getCurrentBatchPurchasePrice()}` : ""}
+                            </span>
+                          )}
+                          {batchPurchasePriceMode === "flat" && getCurrentBatchPurchasePrice() !== null && (
+                            <span aria-label="Purchase price" style={{ alignSelf: "center", color: "#17704e", fontSize: 12, fontWeight: 700 }}>
+                              ৳{getCurrentBatchPurchasePrice()}
+                            </span>
+                          )}
+                        </div>
+                        {batchPurchasePriceMode === "percent" ? (
+                          <input
+                            aria-label="Purchase Price (Box) discount percentage"
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={batchPurchasePriceRate}
+                            onChange={(event) => updateBatchPurchasePriceRate(event.currentTarget.value)}
+                            placeholder="Discount %"
+                            style={{ ...fieldStyle, width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12 }}
+                          />
+                        ) : (
+                          <input
+                            aria-label="Purchase Price (Box)"
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={pendingBatchEntry.purchasePrice}
+                            onChange={(event) => updatePendingBatchField("purchasePrice", event.target.value)}
+                            onBlur={() => finishEditingBatchField("purchasePrice")}
+                            onFocus={(event) => preservePendingBatchFieldOnFocus("purchasePrice", event.currentTarget)}
+                            style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
+                          />
+                        )}
+                      </div>
                       <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
                         Total Purchase Price
                         <input
@@ -1610,9 +1975,6 @@ export default function PurchaseCreateAction() {
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-              <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
-            </div>
           </section>
         </div>
       )}
