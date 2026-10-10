@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { downloadSaleInvoicePdf } from "./saleInvoicePdf";
-import { getCashRoundingAmount, persistSale, type SalesListRow } from "./salesStorage";
+import {
+  emptySalesListSnapshot,
+  getCashRoundingAmount,
+  getSalesListSnapshot,
+  persistSale,
+  subscribeToSalesList,
+  type SalesListRow,
+} from "./salesStorage";
 import {
   emptyPurchaseListSnapshot,
   getAvailablePurchaseQuantity,
@@ -16,6 +23,11 @@ import {
   getVatTaxSettingsSnapshot,
   subscribeToVatTaxSettings,
 } from "./vatTaxStorage";
+import {
+  emptyPaymentMethodsSnapshot,
+  getPaymentMethodsSnapshot,
+  subscribeToPaymentMethods,
+} from "./paymentMethodsStorage";
 
 type SaleProduct = {
   id: string;
@@ -149,8 +161,22 @@ export default function SalesActions() {
     getVatTaxSettingsSnapshot,
     () => emptyVatTaxSettingsSnapshot,
   );
+  const paymentMethodsSnapshot = useSyncExternalStore(
+    subscribeToPaymentMethods,
+    getPaymentMethodsSnapshot,
+    () => emptyPaymentMethodsSnapshot,
+  );
+  const salesSnapshot = useSyncExternalStore(
+    subscribeToSalesList,
+    getSalesListSnapshot,
+    () => emptySalesListSnapshot,
+  );
   const [matchingProducts, setMatchingProducts] = useState<SaleProduct[]>([]);
   const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
+  const [customerName, setCustomerName] = useState("Walk-in customer");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerSuggestionField, setCustomerSuggestionField] = useState<"name" | "phone" | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
   const [payAmount, setPayAmount] = useState("");
   const [discountType, setDiscountType] = useState<"flat" | "percent">("percent");
   const [discountValue, setDiscountValue] = useState("");
@@ -167,6 +193,40 @@ export default function SalesActions() {
   const [expiredProduct, setExpiredProduct] = useState<SaleProduct | null>(null);
   const searchSequence = useRef(0);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const paymentMethodOptions = [
+    { value: "cash", label: "Cash" },
+    ...paymentMethodsSnapshot.rows.map((method) => ({
+      value: `${method.type}:${method.id}`,
+      label: method.type === "mobile" ? method.name : method.bankName,
+    })),
+  ];
+  const effectivePaymentMethod = paymentMethodOptions.some((option) => option.value === selectedPaymentMethod)
+    ? selectedPaymentMethod
+    : "cash";
+  const customerRecords = new Map<string, { name: string; phone: string }>();
+  for (const invoice of salesSnapshot.rows) {
+    const name = invoice.customer.trim();
+    const phone = invoice.phone?.trim() ?? "";
+    if (!name || name.toLocaleLowerCase() === "walk-in customer") continue;
+    const key = `${name.toLocaleLowerCase()}\u0000${phone.replace(/\D/g, "") || phone.toLocaleLowerCase()}`;
+    if (!customerRecords.has(key)) customerRecords.set(key, { name, phone });
+  }
+  const customerQuery = customerSuggestionField === "name" ? customerName.trim() : customerPhone.trim();
+  const normalizedCustomerQuery = customerQuery.toLocaleLowerCase();
+  const normalizedPhoneQuery = customerQuery.replace(/\D/g, "");
+  const customerSuggestions = customerSuggestionField && customerQuery
+    ? [...customerRecords.values()]
+      .filter((customer) => customerSuggestionField === "name"
+        ? customer.name.toLocaleLowerCase().includes(normalizedCustomerQuery)
+        : normalizedPhoneQuery.length > 0 && customer.phone.replace(/\D/g, "").includes(normalizedPhoneQuery))
+      .slice(0, 6)
+    : [];
+
+  function selectCustomerSuggestion(customer: { name: string; phone: string }) {
+    setCustomerName(customer.name);
+    setCustomerPhone(customer.phone);
+    setCustomerSuggestionField(null);
+  }
 
   useEffect(() => {
     const query = searchTerm.trim();
@@ -267,6 +327,7 @@ export default function SalesActions() {
   const roundedTotal = roundCurrency(netTotal + cashRoundingAmount);
   const hasPayAmount = payAmount.trim() !== "";
   const parsedPayAmount = hasPayAmount ? roundCurrency(Number(payAmount)) : 0;
+  const validCustomerName = customerName.trim().length > 0;
   const validPayAmount = hasPayAmount
     && Number.isFinite(parsedPayAmount)
     && parsedPayAmount >= 0
@@ -384,6 +445,10 @@ export default function SalesActions() {
   }
 
   function saveSale() {
+    if (!validCustomerName) {
+      setSaleSaveError("Customer Name is required.");
+      return;
+    }
     if (!validDiscount) {
       setSaleSaveError(discountType === "percent"
         ? "Discount must be between zero and 100%."
@@ -433,10 +498,22 @@ export default function SalesActions() {
     );
 
     try {
-      const savedSale = persistSale(invoiceLines, parsedPayAmount, discountAmount, parsedTaxRate);
+      const savedSale = persistSale(
+        invoiceLines,
+        parsedPayAmount,
+        discountAmount,
+        parsedTaxRate,
+        customerName.trim() || "Walk-in customer",
+        customerPhone.trim(),
+        paymentMethodOptions.find((option) => option.value === effectivePaymentMethod)?.label ?? "Cash",
+      );
       setSaleSaveError("");
       setSaleLines([]);
       setSelectedProductIds([]);
+      setCustomerName("Walk-in customer");
+      setCustomerPhone("");
+      setCustomerSuggestionField(null);
+      setSelectedPaymentMethod("cash");
       setPayAmount("");
       setDiscountType("percent");
       setDiscountValue("");
@@ -484,10 +561,99 @@ export default function SalesActions() {
           overflow: "hidden",
         }}
       >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "10px 16px", borderBottom: "1px solid #e9eeea" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "10px 16px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="new-sale-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>New Sale</h2>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>Search the Product List and add quantities.</p>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginLeft: "auto" }}>
+                <label style={{ position: "relative", display: "grid", gap: 4, minWidth: 180, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                  <span>
+                    Customer Name <span aria-hidden="true" style={{ color: "#ad4b43" }}>*</span>
+                  </span>
+                  <input
+                    aria-label="Customer Name"
+                    role="combobox"
+                    type="text"
+                    required
+                    aria-required="true"
+                    aria-autocomplete="list"
+                    aria-expanded={customerSuggestionField === "name" && customerSuggestions.length > 0}
+                    aria-controls="customer-name-suggestions"
+                    value={customerName}
+                    onFocus={() => {
+                      setCustomerName((current) => current === "Walk-in customer" ? "" : current);
+                      setCustomerSuggestionField("name");
+                    }}
+                    onChange={(event) => {
+                      setCustomerName(event.currentTarget.value);
+                      setCustomerSuggestionField("name");
+                    }}
+                    onBlur={(event) => {
+                      if (!event.currentTarget.value.trim()) setCustomerName("Walk-in customer");
+                      setCustomerSuggestionField(null);
+                    }}
+                    placeholder="Walk-in customer"
+                    style={{ ...inputStyle, width: "100%", padding: "7px 9px", fontSize: 12 }}
+                  />
+                  {customerSuggestionField === "name" && customerSuggestions.length > 0 && (
+                    <div id="customer-name-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
+                      {customerSuggestions.map((customer) => (
+                        <button
+                          key={`${customer.name}-${customer.phone}`}
+                          type="button"
+                          role="option"
+                          aria-selected="false"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectCustomerSuggestion(customer)}
+                          style={{ display: "grid", width: "100%", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#26352f", padding: "8px 10px", textAlign: "left", cursor: "pointer" }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 650 }}>{customer.name}</span>
+                          <span style={{ color: "#77857d", fontSize: 11 }}>{customer.phone || "No phone number saved"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </label>
+                <label style={{ position: "relative", display: "grid", gap: 4, minWidth: 160, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                  <span>Phone Number <span style={{ color: "#77857d", fontWeight: 400 }}>(optional)</span></span>
+                  <input
+                    aria-label="Phone Number"
+                    role="combobox"
+                    type="tel"
+                    inputMode="tel"
+                    aria-autocomplete="list"
+                    aria-expanded={customerSuggestionField === "phone" && customerSuggestions.length > 0}
+                    aria-controls="customer-phone-suggestions"
+                    value={customerPhone}
+                    onFocus={() => setCustomerSuggestionField("phone")}
+                    onChange={(event) => {
+                      setCustomerPhone(event.currentTarget.value);
+                      setCustomerSuggestionField("phone");
+                    }}
+                    onBlur={() => setCustomerSuggestionField(null)}
+                    placeholder="Enter phone number"
+                    style={{ ...inputStyle, width: "100%", padding: "7px 9px", fontSize: 12 }}
+                  />
+                  {customerSuggestionField === "phone" && customerSuggestions.length > 0 && (
+                    <div id="customer-phone-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
+                      {customerSuggestions.map((customer) => (
+                        <button
+                          key={`${customer.name}-${customer.phone}`}
+                          type="button"
+                          role="option"
+                          aria-selected="false"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectCustomerSuggestion(customer)}
+                          style={{ display: "grid", width: "100%", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#26352f", padding: "8px 10px", textAlign: "left", cursor: "pointer" }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 650 }}>{customer.name}</span>
+                          <span style={{ color: "#77857d", fontSize: 11 }}>{customer.phone || "No phone number saved"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </label>
               </div>
             </div>
 
@@ -664,24 +830,29 @@ export default function SalesActions() {
                     <strong style={{ color: "#17704e" }}>{formatPrice(totalPrice)}</strong>
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
-                    <span style={{ color: "#526158", fontSize: 11, fontWeight: 650 }}>Discount</span>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {(["flat", "percent"] as const).map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          aria-pressed={discountType === type}
-                          onClick={() => {
-                            setDiscountType(type);
-                            setDiscountValue("");
-                            setSaleSaveError("");
-                          }}
-                          style={{ border: `1px solid ${discountType === type ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: discountType === type ? "#eef8f2" : "#fff", color: discountType === type ? "#17704e" : "#526158", padding: "6px 8px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}
-                        >
-                          {type === "flat" ? "Flat (৳)" : "%"}
-                        </button>
-                      ))}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ color: "#526158", fontSize: 11, fontWeight: 650 }}>Discount</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {(["flat", "percent"] as const).map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            aria-pressed={discountType === type}
+                            onClick={() => {
+                              setDiscountType(type);
+                              setDiscountValue("");
+                              setSaleSaveError("");
+                            }}
+                            style={{ border: `1px solid ${discountType === type ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: discountType === type ? "#eef8f2" : "#fff", color: discountType === type ? "#17704e" : "#526158", padding: "5px 8px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}
+                          >
+                            {type === "flat" ? "Flat (৳)" : "%"}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto minmax(60px, 1fr) auto", alignItems: "center", gap: 8 }}>
+                    <span>Discount amount</span>
                     <input
                       className="discount-input"
                       aria-label={`Discount ${discountType === "flat" ? "amount" : "percentage"}`}
@@ -695,19 +866,16 @@ export default function SalesActions() {
                         setDiscountValue(event.currentTarget.value);
                         setSaleSaveError("");
                       }}
-                      placeholder={discountType === "flat" ? "Enter amount" : "Enter percentage"}
-                      style={{ ...inputStyle, width: "100%", padding: "6px 8px", fontSize: 12 }}
+                      placeholder={discountType === "flat" ? "Amount" : "%"}
+                      style={{ ...inputStyle, width: "100%", minWidth: 0, padding: "6px 8px", fontSize: 12 }}
                     />
-                    {!validDiscount && (
-                      <span role="alert" style={{ color: "#ad4b43", fontSize: 11 }}>
-                        {discountType === "percent" ? "Discount cannot exceed 100%." : "Discount cannot exceed total price."}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <span>Discount amount</span>
                     <strong style={{ color: "#526158" }}>−{formatPrice(discountAmount)}</strong>
                   </div>
+                  {!validDiscount && (
+                    <span role="alert" style={{ color: "#ad4b43", fontSize: 11 }}>
+                      {discountType === "percent" ? "Discount cannot exceed 100%." : "Discount cannot exceed total price."}
+                    </span>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "#526158", fontSize: 12 }}>
                     <label htmlFor="sale-tax-rate" style={{ whiteSpace: "nowrap" }}>VAT/TAX (%)</label>
                     <input
@@ -752,6 +920,33 @@ export default function SalesActions() {
                     <strong style={{ color: "#26352f" }}>Rounded Total</strong>
                     <strong style={{ color: "#17704e" }}>{formatPrice(roundedTotal)}</strong>
                   </div>
+                  <div role="group" aria-label="Choose payment method" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {paymentMethodOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={effectivePaymentMethod === option.value}
+                          onClick={() => setSelectedPaymentMethod(option.value)}
+                          style={{
+                            border: `1px solid ${effectivePaymentMethod === option.value ? "#179c70" : "#dce5df"}`,
+                            borderRadius: 5,
+                            background: effectivePaymentMethod === option.value ? "#eef8f2" : "#fff",
+                            color: effectivePaymentMethod === option.value ? "#17704e" : "#526158",
+                            padding: "6px 9px",
+                            fontSize: 11,
+                            fontWeight: 650,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                  </div>
+                  {paymentMethodsSnapshot.error && (
+                    <span role="alert" style={{ color: "#ad4b43", fontSize: 11 }}>
+                      {paymentMethodsSnapshot.error}
+                    </span>
+                  )}
                   <label style={{ display: "grid", gap: 3, color: "#526158", fontSize: 11, fontWeight: 650 }}>
                     Pay Amount
                     <input
@@ -906,9 +1101,15 @@ export default function SalesActions() {
               <strong style={{ color: "#17704e", fontSize: 16 }}>{saleInvoice.invoice}</strong>
             </header>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 16, margin: "18px 0", color: "#526158", fontSize: 12 }}>
-              <span>Customer: <strong>{saleInvoice.customer}</strong></span>
+              <span>
+                Customer: <strong>{saleInvoice.customer}</strong>
+                {saleInvoice.phone && <> · Phone: <strong>{saleInvoice.phone}</strong></>}
+              </span>
               <span>{new Date(saleInvoice.createdAt).toLocaleString("en-BD")}</span>
             </div>
+            <p style={{ margin: "-8px 0 16px", color: "#526158", fontSize: 12 }}>
+              Payment Method: <strong>{saleInvoice.paymentMethodName ?? "Cash"}</strong>
+            </p>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                 <thead>

@@ -16,10 +16,13 @@ import {
 } from "./purchaseStorage";
 
 const placeOrderColumns = [
+  "Date & Time",
   "Order",
   "Supplier",
-  "Order date",
-  "Brand",
+  "Box Quantity",
+  "Purchase Price (Box)",
+  "Total Order Price",
+  "Actions",
 ];
 const receiveOrderColumns = [
   "Date & Time",
@@ -96,10 +99,27 @@ export default function PurchasePage() {
           <div key={`${order}-actions`} style={{ display: "flex", alignItems: "center", gap: 10 }}>{viewButton}</div>,
         ];
       }
+      const orderDateTime = updatedAt > 0
+        ? new Date(updatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
+        : rows[0]?.orderDate ?? "";
+      const totalBoxQuantity = rows.reduce((total, row) => {
+        const quantity = Number(row.quantity);
+        return Number.isFinite(quantity) ? total + quantity : total;
+      }, 0);
       return [
+        orderDateTime,
         order,
         suppliers,
-        rows[0]?.orderDate ?? "",
+        totalBoxQuantity.toLocaleString("en-BD", { maximumFractionDigits: 4 }),
+        <span key={`${order}-box-prices`} style={{ display: "grid", gap: 3 }}>
+          {[...new Map(rows.map((row) => [
+            `${row.brand}\u0000${row.packPrice}`,
+            { brand: row.brand, price: Number(row.packPrice) },
+          ])).values()].map(({ brand, price }) => (
+            <span key={`${brand}-${price}`}>{brand}: {Number.isFinite(price) ? formatCurrency(price) : "-"}</span>
+          ))}
+        </span>,
+        formatCurrency(getOrderTotal(rows)),
         <div key={`${order}-actions`} style={{ display: "flex", alignItems: "center", gap: 10 }}>{viewButton}</div>,
       ];
     }),

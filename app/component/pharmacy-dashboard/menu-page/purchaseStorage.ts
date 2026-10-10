@@ -5,6 +5,8 @@ export type PurchaseListRow = {
   id: string;
   order: string;
   supplier: string;
+  supplierContactName?: string;
+  supplierPhone?: string;
   orderDate: string;
   brand: string;
   genericName: string;
@@ -93,6 +95,8 @@ function isPurchaseListRow(value: unknown): value is PurchaseListRow {
     "packPrice",
     "status",
   ].every((key) => key in value && typeof value[key as keyof typeof value] === "string")
+    && (!("supplierContactName" in value) || typeof value.supplierContactName === "string")
+    && (!("supplierPhone" in value) || typeof value.supplierPhone === "string")
     && (!("quantity" in value) || typeof value.quantity === "string")
     && (!("availableQuantity" in value) || typeof value.availableQuantity === "string")
     && (!("totalPrice" in value) || typeof value.totalPrice === "string")
@@ -165,6 +169,56 @@ export type SaleStockLine = {
   batchNumber: string;
   quantity: number;
 };
+
+export type ReturnStockLine = SaleStockLine;
+
+export function getPurchaseRowsAfterReturn(lines: ReturnStockLine[]) {
+  const rows = readPurchaseListRows();
+  const updatedRows = [...rows];
+  const quantities = new Map<string, ReturnStockLine>();
+
+  for (const line of lines) {
+    const brand = line.brand.trim().toLocaleLowerCase();
+    const batchNumber = line.batchNumber.trim().toLocaleLowerCase();
+    if (!brand || !batchNumber || !Number.isInteger(line.quantity) || line.quantity < 1) {
+      throw new Error("Each returned item must have a brand, batch number, and valid quantity.");
+    }
+    const key = JSON.stringify([brand, batchNumber]);
+    const existing = quantities.get(key);
+    quantities.set(key, {
+      brand,
+      batchNumber,
+      quantity: (existing?.quantity ?? 0) + line.quantity,
+    });
+  }
+
+  for (const line of quantities.values()) {
+    const rowIndex = updatedRows.findIndex((row) =>
+      row.brand.trim().toLocaleLowerCase() === line.brand
+      && row.batchNumber.trim().toLocaleLowerCase() === line.batchNumber,
+    );
+    if (rowIndex === -1) {
+      throw new Error(`Could not find ${line.brand}, batch ${line.batchNumber} in inventory.`);
+    }
+
+    const row = updatedRows[rowIndex];
+    const availableQuantity = getAvailablePurchaseQuantity(row);
+    if (availableQuantity === null) {
+      throw new Error(`Could not determine inventory quantity for ${row.brand}, batch ${row.batchNumber}.`);
+    }
+
+    const nextAvailableQuantity = Number((availableQuantity + line.quantity).toFixed(4));
+    const nextPackQuantity = calculatePackQuantity(row.packSize, nextAvailableQuantity);
+    updatedRows[rowIndex] = {
+      ...row,
+      availableQuantity: String(nextAvailableQuantity),
+      ...(nextPackQuantity !== null ? { quantity: String(nextPackQuantity) } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return updatedRows;
+}
 
 export function getPurchaseRowsAfterSale(lines: SaleStockLine[]) {
   const rows = readPurchaseListRows();

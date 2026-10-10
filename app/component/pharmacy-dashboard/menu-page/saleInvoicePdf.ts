@@ -52,9 +52,11 @@ export function downloadSaleInvoicePdf(sale: SalesListRow) {
   document.text(`Invoice: ${sale.invoice}`, left, 32);
   document.text(`Date: ${new Date(sale.createdAt).toLocaleString("en-BD")}`, left, 38);
   document.text(`Customer: ${sale.customer}`, left, 44);
-  document.text(`Payment: ${sale.payment}`, right, 32, { align: "right" });
+  if (sale.phone) document.text(`Phone: ${sale.phone}`, left, 50);
+  document.text(`Payment method: ${sale.paymentMethodName ?? "Cash"}`, left, sale.phone ? 56 : 50);
+  document.text(`Status: ${sale.payment}`, right, 32, { align: "right" });
 
-  let y = 56;
+  let y = sale.phone ? 68 : 62;
   drawTableHeader(y);
   y += 11;
 

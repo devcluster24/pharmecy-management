@@ -13,6 +13,8 @@ import {
   readPlaceOrderListRows,
   readPurchaseListRows,
   subscribeToPlaceOrderList,
+  getPurchaseListSnapshot,
+  subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
 
@@ -90,6 +92,8 @@ type PlaceOrderLine = {
 type CompanySelection = {
   id: number;
   company: string;
+  supplierContactName: string;
+  supplierPhone: string;
   companyDraft: string;
   isAddingCompany: boolean;
   brands: BrandSelection[];
@@ -117,6 +121,8 @@ function createCompanySelection(id: number, brandId: number): CompanySelection {
   return {
     id,
     company: "",
+    supplierContactName: "",
+    supplierPhone: "",
     companyDraft: "",
     isAddingCompany: false,
     brands: [createBrandSelection(brandId)],
@@ -164,6 +170,10 @@ function parseOrderPrice(value: string) {
 
 function formatOrderPrice(value: number) {
   return String(Number(value.toFixed(4)));
+}
+
+function getDefaultSupplierName(company: string) {
+  return company.trim() ? `${company.trim()} Distributor` : "";
 }
 
 function getReceivedBatchKey(row: PurchaseListRow) {
@@ -214,6 +224,8 @@ function mergeReceivedRows(
     }
     rows[existingIndex] = {
       ...existingRow,
+      ...(incomingRow.supplierContactName ? { supplierContactName: incomingRow.supplierContactName } : {}),
+      ...(incomingRow.supplierPhone !== undefined ? { supplierPhone: incomingRow.supplierPhone } : {}),
       quantity: formatOrderPrice(quantity),
       ...(availableQuantity !== undefined ? { availableQuantity: String(availableQuantity) } : {}),
       totalPrice: formatOrderPrice(totalPrice),
@@ -239,6 +251,11 @@ function getErrorMessage(error: unknown) {
 }
 
 export default function PurchaseCreateAction() {
+  const purchaseListSnapshot = useSyncExternalStore(
+    subscribeToPurchaseList,
+    getPurchaseListSnapshot,
+    () => emptyPurchaseListSnapshot,
+  );
   const placeOrderListSnapshot = useSyncExternalStore(
     subscribeToPlaceOrderList,
     getPlaceOrderListSnapshot,
@@ -252,6 +269,7 @@ export default function PurchaseCreateAction() {
   ]);
   const [activeCompanySelectionId, setActiveCompanySelectionId] = useState(0);
   const [isCompanyListOpen, setIsCompanyListOpen] = useState(false);
+  const [focusedSupplierNameId, setFocusedSupplierNameId] = useState<number | null>(null);
   const [nextCompanySelectionId, setNextCompanySelectionId] = useState(1);
   const [nextBrandSelectionId, setNextBrandSelectionId] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -275,6 +293,30 @@ export default function PurchaseCreateAction() {
       .sort((left, right) => left.localeCompare(right)),
     [products],
   );
+  function getSavedSupplierContacts(company: string) {
+    const normalizedCompany = company.trim().toLocaleLowerCase();
+    const seenContacts = new Set<string>();
+    return purchaseListSnapshot.rows
+      .filter((row) =>
+        row.supplier.trim().toLocaleLowerCase() === normalizedCompany
+        && row.supplierContactName?.trim(),
+      )
+      .sort((left, right) => Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? ""))
+      .map((row) => ({
+        name: row.supplierContactName?.trim() ?? "",
+        phone: row.supplierPhone?.trim() ?? "",
+      }))
+      .filter((contact) => {
+        const key = `${contact.name.toLocaleLowerCase()}\u0000${contact.phone.replace(/\D/g, "")}`;
+        if (!contact.name || seenContacts.has(key)) return false;
+        seenContacts.add(key);
+        return true;
+      });
+  }
+
+  function getSavedSupplierContact(company: string) {
+    return getSavedSupplierContacts(company)[0];
+  }
   const selectedProductDetails = companySelections.flatMap((companySelection) => {
     const companyProducts = products.filter((product) => product.manufacturer.trim() === companySelection.company);
     return companySelection.brands
@@ -387,6 +429,8 @@ export default function PurchaseCreateAction() {
           id: `${order}-${companySelection.id}-${selection.id}-${index}`,
           order,
           supplier: companySelection.company,
+          supplierContactName: companySelection.supplierContactName.trim() || getDefaultSupplierName(companySelection.company),
+          supplierPhone: companySelection.supplierPhone.trim(),
           orderDate,
           brand: product?.brand.trim() || product?.medicine_name.trim() || selection.customBrand,
           genericName: displayValue(product?.generic_name),
@@ -411,6 +455,9 @@ export default function PurchaseCreateAction() {
         ...row,
         order,
         orderDate,
+        supplierContactName: companySelections.find((selection) => selection.company === row.supplier)?.supplierContactName.trim()
+          || getDefaultSupplierName(row.supplier),
+        supplierPhone: companySelections.find((selection) => selection.company === row.supplier)?.supplierPhone.trim() ?? "",
       }));
       const updatedRows = mergeReceivedRows(receiveRows, [...newRows, ...stagedOrderRows]);
       persistPurchaseListRows(updatedRows);
@@ -495,7 +542,8 @@ export default function PurchaseCreateAction() {
         return match ? Math.max(maxNumber, Number(match[1])) : maxNumber;
       }, 0) + 1;
       const order = `PO-${String(nextOrderNumber).padStart(4, "0")}`;
-      const orderDate = new Date().toLocaleDateString("en-US", {
+      const now = new Date();
+      const orderDate = now.toLocaleDateString("en-US", {
         month: "short",
         day: "2-digit",
         year: "numeric",
@@ -505,6 +553,7 @@ export default function PurchaseCreateAction() {
         return {
           id: `${order}-${line.id}`,
           order,
+          updatedAt: now.toISOString(),
           supplier: placeOrderCompany,
           orderDate,
           brand: product?.brand.trim() || product?.medicine_name.trim() || "",
@@ -789,12 +838,22 @@ export default function PurchaseCreateAction() {
 
   function setCompanyAndResetBrands(companyId: number, company: string) {
     const brand = createBrandSelection(nextBrandSelectionId);
+    const savedContact = getSavedSupplierContact(company);
     setNextBrandSelectionId((current) => current + 1);
     setCompanySelections((current) => current.map((selection) =>
       selection.id === companyId
-        ? { ...selection, company, companyDraft: "", isAddingCompany: false, brands: [brand] }
+        ? {
+            ...selection,
+            company,
+            supplierContactName: savedContact?.name || getDefaultSupplierName(company),
+            supplierPhone: savedContact?.phone ?? "",
+            companyDraft: "",
+            isAddingCompany: false,
+            brands: [brand],
+          }
         : selection,
     ));
+    setFocusedSupplierNameId(null);
   }
 
   function updateBrandSelection(companyId: number, brandId: number, updates: Partial<Omit<BrandSelection, "id">>) {
@@ -906,6 +965,15 @@ export default function PurchaseCreateAction() {
                     const rightBrand = right.brand.trim() || right.medicine_name.trim();
                     return leftBrand.localeCompare(rightBrand) || left.strength.localeCompare(right.strength);
                   });
+                const savedSupplierContacts = getSavedSupplierContacts(companySelection.company);
+                const supplierSearch = companySelection.supplierContactName.trim().toLocaleLowerCase();
+                const supplierSuggestions = focusedSupplierNameId === companySelection.id
+                  ? savedSupplierContacts.filter((contact) =>
+                    !supplierSearch
+                    || contact.name.toLocaleLowerCase().includes(supplierSearch)
+                    || contact.phone.toLocaleLowerCase().includes(supplierSearch),
+                  ).slice(0, 5)
+                  : [];
                 const companiesSelectedElsewhere = new Set(companySelections
                   .filter((selection) => selection.id !== companySelection.id)
                   .map((selection) => selection.company));
@@ -987,6 +1055,70 @@ export default function PurchaseCreateAction() {
                             style={{ flex: "0 0 34px", width: 34, height: 34, border: "1px solid #179c70", borderRadius: 6, background: "#fff", color: "#16845f", fontSize: 18, fontWeight: 400, lineHeight: 1, cursor: isLoading || companySelection.isAddingCompany || companySelections.some((selection) => selection.id !== companySelection.id && (!selection.company || selection.isAddingCompany)) ? "not-allowed" : "pointer", opacity: isLoading || companySelection.isAddingCompany || companySelections.some((selection) => selection.id !== companySelection.id && (!selection.company || selection.isAddingCompany)) ? 0.55 : 1 }}
                           >+</button>
                         )}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.8fr)", gap: 8 }}>
+                        <label style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
+                          Supplier Name
+                          <input
+                            aria-label={`Supplier Name for ${companySelection.company || "company"}`}
+                            autoComplete="off"
+                            value={companySelection.supplierContactName}
+                            onFocus={() => {
+                              setFocusedSupplierNameId(companySelection.id);
+                              updateCompanySelection(companySelection.id, { supplierContactName: "" });
+                            }}
+                            onChange={(event) => updateCompanySelection(companySelection.id, { supplierContactName: event.currentTarget.value })}
+                            onBlur={() => {
+                              setFocusedSupplierNameId(null);
+                              setCompanySelections((current) => current.map((selection) =>
+                                selection.id === companySelection.id && !selection.supplierContactName.trim()
+                                  ? {
+                                      ...selection,
+                                      supplierContactName: getSavedSupplierContact(selection.company)?.name || getDefaultSupplierName(selection.company),
+                                    }
+                                  : selection,
+                              ));
+                            }}
+                            placeholder={`${companySelection.company || "Company"} Distributor`}
+                            style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
+                          />
+                          {supplierSuggestions.length > 0 && (
+                            <div role="listbox" aria-label={`Saved suppliers for ${companySelection.company}`} style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 26, display: "grid", maxHeight: 160, overflowY: "auto", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 22px rgba(20, 35, 27, 0.14)" }}>
+                              {supplierSuggestions.map((contact) => (
+                                <button
+                                  key={`${contact.name}-${contact.phone}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected="false"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    updateCompanySelection(companySelection.id, {
+                                      supplierContactName: contact.name,
+                                      supplierPhone: contact.phone,
+                                    });
+                                    setFocusedSupplierNameId(null);
+                                  }}
+                                  style={{ display: "grid", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#34453b", padding: "7px 9px", textAlign: "left", cursor: "pointer" }}
+                                >
+                                  <span style={{ fontSize: 12 }}>{contact.name}</span>
+                                  {contact.phone && <span style={{ color: "#77857d", fontSize: 10 }}>{contact.phone}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </label>
+                        <label style={{ display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
+                          Phone Number
+                          <input
+                            aria-label={`Supplier Phone Number for ${companySelection.company || "company"}`}
+                            type="tel"
+                            inputMode="tel"
+                            value={companySelection.supplierPhone}
+                            onChange={(event) => updateCompanySelection(companySelection.id, { supplierPhone: event.currentTarget.value })}
+                            placeholder="Phone number"
+                            style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
+                          />
+                        </label>
                       </div>
                     </div>
 

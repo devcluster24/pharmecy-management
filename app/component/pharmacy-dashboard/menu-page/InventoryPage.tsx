@@ -16,6 +16,11 @@ import {
   subscribeToLowStockThreshold,
 } from "./lowStockStorage";
 import { isInventoryItemExpired } from "./inventoryExpiry";
+import {
+  emptyReturnsSnapshot,
+  getReturnsSnapshot,
+  subscribeToReturns,
+} from "./returnsStorage";
 
 const receiveOrderColumns = [
   "Date & Time",
@@ -80,7 +85,13 @@ export default function InventoryPage() {
     getLowStockThresholdSnapshot,
     () => emptyLowStockThresholdSnapshot,
   );
+  const returns = useSyncExternalStore(
+    subscribeToReturns,
+    getReturnsSnapshot,
+    () => emptyReturnsSnapshot,
+  );
   const [selectedRow, setSelectedRow] = useState<PurchaseListRow | null>(null);
+  const [selectedReturnBatch, setSelectedReturnBatch] = useState<{ brand: string; batchNumber: string } | null>(null);
   const [activeList, setActiveList] = useState<InventoryListType>("inventory");
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<ExpiryMonthFilter>(3);
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,7 +156,7 @@ export default function InventoryPage() {
           : activeList === "out-of-stock"
             ? "Items with zero quantity."
             : "Review stock received from your suppliers.",
-    errorMessage: purchaseList.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
+    errorMessage: purchaseList.error || returns.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
     action: "Adjust stock",
     metrics: [],
     columns: receiveOrderColumns,
@@ -165,13 +176,29 @@ export default function InventoryPage() {
         row.packPrice,
         row.expDate,
       ];
+      const hasReturnForBatch = returns.rows.some((record) =>
+        record.brand?.trim().toLocaleLowerCase() === row.brand.trim().toLocaleLowerCase()
+        && record.batchNumber?.trim().toLocaleLowerCase() === row.batchNumber.trim().toLocaleLowerCase(),
+      );
       return [
         ...cells.map((value, index) => (
           <span key={`${row.id}-${index}`} style={{
             ...(activeList === "expaired" || ((activeList === "low-stock" || activeList === "out-of-stock") && index === 10) ? { color: "#dc2626" } : {}),
             ...((activeList === "low-stock" || activeList === "out-of-stock") && index === 10 ? { fontWeight: 700 } : {}),
           }}>
-            {value}
+            {index === 1 && hasReturnForBatch ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {value}
+                <button
+                  type="button"
+                  aria-label={`View return invoices for ${row.brand}, batch ${row.batchNumber}`}
+                  onClick={() => setSelectedReturnBatch({ brand: row.brand, batchNumber: row.batchNumber })}
+                  style={{ border: "1px solid #b9dfd0", borderRadius: 4, background: "#fff", color: "#16845f", padding: "2px 5px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                >
+                  + Re
+                </button>
+              </span>
+            ) : value}
           </span>
         )),
         <button
@@ -263,6 +290,56 @@ export default function InventoryPage() {
         </div>
       }
     />
+    {selectedReturnBatch && (
+      <div
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSelectedReturnBatch(null);
+        }}
+        style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", padding: 20, background: "rgba(18, 35, 27, 0.45)" }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="return-invoice-history-title"
+          style={{ width: "min(620px, 100%)", maxHeight: "85vh", overflow: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
+        >
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
+            <div>
+              <h2 id="return-invoice-history-title" style={{ margin: 0, color: "#20342a", fontSize: 17, fontWeight: 700 }}>Return Invoice</h2>
+              <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>
+                {selectedReturnBatch.brand} · Batch {selectedReturnBatch.batchNumber}
+              </p>
+            </div>
+            <button type="button" aria-label="Close return invoices" onClick={() => setSelectedReturnBatch(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+          </header>
+          <div style={{ display: "grid", gap: 8, padding: 18 }}>
+            {returns.rows
+              .filter((record) =>
+                record.brand?.trim().toLocaleLowerCase() === selectedReturnBatch.brand.trim().toLocaleLowerCase()
+                && record.batchNumber?.trim().toLocaleLowerCase() === selectedReturnBatch.batchNumber.trim().toLocaleLowerCase(),
+              )
+              .map((record) => (
+                <article key={record.id} style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px 16px", padding: 12, border: "1px solid #e5ebe7", borderRadius: 7, background: "#fbfcfb", color: "#526158", fontSize: 12 }}>
+                  <strong style={{ color: "#26352f" }}>Return Invoice: {record.reInvoice ?? record.id}</strong>
+                  <span>Original Invoice: {record.invoice}</span>
+                  <span>Brand: {record.brand}</span>
+                  <span>Batch Number: {record.batchNumber}</span>
+                  <span>Return Quantity: {record.quantity ?? "—"}</span>
+                  <span>Customer Name: {record.customer || "Walk-in customer"}</span>
+                  <span>Phone Number: {record.phone || "—"}</span>
+                  <span>Date: {record.date}</span>
+                </article>
+              ))}
+            {returns.rows.every((record) =>
+              record.brand?.trim().toLocaleLowerCase() !== selectedReturnBatch.brand.trim().toLocaleLowerCase()
+              || record.batchNumber?.trim().toLocaleLowerCase() !== selectedReturnBatch.batchNumber.trim().toLocaleLowerCase(),
+            ) && (
+              <p style={{ margin: 0, color: "#77857d", fontSize: 13 }}>No return invoices found for this brand and batch.</p>
+            )}
+          </div>
+        </section>
+      </div>
+    )}
     {selectedRow && (
       <div
         onMouseDown={(event) => {

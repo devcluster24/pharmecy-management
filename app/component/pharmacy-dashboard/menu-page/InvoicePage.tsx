@@ -44,7 +44,7 @@ export default function InvoicePage() {
   const rows = sales.rows
     .filter((sale) =>
       !normalizedSearch
-      || [sale.invoice, sale.customer, sale.payment].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+      || [sale.invoice, sale.customer, sale.phone ?? "", sale.payment].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
     )
     .map((sale) => {
       const subtotal = sale.subtotalAmount ?? sale.amount;
@@ -112,6 +112,8 @@ export default function InvoicePage() {
             <div style={{ padding: 24 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px 24px", marginBottom: 24, color: "#526158", fontSize: 13 }}>
                 <div><span style={{ color: "#87928d" }}>Customer</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.customer}</div></div>
+                {selectedInvoice.phone && <div><span style={{ color: "#87928d" }}>Phone number</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.phone}</div></div>}
+                {selectedInvoice.paymentMethodName && <div><span style={{ color: "#87928d" }}>Payment method</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.paymentMethodName}</div></div>}
                 <div><span style={{ color: "#87928d" }}>Date &amp; time</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{new Date(selectedInvoice.createdAt).toLocaleString("en-BD")}</div></div>
                 <div><span style={{ color: "#87928d" }}>Payment status</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.payment}</div></div>
               </div>

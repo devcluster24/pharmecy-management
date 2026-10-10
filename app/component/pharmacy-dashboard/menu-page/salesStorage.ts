@@ -16,10 +16,16 @@ export type SalesInvoiceItem = {
   totalPrice: number;
 };
 
+export type SalesPaymentEntry = {
+  methodName: string;
+  amount: number;
+};
+
 export type SalesListRow = {
   id: string;
   invoice: string;
   customer: string;
+  phone?: string;
   items: number;
   time: string;
   amount: number;
@@ -31,6 +37,8 @@ export type SalesListRow = {
   paidAmount?: number;
   dueAmount?: number;
   payment: string;
+  paymentMethodName?: string;
+  payments?: SalesPaymentEntry[];
   createdAt: string;
   lines?: SalesInvoiceItem[];
 };
@@ -57,6 +65,7 @@ function isSalesListRow(value: unknown): value is SalesListRow {
   return typeof row.id === "string"
     && typeof row.invoice === "string"
     && typeof row.customer === "string"
+    && (!("phone" in row) || typeof row.phone === "string")
     && typeof row.items === "number"
     && Number.isInteger(row.items)
     && typeof row.time === "string"
@@ -70,6 +79,19 @@ function isSalesListRow(value: unknown): value is SalesListRow {
     && (!("paidAmount" in row) || (typeof row.paidAmount === "number" && Number.isFinite(row.paidAmount)))
     && (!("dueAmount" in row) || (typeof row.dueAmount === "number" && Number.isFinite(row.dueAmount)))
     && typeof row.payment === "string"
+    && (!("paymentMethodName" in row) || typeof row.paymentMethodName === "string")
+    && (!("payments" in row) || (
+      Array.isArray(row.payments)
+      && row.payments.every((payment: unknown) => {
+        if (!payment || typeof payment !== "object") return false;
+        const entry = payment as Record<string, unknown>;
+        return typeof entry.methodName === "string"
+          && entry.methodName.trim().length > 0
+          && typeof entry.amount === "number"
+          && Number.isFinite(entry.amount)
+          && entry.amount >= 0;
+      })
+    ))
     && typeof row.createdAt === "string"
     && (!("lines" in row) || (
       Array.isArray(row.lines)
@@ -132,9 +154,20 @@ export function subscribeToSalesList(listener: () => void) {
   };
 }
 
-export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, discountAmount = 0, taxRate = 0) {
+export function persistSale(
+  lines: SalesInvoiceItem[],
+  paidAmount: number,
+  discountAmount = 0,
+  taxRate = 0,
+  customer = "Walk-in customer",
+  phone = "",
+  paymentMethodName = "Cash",
+) {
   if (
     lines.length === 0
+    || typeof customer !== "string"
+    || typeof phone !== "string"
+    || typeof paymentMethodName !== "string"
     || !Number.isFinite(paidAmount)
     || paidAmount < 0
     || !Number.isFinite(discountAmount)
@@ -182,7 +215,8 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
   const row: SalesListRow = {
     id: invoice,
     invoice,
-    customer: "Walk-in customer",
+    customer: customer.trim() || "Walk-in customer",
+    ...(phone.trim() ? { phone: phone.trim() } : {}),
     items: lines.length,
     time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
     amount: payableAmount,
@@ -194,6 +228,10 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
     paidAmount: roundedPaidAmount,
     dueAmount,
     payment: dueAmount > 0 ? "Due" : "Paid",
+    paymentMethodName: paymentMethodName.trim() || "Cash",
+    payments: roundedPaidAmount > 0
+      ? [{ methodName: paymentMethodName.trim() || "Cash", amount: roundedPaidAmount }]
+      : [],
     createdAt: now.toISOString(),
     lines,
   };
@@ -223,4 +261,80 @@ export function persistSale(lines: SalesInvoiceItem[], paidAmount: number, disco
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(salesListUpdatedEvent));
   return row;
+}
+
+export function addSalePayment(invoiceId: string, paymentAmount: number, paymentMethodName = "Cash") {
+  const updatedInvoices = addSalePaymentAcrossInvoices([invoiceId], paymentAmount, paymentMethodName);
+  return updatedInvoices[0];
+}
+
+export function addSalePaymentAcrossInvoices(
+  invoiceIds: string[],
+  paymentAmount: number,
+  paymentMethodName = "Cash",
+) {
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    throw new Error("Enter a payment amount greater than 0.");
+  }
+  if (typeof paymentMethodName !== "string" || !paymentMethodName.trim()) {
+    throw new Error("Choose a valid payment method.");
+  }
+  if (invoiceIds.length === 0 || new Set(invoiceIds).size !== invoiceIds.length) {
+    throw new Error("Select at least one valid invoice.");
+  }
+
+  const rows = readSalesListRows();
+  const invoiceIndexes = invoiceIds.map((invoiceId) =>
+    rows.findIndex((row) => row.id === invoiceId || row.invoice === invoiceId),
+  );
+  if (invoiceIndexes.some((invoiceIndex) => invoiceIndex === -1)) {
+    throw new Error("One or more selected invoices could not be found.");
+  }
+
+  let remainingPayment = Number(paymentAmount.toFixed(2));
+  const allocations = invoiceIndexes.map((invoiceIndex) => {
+    const invoice = rows[invoiceIndex];
+    const dueAmount = Math.max(0, invoice.dueAmount ?? invoice.amount - (invoice.paidAmount ?? invoice.amount));
+    const allocation = Number(Math.min(dueAmount, remainingPayment).toFixed(2));
+    remainingPayment = Number(Math.max(0, remainingPayment - allocation).toFixed(2));
+    return { invoiceIndex, allocation };
+  });
+  if (!allocations.some(({ allocation }) => allocation > 0)) {
+    throw new Error("The selected invoices have no outstanding due.");
+  }
+  if (remainingPayment > 0) {
+    const firstDueAllocation = allocations.find(({ allocation }) => allocation > 0);
+    if (!firstDueAllocation) throw new Error("The payment could not be assigned to an invoice.");
+    firstDueAllocation.allocation = Number((firstDueAllocation.allocation + remainingPayment).toFixed(2));
+  }
+
+  const updatedInvoices = allocations.map(({ invoiceIndex, allocation }) => {
+    if (allocation <= 0) return rows[invoiceIndex];
+    const invoice = rows[invoiceIndex];
+    const paidAmount = invoice.paidAmount ?? invoice.amount;
+    const dueAmount = Math.max(0, invoice.dueAmount ?? invoice.amount - paidAmount);
+    const nextPaidAmount = Number((paidAmount + allocation).toFixed(2));
+    if (!Number.isFinite(nextPaidAmount)) throw new Error("The payment amount is too large.");
+    const nextDueAmount = Number(Math.max(0, dueAmount - allocation).toFixed(2));
+    const previousPayments = invoice.payments ?? (paidAmount > 0
+      ? [{ methodName: invoice.paymentMethodName?.trim() || "Cash", amount: paidAmount }]
+      : []);
+    return {
+      ...invoice,
+      paidAmount: nextPaidAmount,
+      dueAmount: nextDueAmount,
+      payment: nextDueAmount > 0 ? "Due" : "Paid",
+      paymentMethodName: paymentMethodName.trim(),
+      payments: [...previousPayments, { methodName: paymentMethodName.trim(), amount: allocation }],
+    };
+  });
+  const updatedRows = [...rows];
+  allocations.forEach(({ invoiceIndex }, allocationIndex) => {
+    updatedRows[invoiceIndex] = updatedInvoices[allocationIndex];
+  });
+
+  localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(updatedRows));
+  cachedSnapshot = { rows: updatedRows, error: "" };
+  window.dispatchEvent(new Event(salesListUpdatedEvent));
+  return updatedInvoices;
 }
