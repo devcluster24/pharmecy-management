@@ -15,10 +15,20 @@ export default function LoginPage() {
     setMessage("");
 
     const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const loginId = String(formData.get("login_id") ?? "").trim();
     const password = String(formData.get("password") ?? "");
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const isPhone = !loginId.includes("@");
+    const phone = loginId.replace(/[^\d+]/g, "");
+    if (isPhone && !/^\+[1-9]\d{6,14}$/.test(phone)) {
+      setMessage("Enter your phone number in international format, for example +8801XXXXXXXXX.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword(isPhone
+      ? { phone, password }
+      : { email: loginId.toLowerCase(), password });
 
     if (error || !data.user) {
       setMessage(error?.message ?? "Sign in failed. Please try again.");
@@ -34,6 +44,15 @@ export default function LoginPage() {
 
     if (profileError || !profile) {
       setMessage(profileError?.message ?? "Your account profile is not ready yet.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (profile.role === "pharmacy_staff") {
+      const { error: signOutError } = await supabase.auth.signOut();
+      setMessage(signOutError
+        ? `Staff accounts do not have dashboard access yet. Sign out failed: ${signOutError.message}`
+        : "Staff account signed in successfully, but dashboard access has not been enabled yet. Contact your pharmacy owner.");
       setIsSubmitting(false);
       return;
     }
@@ -218,14 +237,14 @@ export default function LoginPage() {
                   fontWeight: 500,
                 }}
               >
-                Email
+                Email or Phone Number
               </label>
               <input
-                type="email"
-                name="email"
+                type="text"
+                name="login_id"
                 required
-                autoComplete="email"
-                placeholder="you@example.com"
+                autoComplete="username"
+                placeholder="you@example.com or +8801XXXXXXXXX"
                 style={{
                   width: "100%",
                   background: "#fff",

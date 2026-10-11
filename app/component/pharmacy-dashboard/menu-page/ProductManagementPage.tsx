@@ -388,7 +388,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
 
     async function loadPharmacyProducts() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: { session }, error: authError } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (authError || !user) throw authError ?? new Error("Sign in to load your product list.");
 
         setPharmacyUserId(user.id);

@@ -1,10 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { initializePharmacyDataSync } from "@/lib/pharmacy-data-sync";
+import {
+  clearPharmacyDashboardIdentity,
+  loadPharmacyDashboardIdentity,
+} from "@/lib/pharmacy-dashboard-identity";
 import PharmacyDataSyncNotice from "./PharmacyDataSyncNotice";
 
 type RequiredRole = "pharmacy_user" | "admin";
@@ -21,31 +25,52 @@ export default function DashboardAccessGate({
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [message, setMessage] = useState("");
   const [checkAttempt, setCheckAttempt] = useState(0);
+  const accessStateRef = useRef(accessState);
+
+  useEffect(() => {
+    accessStateRef.current = accessState;
+  }, [accessState]);
 
   useEffect(() => {
     let active = true;
 
     async function checkAccess() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: { session }, error: authError } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
 
         if (authError || !user) {
-          router.replace("/login");
+          if (active) router.replace("/login");
           return;
         }
 
-        const { data: profile, error: profileError } = await supabase
-          .from("user_profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profileError) {
-          if (active) {
-            setMessage(profileError.message);
-            setAccessState("failed");
+        let profile: { role: string; full_name?: string | null; phone?: string | null } | null;
+        let hasPharmacy = false;
+        if (requiredRole === "pharmacy_user") {
+          const identity = await loadPharmacyDashboardIdentity(user.id);
+          if (!identity) {
+            if (active) {
+              setMessage("Your account profile is not ready yet.");
+              setAccessState("blocked");
+            }
+            return;
           }
-          return;
+          profile = identity;
+          hasPharmacy = identity.hasPharmacy;
+        } else {
+          const { data, error } = await supabase
+            .from("user_profiles")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+          if (error) {
+            if (active) {
+              setMessage(error.message);
+              setAccessState("failed");
+            }
+            return;
+          }
+          profile = data;
         }
 
         if (!profile) {
@@ -56,25 +81,9 @@ export default function DashboardAccessGate({
           return;
         }
 
-        if (requiredRole === "pharmacy_user" && profile.role === "pharmacy_user") {
-          const { data: pharmacy, error: pharmacyError } = await supabase
-            .from("pharmacies")
-            .select("id")
-            .eq("owner_user_id", user.id)
-            .maybeSingle();
-
-          if (pharmacyError) {
-            if (active) {
-              setMessage(pharmacyError.message);
-              setAccessState("failed");
-            }
-            return;
-          }
-
-          if (!pharmacy) {
-            router.replace("/shop-setup");
-            return;
-          }
+        if (requiredRole === "pharmacy_user" && profile.role === "pharmacy_user" && !hasPharmacy) {
+          if (active) router.replace("/shop-setup");
+          return;
         }
 
         const permitted = requiredRole === "admin"
@@ -113,7 +122,10 @@ export default function DashboardAccessGate({
 
     void checkAccess();
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+      if (event === "SIGNED_OUT") {
+        clearPharmacyDashboardIdentity();
+        if (active) router.replace("/login");
+      } else if (event === "SIGNED_IN" && accessStateRef.current !== "checking") {
         if (active) {
           setAccessState("checking");
           setCheckAttempt((attempt) => attempt + 1);

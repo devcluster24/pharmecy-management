@@ -3,6 +3,10 @@
 import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase/client";
+import {
+  getPharmacyDashboardIdentity,
+  loadPharmacyDashboardIdentity,
+} from "@/lib/pharmacy-dashboard-identity";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import {
   getLowStockThresholdSnapshot,
@@ -107,6 +111,7 @@ type SettingsProfile = {
   email: string;
   phone: string;
   role: string;
+  storeName: string;
 };
 
 type ProfileState =
@@ -186,25 +191,25 @@ export default function SettingPage() {
 
     async function loadProfile() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: { session }, error: authError } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (authError) throw authError;
         if (!user) throw new Error("Sign in to view your profile.");
 
-        const { data: userProfile, error: profileError } = await supabase
-          .from("user_profiles")
-          .select("full_name, phone, role")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (profileError) throw profileError;
-        if (!userProfile) throw new Error("Your account profile could not be found.");
+        const dashboardIdentity = getPharmacyDashboardIdentity(user.id)
+          ?? await loadPharmacyDashboardIdentity(user.id);
+        if (!dashboardIdentity) {
+          throw new Error("Your account profile could not be found.");
+        }
 
         const metadata = user.user_metadata as Record<string, unknown>;
         const profile: SettingsProfile = {
           photoUrl: metadataString(metadata, "avatar_url", "picture", "profile_photo_url", "photo_url"),
-          fullName: metadataString(metadata, "full_name", "name") || userProfile.full_name || "",
+          fullName: metadataString(metadata, "full_name", "name") || dashboardIdentity.fullName,
           email: user.email ?? "",
-          phone: metadataString(metadata, "phone", "phone_number") || userProfile.phone || "",
-          role: userProfile.role,
+          phone: metadataString(metadata, "phone", "phone_number") || dashboardIdentity.phone,
+          role: dashboardIdentity.role,
+          storeName: dashboardIdentity.storeName,
         };
 
         if (active) setProfileState({ status: "ready", profile, error: "" });
@@ -230,6 +235,7 @@ export default function SettingPage() {
     ["Full Name", profile?.fullName],
     ["Email", profile?.email],
     ["Phone Number", profile?.phone],
+    ["Store Name", profile?.storeName],
     ["User Role", profile?.role],
   ] as const;
   const parsedLowStockThreshold = Number(lowStockThreshold);
