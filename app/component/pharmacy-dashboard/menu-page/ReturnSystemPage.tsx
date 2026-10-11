@@ -31,18 +31,12 @@ type ReturnItemMatch = {
 type SelectedReturnItem = ReturnItemMatch & { quantity: string };
 const RETURNS_PER_PAGE = 10;
 
-const initialRows: string[][] = [
-  ["RE-ID-0124", "Sep 30, 2026, 10:30 AM", "Walk-in customer", "RET-2058", "INV-2058", "Napa 500mg · Qty 1 · Batch 2424", "1", "৳500.00", "Cash Return"],
-  ["RE-ID-0123", "Sep 29, 2026, 11:45 AM", "Walk-in customer", "RET-2041", "INV-2041", "Seclo 20mg · Qty 1 · Batch 2423", "1", "৳350.00", "Cash Return"],
-  ["RE-ID-0122", "Sep 28, 2026, 02:15 PM", "Walk-in customer", "RET-2019", "INV-2019", "Ceevit 250mg · Qty 1 · Batch 2419", "1", "৳120.00", "Product Adjust"],
-];
-
 const pageData: SectionData = {
   description: "Review returned products and keep return adjustments traceable.",
   action: "Record Return",
   metrics: [],
   columns: ["Return ID", "Date & Time", "Customer Name & Phone Number", "Re-Invoice", "Invoice", "Product", "Return Qty", "Amount", "Return Method"],
-  rows: initialRows,
+  rows: [],
 };
 
 const inputStyle = {
@@ -223,16 +217,10 @@ export default function ReturnSystemPage() {
       record.batchNumber ?? "",
     ].some((value) => value.toLocaleLowerCase().includes(normalizedListSearch)))
     : returns.rows;
-  const matchingInitialRows = normalizedListSearch
-    ? initialRows.filter((row) => [row[0], row[2], row[3], row[5]].some((value) => value.toLocaleLowerCase().includes(normalizedListSearch)))
-    : initialRows;
-  const returnRowCount = matchingReturnRecords.length + matchingInitialRows.length;
+  const returnRowCount = matchingReturnRecords.length;
   const returnPageCount = Math.max(1, Math.ceil(returnRowCount / RETURNS_PER_PAGE));
   const currentReturnPage = Math.min(returnListPage, returnPageCount);
   const pageRecords = matchingReturnRecords.slice((currentReturnPage - 1) * RETURNS_PER_PAGE, currentReturnPage * RETURNS_PER_PAGE);
-  const initialStartIndex = Math.max(0, (currentReturnPage - 1) * RETURNS_PER_PAGE - matchingReturnRecords.length);
-  const initialEndIndex = Math.max(0, currentReturnPage * RETURNS_PER_PAGE - matchingReturnRecords.length);
-  const pageInitialRows = matchingInitialRows.slice(initialStartIndex, initialEndIndex);
   const returnRows: ReactNode[][] = [
     ...pageRecords.map((record) => {
       const returnId = record.returnId ?? record.id;
@@ -260,7 +248,6 @@ export default function ReturnSystemPage() {
         record.returnMethod ?? "Cash Return",
       ];
     }),
-    ...pageInitialRows,
   ];
   const selectedReturnRecords = selectedReturnId
     ? returns.rows.filter((record) => (record.returnId ?? record.id) === selectedReturnId)

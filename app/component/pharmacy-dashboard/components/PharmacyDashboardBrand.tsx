@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { formatPharmacyStoreName, loadPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
@@ -50,7 +51,7 @@ export default function PharmacyDashboardBrand() {
 
   return (
     <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none", minWidth: 0 }}>
-      <span aria-hidden="true" style={{ width: 24, height: 24, flex: "0 0 24px", display: "grid", placeItems: "center", borderRadius: 7, background: "#2ad49a", color: "#07372b", fontSize: 14 }}>✚</span>
+      <Image src="/pharmacy-icon.png" alt="" width={28} height={28} aria-hidden="true" style={{ flex: "0 0 28px" }} />
       <span style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {storeName || "Pharmacy Cluster"}
       </span>
