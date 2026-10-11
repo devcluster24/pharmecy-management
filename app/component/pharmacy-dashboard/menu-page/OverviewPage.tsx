@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
+import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
   emptyExpensesSnapshot,
   getExpensesSnapshot,
@@ -196,6 +197,7 @@ function ProductTable({
 }
 
 export default function OverviewPage() {
+  const storeName = usePharmacyStoreName();
   const [period, setPeriod] = useState<Period>("Daily");
   const salesSnapshot = useSyncExternalStore(subscribeToSalesList, getSalesListSnapshot, () => emptySalesListSnapshot);
   const purchaseSnapshot = useSyncExternalStore(subscribeToPurchaseList, getPurchaseListSnapshot, () => emptyPurchaseListSnapshot);
@@ -418,12 +420,9 @@ export default function OverviewPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#f5f7f5", color: "#1f2d26", fontFamily: "Inter, Arial, sans-serif" }}>
       <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e6ebe7" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "#2ad49a", color: "#07372b", fontSize: 14 }}>✚</span>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Pharmecy Cluster</span>
-        </div>
+        <PharmacyDashboardBrand />
         <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#66756d", fontSize: 12 }}>
-          <span>Pharmacy business overview</span>
+          <span>{storeName || "Pharmacy Cluster"}</span>
           <PharmacyProfileMenu />
         </div>
       </header>

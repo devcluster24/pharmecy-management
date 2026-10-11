@@ -1,4 +1,8 @@
 import { supabase } from "@/lib/supabase/client";
+import {
+  assertPharmacyStaffAccess,
+  type StaffPageAction,
+} from "@/lib/pharmacy-staff-permissions";
 
 export const pharmacyDataKeys = [
   "pharmecy-sales-list-v1",
@@ -10,6 +14,7 @@ export const pharmacyDataKeys = [
   "pharmecy-payment-methods-v1",
   "pharmecy-vat-tax-settings-v1",
   "pharmecy-return-deduction-settings-v1",
+  "pharmecy-invoice-templates-v1",
   "pharmecy-supplier-status-v1",
   "pharmecy-supplier-due-adjustments-v1",
   "pharmecy-supplier-due-payments-v1",
@@ -37,6 +42,7 @@ const keyEvents: Record<PharmacyDataKey, string> = {
   "pharmecy-payment-methods-v1": "pharmecy-payment-methods-updated",
   "pharmecy-vat-tax-settings-v1": "pharmecy-vat-tax-settings-updated",
   "pharmecy-return-deduction-settings-v1": "pharmecy-return-deduction-settings-updated",
+  "pharmecy-invoice-templates-v1": "pharmecy-invoice-templates-updated",
   "pharmecy-supplier-status-v1": "pharmecy-supplier-dues-updated",
   "pharmecy-supplier-due-adjustments-v1": "pharmecy-supplier-dues-updated",
   "pharmecy-supplier-due-payments-v1": "pharmecy-supplier-dues-updated",
@@ -53,6 +59,7 @@ let ownerGeneration = 0;
 let refreshTimer: number | null = null;
 let activeEventCleanups: (() => void)[] = [];
 let dirtyKeys = new Set<PharmacyDataKey>();
+let knownDataKeys = new Set<PharmacyDataKey>();
 let refreshInProgress = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
@@ -70,10 +77,33 @@ function notifyDataChanged(keys: PharmacyDataKey[]) {
   }
 }
 
+function getSyncErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+
+  if (error && typeof error === "object") {
+    const details = error as Record<string, unknown>;
+    const message = typeof details.message === "string" ? details.message : "";
+    const code = typeof details.code === "string" ? ` (${details.code})` : "";
+    const detail = typeof details.details === "string" ? ` Details: ${details.details}` : "";
+    const hint = typeof details.hint === "string" ? ` Hint: ${details.hint}` : "";
+    if (message || code || detail || hint) return `${message || "Supabase request failed."}${code}${detail}${hint}`;
+
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== "{}") return serialized;
+    } catch {
+      return "Could not sync pharmacy data with Supabase.";
+    }
+  }
+
+  return "Could not sync pharmacy data with Supabase.";
+}
+
 function reportSyncError(error: unknown) {
   notifyStatus({
     state: "error",
-    message: error instanceof Error ? error.message : "Could not sync pharmacy data with Supabase.",
+    message: getSyncErrorMessage(error),
     lastSyncedAt: syncStatus.lastSyncedAt,
   });
 }
@@ -89,14 +119,34 @@ export function getPharmacyDataJson(key: PharmacyDataKey) {
   return payload === undefined ? null : JSON.stringify(payload);
 }
 
-export function setPharmacyDataJson(key: PharmacyDataKey, serialized: string) {
+const dataKeyPages: Record<PharmacyDataKey, string> = {
+  "pharmecy-sales-list-v1": "sales",
+  "pharmecy-purchase-list-v1": "purchase",
+  "pharmecy-place-order-list-v1": "purchase",
+  "pharmecy-expenses-v1": "expenses",
+  "pharmecy-return-records-v1": "returns",
+  "pharmecy-low-stock-threshold-v1": "settings",
+  "pharmecy-payment-methods-v1": "settings",
+  "pharmecy-vat-tax-settings-v1": "settings",
+  "pharmecy-return-deduction-settings-v1": "settings",
+  "pharmecy-invoice-templates-v1": "settings",
+  "pharmecy-supplier-status-v1": "suppliers",
+  "pharmecy-supplier-due-adjustments-v1": "suppliers",
+  "pharmecy-supplier-due-payments-v1": "suppliers",
+};
+
+export function setPharmacyDataJson(
+  key: PharmacyDataKey,
+  serialized: string,
+  action: StaffPageAction = "edit",
+) {
   let payload: unknown;
   try {
     payload = JSON.parse(serialized) as unknown;
   } catch (error) {
     throw new Error(`Could not save ${key}: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }
-  setPharmacyDataBatch({ [key]: payload });
+  setPharmacyDataBatch({ [key]: payload }, action);
 }
 
 async function flushDirtyData(ownerId: string) {
@@ -105,16 +155,32 @@ async function flushDirtyData(ownerId: string) {
     .map((key) => [key, pharmacyData.get(key)] as const)
     .filter((entry) => entry[1] !== undefined);
   if (!entries.length) return;
-  const rows = entries.map(([data_key, payload]) => ({
-    owner_user_id: ownerId,
-    data_key,
-    payload,
-    updated_at: new Date().toISOString(),
-  }));
-  const { error } = await supabase
-    .from("pharmacy_app_data")
-    .upsert(rows, { onConflict: "owner_user_id,data_key" });
-  if (error) throw error;
+  for (const [data_key, payload] of entries) {
+    const row = {
+      owner_user_id: ownerId,
+      data_key,
+      payload,
+      updated_at: new Date().toISOString(),
+    };
+    const result = knownDataKeys.has(data_key)
+      ? await supabase
+        .from("pharmacy_app_data")
+        .update(row)
+        .eq("owner_user_id", ownerId)
+        .eq("data_key", data_key)
+        .select("data_key")
+        .maybeSingle()
+      : await supabase
+        .from("pharmacy_app_data")
+        .insert(row)
+        .select("data_key")
+        .maybeSingle();
+    if (result.error) throw result.error;
+    if (!result.data) {
+      throw new Error(`Could not save ${data_key}; check that you have permission to edit this page.`);
+    }
+    knownDataKeys.add(data_key);
+  }
   entries.forEach(([key, payload]) => {
     if (JSON.stringify(pharmacyData.get(key)) === JSON.stringify(payload)) dirtyKeys.delete(key);
   });
@@ -124,16 +190,28 @@ async function flushDirtyData(ownerId: string) {
 }
 
 function queueDirtyData(ownerId: string) {
-  writeQueue = writeQueue
+  const queuedWrite = writeQueue
     .catch(() => undefined)
-    .then(() => flushDirtyData(ownerId))
-    .catch(reportSyncError);
+    .then(() => flushDirtyData(ownerId));
+  writeQueue = queuedWrite;
+  void queuedWrite.catch(reportSyncError);
+  return queuedWrite;
 }
 
-export function setPharmacyDataBatch(updates: Partial<Record<PharmacyDataKey, unknown>>) {
+export function setPharmacyDataBatch(
+  updates: Partial<Record<PharmacyDataKey, unknown>>,
+  action: StaffPageAction | Partial<Record<PharmacyDataKey, StaffPageAction>> = "edit",
+) {
   assertInitialized();
   const entries = Object.entries(updates) as [PharmacyDataKey, unknown][];
   if (!entries.length) return;
+  for (const [key] of entries) {
+    const requestedAction = typeof action === "string" ? action : action[key] ?? "edit";
+    const effectiveAction = !knownDataKeys.has(key) && requestedAction === "edit"
+      ? "create"
+      : requestedAction;
+    assertPharmacyStaffAccess(dataKeyPages[key], effectiveAction);
+  }
   for (const [key, payload] of entries) {
     pharmacyData.set(key, payload);
     dirtyKeys.add(key);
@@ -195,6 +273,7 @@ function stopOwnerListeners() {
   refreshTimer = null;
   initializedOwnerId = null;
   dirtyKeys = new Set();
+  knownDataKeys = new Set();
   pharmacyData.clear();
   writeQueue = Promise.resolve();
 }
@@ -227,7 +306,9 @@ async function initializeOwner(ownerId: string) {
 
   for (const row of rows) {
     if (dataKeySet.has(row.data_key)) {
-      pharmacyData.set(row.data_key as PharmacyDataKey, row.payload);
+      const key = row.data_key as PharmacyDataKey;
+      pharmacyData.set(key, row.payload);
+      knownDataKeys.add(key);
     }
   }
   initializedOwnerId = ownerId;
@@ -260,15 +341,21 @@ export function retryPharmacyDataSync() {
   if (!initializedOwnerId) return Promise.resolve();
   notifyStatus({ state: "syncing", message: "Checking Supabase for pharmacy data…", lastSyncedAt: syncStatus.lastSyncedAt });
   const ownerId = initializedOwnerId;
-  if (dirtyKeys.size) queueDirtyData(ownerId);
-  const waitForPendingWrites = async () => {
+  const waitForPendingWrites = async (ignorePreviousFailure = false) => {
     while (true) {
       const pendingWrites = writeQueue;
-      await pendingWrites;
+      try {
+        await pendingWrites;
+      } catch (error) {
+        if (!ignorePreviousFailure) throw error;
+      }
       if (pendingWrites === writeQueue) return;
     }
   };
-  return waitForPendingWrites().then(() => {
+
+  return waitForPendingWrites(true).then(async () => {
+    if (dirtyKeys.size) await queueDirtyData(ownerId);
+    await waitForPendingWrites();
     if (dirtyKeys.size) throw new Error("Some pharmacy data is still waiting to sync.");
     return refreshFromCloud();
   }).then(() => {

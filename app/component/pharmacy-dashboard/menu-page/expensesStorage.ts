@@ -80,8 +80,8 @@ export function subscribeToExpenses(listener: () => void) {
   };
 }
 
-function saveExpenses(rows: ExpenseRecord[]) {
-  setPharmacyDataJson(EXPENSES_STORAGE_KEY, JSON.stringify(rows));
+function saveExpenses(rows: ExpenseRecord[], action: "create" | "edit" | "delete" = "edit") {
+  setPharmacyDataJson(EXPENSES_STORAGE_KEY, JSON.stringify(rows), action);
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(expensesUpdatedEvent));
 }
@@ -107,7 +107,7 @@ export function addExpense(input: Omit<ExpenseRecord, "id" | "createdAt">) {
     amount: Number(input.amount.toFixed(2)),
     createdAt: new Date().toISOString(),
   };
-  saveExpenses([expense, ...rows]);
+  saveExpenses([expense, ...rows], "create");
   return expense;
 }
 
@@ -116,5 +116,5 @@ export function deleteExpense(id: string) {
   if (!rows.some((row) => row.id === id)) {
     throw new Error("This expense could not be found. Refresh the list and try again.");
   }
-  saveExpenses(rows.filter((row) => row.id !== id));
+  saveExpenses(rows.filter((row) => row.id !== id), "delete");
 }

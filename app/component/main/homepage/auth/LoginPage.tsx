@@ -1,13 +1,132 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { dashboardNavItems } from "@/app/component/pharmacy-dashboard/navigation";
+import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
+import { clearPharmacyDashboardIdentity, loadPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
 
 export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hasHandledGoogleCallback = useRef(false);
+
+  const completeSignIn = useCallback(async (userId: string) => {
+    const { data: profile, error: profileError } = await supabase
+      .from("user_profiles")
+      .select("role, approval_status")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      throw new Error(profileError?.message ?? "Your account profile is not ready yet.");
+    }
+
+    if (profile.role === "pharmacy_staff" && profile.approval_status !== "approved") {
+      const { error: signOutError } = await supabase.auth.signOut();
+      setMessage(signOutError
+        ? `Your staff application is waiting for owner approval. Sign out failed: ${signOutError.message}`
+        : profile.approval_status === "rejected"
+          ? "Your staff application was not approved. Contact your pharmacy owner."
+          : "Your staff application is waiting for owner approval.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (profile.role === "pharmacy_staff") {
+      const identity = await loadPharmacyDashboardIdentity(userId, true);
+      if (!identity || identity.role !== "pharmacy_staff" || identity.approvalStatus !== "approved") {
+        throw new Error("Your staff account could not load its approved pharmacy access. Ask the pharmacy owner to check your account status.");
+      }
+
+      const firstAllowedPage = dashboardNavItems.find((item) =>
+        item.slug !== "staff" && canPharmacyStaffAccess(item.slug || "overview", "view"),
+      );
+      if (!firstAllowedPage) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        clearPharmacyDashboardIdentity();
+        setMessage(signOutError
+          ? `Your account is active, but no dashboard pages are enabled. Sign out failed: ${signOutError.message}`
+          : "Your account is active, but your pharmacy owner has not enabled any dashboard pages yet.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      router.replace(firstAllowedPage.href);
+      return;
+    }
+
+    if (profile.approval_status !== "approved") {
+      const { error: signOutError } = await supabase.auth.signOut();
+      setMessage(signOutError
+        ? `Your account is awaiting approval. Sign out failed: ${signOutError.message}`
+        : "Your account is awaiting approval.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (profile.role === "pharmacy_user") {
+      const { data: pharmacy, error: pharmacyError } = await supabase
+        .from("pharmacies")
+        .select("id")
+        .eq("owner_user_id", userId)
+        .maybeSingle();
+
+      if (pharmacyError) throw pharmacyError;
+
+      if (!pharmacy) {
+        router.replace("/shop-setup");
+        return;
+      }
+    }
+
+    router.replace(profile.role === "admin" || profile.role === "superadmin"
+      ? "/admin-dashboard"
+      : "/dashboard");
+  }, [router]);
+
+  useEffect(() => {
+    if (hasHandledGoogleCallback.current) return;
+    if (new URLSearchParams(window.location.search).get("google_signin") !== "1") return;
+    hasHandledGoogleCallback.current = true;
+
+    async function completeGoogleSignIn() {
+      setIsSubmitting(true);
+      setMessage("");
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) throw new Error("Google sign-in did not complete. Please try again.");
+        await completeSignIn(data.session.user.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not sign in with Google.";
+        const { error: signOutError } = await supabase.auth.signOut();
+        setMessage(signOutError ? `${message} Sign out also failed: ${signOutError.message}` : message);
+        setIsSubmitting(false);
+      }
+    }
+
+    void completeGoogleSignIn();
+  }, [completeSignIn]);
+
+  async function handleGoogleSignIn() {
+    setIsSubmitting(true);
+    setMessage("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/login?google_signin=1`,
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start Google sign-in.");
+      setIsSubmitting(false);
+    }
+  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,49 +155,12 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("user_profiles")
-      .select("role")
-      .eq("id", data.user.id)
-      .maybeSingle();
-
-    if (profileError || !profile) {
-      setMessage(profileError?.message ?? "Your account profile is not ready yet.");
+    try {
+      await completeSignIn(data.user.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Sign in failed. Please try again.");
       setIsSubmitting(false);
-      return;
     }
-
-    if (profile.role === "pharmacy_staff") {
-      const { error: signOutError } = await supabase.auth.signOut();
-      setMessage(signOutError
-        ? `Staff accounts do not have dashboard access yet. Sign out failed: ${signOutError.message}`
-        : "Staff account signed in successfully, but dashboard access has not been enabled yet. Contact your pharmacy owner.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (profile.role === "pharmacy_user") {
-      const { data: pharmacy, error: pharmacyError } = await supabase
-        .from("pharmacies")
-        .select("id")
-        .eq("owner_user_id", data.user.id)
-        .maybeSingle();
-
-      if (pharmacyError) {
-        setMessage(pharmacyError.message);
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!pharmacy) {
-        router.replace("/shop-setup");
-        return;
-      }
-    }
-
-    router.replace(profile.role === "admin" || profile.role === "superadmin"
-      ? "/admin-dashboard"
-      : "/dashboard");
   }
 
   return (
@@ -175,6 +257,9 @@ export default function LoginPage() {
             </p>
 
             <button
+              type="button"
+              onClick={() => void handleGoogleSignIn()}
+              disabled={isSubmitting}
               style={{
                 width: "100%",
                 border: "1px solid #dfe4e2",
@@ -189,7 +274,8 @@ export default function LoginPage() {
                 fontSize: 15,
                 fontWeight: 600,
                 marginBottom: 18,
-                cursor: "pointer",
+                cursor: isSubmitting ? "wait" : "pointer",
+                opacity: isSubmitting ? 0.7 : 1,
               }}
             >
               <span

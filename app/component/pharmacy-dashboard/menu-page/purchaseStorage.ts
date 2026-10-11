@@ -348,8 +348,8 @@ function subscribeToPurchaseLists(listener: () => void) {
 export const subscribeToPurchaseList = subscribeToPurchaseLists;
 export const subscribeToPlaceOrderList = subscribeToPurchaseLists;
 
-export function persistPurchaseListRows(rows: PurchaseListRow[]) {
-  setPharmacyDataJson(PURCHASE_STORAGE_KEY, JSON.stringify(rows));
+export function persistPurchaseListRows(rows: PurchaseListRow[], action: "create" | "edit" | "delete" = "edit") {
+  setPharmacyDataJson(PURCHASE_STORAGE_KEY, JSON.stringify(rows), action);
   notifyPurchaseListRowsChanged(rows);
 }
 
@@ -358,8 +358,8 @@ export function notifyPurchaseListRowsChanged(rows: PurchaseListRow[]) {
   window.dispatchEvent(new Event(purchaseListUpdatedEvent));
 }
 
-export function persistPlaceOrderListRows(rows: PurchaseListRow[]) {
-  setPharmacyDataJson(PLACE_ORDER_STORAGE_KEY, JSON.stringify(rows));
+export function persistPlaceOrderListRows(rows: PurchaseListRow[], action: "create" | "edit" | "delete" = "edit") {
+  setPharmacyDataJson(PLACE_ORDER_STORAGE_KEY, JSON.stringify(rows), action);
   cachedPlaceOrderSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(purchaseListUpdatedEvent));
 }

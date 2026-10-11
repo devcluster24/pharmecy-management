@@ -1,13 +1,8 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useState, type FormEvent } from "react";
-import { supabase } from "@/lib/supabase/client";
-import {
-  getPharmacyDashboardIdentity,
-  loadPharmacyDashboardIdentity,
-} from "@/lib/pharmacy-dashboard-identity";
+import { useState, type FormEvent } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import { retryPharmacyDataSync } from "@/lib/pharmacy-data-sync";
 import {
   getLowStockThresholdSnapshot,
   saveLowStockThreshold as persistLowStockThreshold,
@@ -25,16 +20,17 @@ import {
   getReturnDeductionSettingsSnapshot,
   saveReturnDeductionDefaultRate,
 } from "./returnDeductionStorage";
+import SubscriptionBillingSection from "./SubscriptionBillingSection";
+import InvoiceSetupSection from "./InvoiceSetupSection";
+import { usePharmacySubscriptionExpiry } from "../../auth/PharmacySubscriptionExpiry";
 
 const settingsMenus = [
   { id: "pharmacy-store", label: "Pharmacy Store" },
-  { id: "subscription-bill", label: "Subcription & Bill" },
+  { id: "subscription-bill", label: "Subscription & Billing" },
   { id: "documents-invoice", label: "Documents & Invoice" },
-  { id: "store-bill-payment", label: "Store Bill Payment" },
-  { id: "profile", label: "Profile" },
 ] as const;
 
-const pharmacyStoreSubmenus = ["Product Management", "Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System"] as const;
+const pharmacyStoreSubmenus = ["Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System"] as const;
 const defaultMobilePaymentNames = ["Bangla QR", "Bkash", "Nagad", "Rocket", "upay", "Tap", "gpay"] as const;
 const bankNames = [
   "Sonali Bank PLC",
@@ -105,50 +101,21 @@ const bankNames = [
   "Palli Sanchay Bank",
 ] as const;
 
-type SettingsProfile = {
-  photoUrl: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  role: string;
-  storeName: string;
-};
-
-type ProfileState =
-  | { status: "loading"; profile: null; error: "" }
-  | { status: "ready"; profile: SettingsProfile; error: "" }
-  | { status: "error"; profile: null; error: string };
-
 const emptyPageData: SectionData = {
-  description: "View your account profile.",
+  description: "Manage your pharmacy settings.",
   action: "",
   metrics: [],
   columns: [],
   rows: [],
 };
 
-function metadataString(metadata: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) {
-    const value = metadata[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function getInitials(fullName: string, email: string) {
-  const name = fullName.trim();
-  if (name) {
-    return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase();
-  }
-  return email.trim().slice(0, 1).toLocaleUpperCase() || "?";
-}
-
 export default function SettingPage() {
+  const { isExpired } = usePharmacySubscriptionExpiry();
   const [activeMenu, setActiveMenu] = useState<(typeof settingsMenus)[number]["id"]>("pharmacy-store");
-  const [activeStoreSubmenu, setActiveStoreSubmenu] = useState<(typeof pharmacyStoreSubmenus)[number] | null>(null);
-  const [lowStockThreshold, setLowStockThreshold] = useState("");
+  const [activeStoreSubmenu, setActiveStoreSubmenu] = useState<(typeof pharmacyStoreSubmenus)[number]>("Inventory");
+  const [lowStockThreshold, setLowStockThreshold] = useState(() => getLowStockThresholdSnapshot().threshold);
   const [lowStockMessage, setLowStockMessage] = useState("");
-  const [lowStockError, setLowStockError] = useState("");
+  const [lowStockError, setLowStockError] = useState(() => getLowStockThresholdSnapshot().error);
   const [vatTaxRate, setVatTaxRate] = useState("0");
   const [vatTaxMessage, setVatTaxMessage] = useState("");
   const [vatTaxError, setVatTaxError] = useState("");
@@ -168,11 +135,6 @@ export default function SettingPage() {
   const [editingPaymentMethodId, setEditingPaymentMethodId] = useState<string | null>(null);
   const [paymentMethodMessage, setPaymentMethodMessage] = useState("");
   const [paymentMethodError, setPaymentMethodError] = useState("");
-  const [profileState, setProfileState] = useState<ProfileState>({
-    status: "loading",
-    profile: null,
-    error: "",
-  });
   const existingMobilePaymentNames = new Set(
     paymentMethods
       .filter((method): method is Extract<PaymentMethod, { type: "mobile" }> =>
@@ -186,58 +148,6 @@ export default function SettingPage() {
       .map((method) => method.bankName.trim().toLocaleLowerCase()),
   );
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadProfile() {
-      try {
-        const { data: { session }, error: authError } = await supabase.auth.getSession();
-        const user = session?.user ?? null;
-        if (authError) throw authError;
-        if (!user) throw new Error("Sign in to view your profile.");
-
-        const dashboardIdentity = getPharmacyDashboardIdentity(user.id)
-          ?? await loadPharmacyDashboardIdentity(user.id);
-        if (!dashboardIdentity) {
-          throw new Error("Your account profile could not be found.");
-        }
-
-        const metadata = user.user_metadata as Record<string, unknown>;
-        const profile: SettingsProfile = {
-          photoUrl: metadataString(metadata, "avatar_url", "picture", "profile_photo_url", "photo_url"),
-          fullName: metadataString(metadata, "full_name", "name") || dashboardIdentity.fullName,
-          email: user.email ?? "",
-          phone: metadataString(metadata, "phone", "phone_number") || dashboardIdentity.phone,
-          role: dashboardIdentity.role,
-          storeName: dashboardIdentity.storeName,
-        };
-
-        if (active) setProfileState({ status: "ready", profile, error: "" });
-      } catch (error) {
-        if (active) {
-          setProfileState({
-            status: "error",
-            profile: null,
-            error: error instanceof Error ? error.message : "Unable to load your profile.",
-          });
-        }
-      }
-    }
-
-    void loadProfile();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const profile = profileState.status === "ready" ? profileState.profile : null;
-  const profileFields = [
-    ["Full Name", profile?.fullName],
-    ["Email", profile?.email],
-    ["Phone Number", profile?.phone],
-    ["Store Name", profile?.storeName],
-    ["User Role", profile?.role],
-  ] as const;
   const parsedLowStockThreshold = Number(lowStockThreshold);
   const isLowStockEnabled = lowStockThreshold.trim() !== ""
     && Number.isInteger(parsedLowStockThreshold)
@@ -283,7 +193,7 @@ export default function SettingPage() {
     }
   }
 
-  function saveLowStockThreshold() {
+  async function saveLowStockThreshold() {
     const threshold = Number(lowStockThreshold);
     if (lowStockThreshold.trim() === "" || !Number.isInteger(threshold) || threshold < 0) {
       setLowStockError("Enter a whole number equal to or greater than 0.");
@@ -293,6 +203,7 @@ export default function SettingPage() {
 
     try {
       persistLowStockThreshold(String(threshold));
+      await retryPharmacyDataSync();
       setLowStockThreshold(String(threshold));
       setLowStockError("");
       setLowStockMessage("Low stock threshold saved.");
@@ -302,7 +213,7 @@ export default function SettingPage() {
     }
   }
 
-  function saveVatTaxSettings() {
+  async function saveVatTaxSettings() {
     const rate = Number(vatTaxRate);
     if (vatTaxRate.trim() === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
       setVatTaxError("Enter a VAT/TAX rate between 0 and 100%.");
@@ -312,6 +223,7 @@ export default function SettingPage() {
 
     try {
       saveVatTaxDefaultRate(rate);
+      await retryPharmacyDataSync();
       setVatTaxRate(String(Number(rate.toFixed(2))));
       setVatTaxError("");
       setVatTaxMessage("Default VAT/TAX rate saved.");
@@ -321,7 +233,7 @@ export default function SettingPage() {
     }
   }
 
-  function saveReturnDeductionSettings() {
+  async function saveReturnDeductionSettings() {
     const rate = Number(returnDeductionRate);
     if (returnDeductionRate.trim() === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
       setReturnDeductionError("Enter a return deduction rate between 0 and 100%.");
@@ -331,6 +243,7 @@ export default function SettingPage() {
 
     try {
       saveReturnDeductionDefaultRate(rate);
+      await retryPharmacyDataSync();
       const normalizedRate = Number(rate.toFixed(2));
       setReturnDeductionRate(String(normalizedRate));
       setSavedReturnDeductionRate(normalizedRate);
@@ -342,7 +255,7 @@ export default function SettingPage() {
     }
   }
 
-  function savePaymentMethod(event: FormEvent<HTMLFormElement>) {
+  async function savePaymentMethod(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPaymentMethodMessage("");
     setPaymentMethodError("");
@@ -383,7 +296,8 @@ export default function SettingPage() {
       const nextMethods = editingPaymentMethodId
         ? paymentMethods.map((existingMethod) => existingMethod.id === editingPaymentMethodId ? method : existingMethod)
         : [...paymentMethods, method];
-      savePaymentMethods(nextMethods);
+      savePaymentMethods(nextMethods, editingPaymentMethodId ? "edit" : "create");
+      await retryPharmacyDataSync();
       setPaymentMethods(nextMethods);
       setPaymentMethodMessage(editingPaymentMethodId ? "Payment method updated." : "Payment method saved.");
       setEditingPaymentMethodId(null);
@@ -417,11 +331,12 @@ export default function SettingPage() {
     setActiveStoreSubmenu("Add Payment Method");
   }
 
-  function deletePaymentMethod(methodId: string) {
+  async function deletePaymentMethod(methodId: string) {
     if (!window.confirm("Delete this payment method?")) return;
     const nextMethods = paymentMethods.filter((method) => method.id !== methodId);
     try {
-      savePaymentMethods(nextMethods);
+      savePaymentMethods(nextMethods, "delete");
+      await retryPharmacyDataSync();
       setPaymentMethods(nextMethods);
       setPaymentMethodMessage("Payment method deleted.");
       setPaymentMethodError("");
@@ -448,42 +363,6 @@ export default function SettingPage() {
       hideAction
       content={
         <>
-          <section aria-labelledby="settings-profile-title" style={{ maxWidth: 760, background: "transparent", padding: 24, marginBottom: 20 }}>
-            <h2 id="settings-profile-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Profile</h2>
-            {profileState.status === "loading" && (
-              <p role="status" style={{ margin: "16px 0 0", color: "#687871", fontSize: 13 }}>Loading profile...</p>
-            )}
-            {profileState.status === "error" && (
-              <p role="alert" style={{ margin: "16px 0 0", color: "#b34b43", fontSize: 13 }}>{profileState.error}</p>
-            )}
-            {profile && (
-              <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap", marginTop: 20 }}>
-                <div style={{ display: "grid", justifyItems: "center", gap: 8 }}>
-                  <div style={{ width: 104, height: 104, display: "grid", placeItems: "center", overflow: "hidden", border: "1px solid #d7ebdf", borderRadius: "50%", background: "#e5f5ed", color: "#187553", fontSize: 28, fontWeight: 700 }}>
-                    {profile.photoUrl ? (
-                      <Image
-                        src={profile.photoUrl}
-                        alt={`${profile.fullName || "User"} profile photo`}
-                        width={104}
-                        height={104}
-                        unoptimized
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                      />
-                    ) : getInitials(profile.fullName, profile.email)}
-                  </div>
-                  <span style={{ color: "#687871", fontSize: 12 }}>Profile Photo</span>
-                </div>
-                <dl style={{ flex: "1 1 320px", display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 2fr", gap: "14px 20px", margin: 0, color: "#34453b", fontSize: 13 }}>
-                  {profileFields.map(([label, value]) => (
-                    <div key={label} style={{ display: "contents" }}>
-                      <dt style={{ color: "#77857d" }}>{label}</dt>
-                      <dd style={{ margin: 0, fontWeight: 600 }}>{value || "Not provided"}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            )}
-          </section>
           <div role="group" aria-label="Settings menu" style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 20 }}>
             {settingsMenus.map((menu) => (
               <button
@@ -497,6 +376,8 @@ export default function SettingPage() {
               </button>
             ))}
           </div>
+          {activeMenu === "subscription-bill" && <SubscriptionBillingSection />}
+          {activeMenu === "documents-invoice" && <InvoiceSetupSection />}
           {activeMenu === "pharmacy-store" && (
             <div style={{ display: "flex", alignItems: "flex-start", gap: 40, margin: "-6px 0 20px", paddingLeft: 16 }}>
               <nav aria-label="Pharmacy Store menu" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
@@ -512,8 +393,8 @@ export default function SettingPage() {
                   </button>
                 ))}
               </nav>
+              <fieldset disabled={isExpired} style={{ display: "contents" }}>
               <section aria-live="polite" style={{ flex: "1 1 0", minWidth: 0, minHeight: 80, color: "#26352f", fontSize: 15, fontWeight: 600 }}>
-                {activeStoreSubmenu === "Product Management" && <p style={{ margin: 0 }}>Hello Product Management</p>}
                 {activeStoreSubmenu === "Add Payment Method" && (
                   <section aria-labelledby="payment-method-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
                     <h2 id="payment-method-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>{editingPaymentMethodId ? "Edit Payment Method" : "Add Payment Method"}</h2>
@@ -783,7 +664,7 @@ export default function SettingPage() {
                       <aside style={{ borderLeft: "2px solid #dce5df", paddingLeft: 16 }}>
                         <h3 style={{ margin: 0, color: "#16845f", fontSize: 13, fontWeight: 700 }}>Per-sale adjustment</h3>
                         <p style={{ margin: "8px 0 0", color: "#687871", fontSize: 12, fontWeight: 400, lineHeight: 1.6 }}>
-                          The saved rate is stored in this browser and prefilled for new sales on this device. A cashier can adjust it for an individual sale without changing this default.
+                          The saved rate is stored in this pharmacy&apos;s Supabase account and prefilled for new sales on authorized devices. A cashier can adjust it for an individual sale without changing this default.
                         </p>
                       </aside>
                     </div>
@@ -841,6 +722,7 @@ export default function SettingPage() {
                   </section>
                 )}
               </section>
+              </fieldset>
             </div>
           )}
         </>

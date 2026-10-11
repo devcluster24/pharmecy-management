@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
 import {
   persistPlaceOrderListRows,
   persistPurchaseListRows,
@@ -431,13 +432,14 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         const user = session?.user ?? null;
         if (authError) throw authError;
         if (!user) throw new Error("Sign in to create a purchase.");
+        const pharmacyOwnerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
 
         const rows: PurchaseProduct[] = [];
         for (let offset = 0; ; offset += PAGE_SIZE) {
           const { data, error } = await supabase
             .from("pharmacy_catalog_products")
             .select("id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price")
-            .eq("owner_user_id", user.id)
+            .eq("owner_user_id", pharmacyOwnerId)
             .order("manufacturer", { ascending: true })
             .order("brand", { ascending: true })
             .range(offset, offset + PAGE_SIZE - 1);
@@ -557,7 +559,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         orderDueAmount: formatOrderPrice(receiveDueAmount),
       }));
       const updatedRows = mergeReceivedRows(receiveRows, [...newRows, ...stagedOrderRows]);
-      persistPurchaseListRows(updatedRows);
+      persistPurchaseListRows(updatedRows, "create");
       if (pendingOrderReceipts.length > 0) {
         const receivedPlaceOrders = new Map(pendingOrderReceipts.map((receipt) => {
           const receivedBatchKeys = new Set(receipt.rows.map(getReceivedBatchKey));
@@ -582,7 +584,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
           return receivedTotals
             ? { ...row, ...receivedTotals, status: "Received" }
             : row;
-        }));
+        }), "edit");
       }
       closeModal();
     } catch (error) {
@@ -673,7 +675,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
           status: "Placed",
         };
       });
-      persistPlaceOrderListRows([...newRows, ...readPlaceOrderListRows()]);
+      persistPlaceOrderListRows([...newRows, ...readPlaceOrderListRows()], "create");
       closePlaceOrderModal();
     } catch (error) {
       setPlaceOrderError(error instanceof Error ? error.message : "Could not place this order.");

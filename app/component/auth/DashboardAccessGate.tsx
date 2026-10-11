@@ -1,14 +1,17 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { initializePharmacyDataSync } from "@/lib/pharmacy-data-sync";
+import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
 import {
   clearPharmacyDashboardIdentity,
   loadPharmacyDashboardIdentity,
 } from "@/lib/pharmacy-dashboard-identity";
+import { PharmacySubscriptionExpiryProvider } from "./PharmacySubscriptionExpiry";
 import PharmacyDataSyncNotice from "./PharmacyDataSyncNotice";
 
 type RequiredRole = "pharmacy_user" | "admin";
@@ -22,9 +25,13 @@ export default function DashboardAccessGate({
   requiredRole: RequiredRole;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isSubscriptionPaymentPage = pathname === "/dashboard/paymnet";
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [message, setMessage] = useState("");
   const [checkAttempt, setCheckAttempt] = useState(0);
+  const [previouslyAllowedPath, setPreviouslyAllowedPath] = useState<string | null>(null);
+  const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
   const accessStateRef = useRef(accessState);
 
   useEffect(() => {
@@ -35,28 +42,35 @@ export default function DashboardAccessGate({
     let active = true;
 
     async function checkAccess() {
+      if (active) {
+        setMessage("");
+        setAccessState("checking");
+      }
+
       try {
         const { data: { session }, error: authError } = await supabase.auth.getSession();
         const user = session?.user ?? null;
 
         if (authError || !user) {
-          if (active) router.replace("/login");
+          if (active) {
+            setPreviouslyAllowedPath(null);
+            router.replace("/login");
+          }
           return;
         }
 
-        let profile: { role: string; full_name?: string | null; phone?: string | null } | null;
-        let hasPharmacy = false;
+        let profile: { role: string; approvalStatus?: string; ownerUserId?: string; hasPharmacy?: boolean } | null;
         if (requiredRole === "pharmacy_user") {
-          const identity = await loadPharmacyDashboardIdentity(user.id);
+          const identity = await loadPharmacyDashboardIdentity(user.id, true);
           if (!identity) {
             if (active) {
+              setPreviouslyAllowedPath(null);
               setMessage("Your account profile is not ready yet.");
               setAccessState("blocked");
             }
             return;
           }
           profile = identity;
-          hasPharmacy = identity.hasPharmacy;
         } else {
           const { data, error } = await supabase
             .from("user_profiles")
@@ -65,6 +79,7 @@ export default function DashboardAccessGate({
             .maybeSingle();
           if (error) {
             if (active) {
+              setPreviouslyAllowedPath(null);
               setMessage(error.message);
               setAccessState("failed");
             }
@@ -75,34 +90,118 @@ export default function DashboardAccessGate({
 
         if (!profile) {
           if (active) {
+            setPreviouslyAllowedPath(null);
             setMessage("Your account profile is not ready yet.");
             setAccessState("blocked");
           }
           return;
         }
 
-        if (requiredRole === "pharmacy_user" && profile.role === "pharmacy_user" && !hasPharmacy) {
+        if (
+          requiredRole === "pharmacy_user"
+          && profile.role === "pharmacy_user"
+          && profile.approvalStatus === "suspended"
+        ) {
+          if (active) {
+            setPreviouslyAllowedPath(null);
+            setMessage("This pharmacy account is suspended. Contact an administrator for assistance.");
+            setAccessState("blocked");
+          }
+          return;
+        }
+
+        if (requiredRole === "pharmacy_user" && profile.role === "pharmacy_user" && !profile.hasPharmacy) {
           if (active) router.replace("/shop-setup");
           return;
         }
 
+        if (
+          isSubscriptionPaymentPage
+          && (profile.role !== "pharmacy_user" || profile.approvalStatus !== "approved")
+        ) {
+          if (active) {
+            setPreviouslyAllowedPath(null);
+            setMessage("Only an approved pharmacy owner can access subscription payment.");
+            setAccessState("blocked");
+          }
+          return;
+        }
+
+        if (requiredRole === "pharmacy_user" && profile.role === "pharmacy_user") {
+          const { data: subscriptionData, error: subscriptionError } = await supabase.rpc("get_my_pharmacy_subscription_plan");
+          if (subscriptionError) {
+            if (active) {
+              setPreviouslyAllowedPath(null);
+              setMessage(`Could not verify subscription setup: ${subscriptionError.message} Apply all subscription migrations through supabase/migrations/20261011230000_subscription_billing_period_selection.sql in the Supabase project, then retry.`);
+              setAccessState("failed");
+            }
+            return;
+          }
+          if (!subscriptionData || typeof subscriptionData !== "object" || !("is_assigned" in subscriptionData)) {
+            if (active) {
+              setPreviouslyAllowedPath(null);
+              setMessage("Supabase returned invalid subscription setup data.");
+              setAccessState("failed");
+            }
+            return;
+          }
+          const expiresAt = "expires_at" in subscriptionData
+            ? subscriptionData.expires_at
+            : undefined;
+          if (
+            expiresAt !== null
+            && (typeof expiresAt !== "string" || !Number.isFinite(Date.parse(expiresAt)))
+          ) {
+            if (active) {
+              setPreviouslyAllowedPath(null);
+              setMessage("Supabase returned invalid subscription expiry data. Apply supabase/migrations/20261011230000_subscription_billing_period_selection.sql in the Supabase project, then retry.");
+              setAccessState("failed");
+            }
+            return;
+          }
+          if (active) setSubscriptionExpiresAt(expiresAt ?? null);
+          if (subscriptionData.is_assigned !== true && !isSubscriptionPaymentPage) {
+            if (active) router.replace("/subscription-setup");
+            return;
+          }
+        }
+
+        const isStaff = profile.role === "pharmacy_staff"
+          && profile.approvalStatus === "approved"
+          && Boolean(profile.ownerUserId);
         const permitted = requiredRole === "admin"
           ? profile.role === "admin" || profile.role === "superadmin"
-          : profile.role === "pharmacy_user";
+          : profile.role === "pharmacy_user" || isStaff;
 
         if (!permitted) {
           if (active) {
+            setPreviouslyAllowedPath(null);
             setMessage("This account does not have access to this dashboard.");
             setAccessState("blocked");
           }
           return;
         }
 
-        if (requiredRole === "pharmacy_user") {
+        if (isStaff) {
+          const page = pathname === "/dashboard"
+            ? "overview"
+            : pathname.slice("/dashboard/".length).split("/")[0].toLocaleLowerCase();
+          if (page !== "profile" && !canPharmacyStaffAccess(page, "view")) {
+            if (active) {
+              setPreviouslyAllowedPath(null);
+              setMessage("Your pharmacy owner has not granted access to this page.");
+              setAccessState("blocked");
+            }
+            return;
+          }
+        }
+
+        if (requiredRole === "pharmacy_user" && !isSubscriptionPaymentPage) {
           try {
-            await initializePharmacyDataSync(user.id);
+            await initializePharmacyDataSync(profile.ownerUserId ?? user.id);
           } catch (error) {
             if (active) {
+              setPreviouslyAllowedPath(null);
               const reason = error instanceof Error ? error.message : "Unknown Supabase error.";
               setMessage(`Could not load this pharmacy's Supabase data: ${reason} Apply migration supabase/migrations/20261011000000_pharmacy_app_data.sql in the Supabase project, then retry.`);
               setAccessState("failed");
@@ -111,9 +210,13 @@ export default function DashboardAccessGate({
           }
         }
 
-        if (active) setAccessState("allowed");
+        if (active) {
+          setPreviouslyAllowedPath(pathname);
+          setAccessState("allowed");
+        }
       } catch (error) {
         if (active) {
+          setPreviouslyAllowedPath(null);
           setMessage(error instanceof Error ? error.message : "Unable to verify account access.");
           setAccessState("failed");
         }
@@ -132,23 +235,32 @@ export default function DashboardAccessGate({
         }
       }
     });
+    function refreshDashboardAccess() {
+      if (document.visibilityState === "visible") {
+        setCheckAttempt((attempt) => attempt + 1);
+      }
+    }
+    window.addEventListener("focus", refreshDashboardAccess);
+    document.addEventListener("visibilitychange", refreshDashboardAccess);
     return () => {
       active = false;
+      window.removeEventListener("focus", refreshDashboardAccess);
+      document.removeEventListener("visibilitychange", refreshDashboardAccess);
       authListener.subscription.unsubscribe();
     };
-  }, [checkAttempt, requiredRole, router]);
+  }, [checkAttempt, isSubscriptionPaymentPage, pathname, requiredRole, router]);
 
   async function signOut() {
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
-  if (accessState === "allowed") {
+  if (accessState === "allowed" || (accessState === "checking" && previouslyAllowedPath === pathname)) {
     return (
-      <>
+      <PharmacySubscriptionExpiryProvider expiresAt={subscriptionExpiresAt}>
         {children}
         <PharmacyDataSyncNotice />
-      </>
+      </PharmacySubscriptionExpiryProvider>
     );
   }
 

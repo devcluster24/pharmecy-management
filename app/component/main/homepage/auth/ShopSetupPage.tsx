@@ -105,7 +105,7 @@ export default function ShopSetupPage() {
         return;
       }
 
-      router.replace("/dashboard");
+      router.replace("/subscription-setup");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save pharmacy details.");
       setHasError(true);

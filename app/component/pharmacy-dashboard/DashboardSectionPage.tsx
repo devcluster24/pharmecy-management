@@ -1,8 +1,9 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import Sidebar from "./components/Sidebar";
 import PharmacyProfileMenu from "./components/PharmacyProfileMenu";
+import PharmacyDashboardBrand, { PharmacyDashboardStoreName } from "./components/PharmacyDashboardBrand";
 import { dashboardNavItems } from "./navigation";
+import { SubscriptionActionLock } from "../auth/PharmacySubscriptionExpiry";
 
 export type SectionData = {
   description: string;
@@ -22,6 +23,7 @@ export default function DashboardSectionPage({
   actionContent,
   hideAction = false,
   hidePageHeader = false,
+  pageTitle,
   content,
   listTitle,
   listNavigation,
@@ -34,6 +36,7 @@ export default function DashboardSectionPage({
   actionContent?: ReactNode;
   hideAction?: boolean;
   hidePageHeader?: boolean;
+  pageTitle?: string;
   content?: ReactNode;
   listTitle?: string;
   listNavigation?: ReactNode;
@@ -65,12 +68,9 @@ export default function DashboardSectionPage({
           borderBottom: "1px solid #e8e8e6",
         }}
       >
-        <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none" }}>
-          <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "#2ad49a", color: "#07372b", fontSize: 14 }}>✚</span>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Pharmecy Cluster</span>
-        </Link>
+        <PharmacyDashboardBrand />
         <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
-          <span>Green Valley Pharmacy</span>
+          <PharmacyDashboardStoreName />
           <PharmacyProfileMenu />
         </div>
       </header>
@@ -89,11 +89,15 @@ export default function DashboardSectionPage({
                 : "32px clamp(18px, 4vw, 48px) 48px",
           }}
         >
+          <SubscriptionActionLock
+            showExpiryNotice={sectionSlug !== "settings"}
+            locked={sectionSlug !== "settings"}
+          >
           {sectionSlug !== "sales" && !hidePageHeader && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
               <div>
-                <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {navItem.label}</div>
-                <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{navItem.label}</h1>
+                <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {pageTitle ?? navItem.label}</div>
+                <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{pageTitle ?? navItem.label}</h1>
                 {data.description && (
                   <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>{data.description}</p>
                 )}
@@ -181,6 +185,7 @@ export default function DashboardSectionPage({
             )}
             </section>
           )}
+          </SubscriptionActionLock>
         </main>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
   emptySalesListSnapshot,
   getSalesListSnapshot,
@@ -25,6 +26,7 @@ function formatPrice(amount: number) {
 }
 
 export default function InvoicePage() {
+  const storeName = usePharmacyStoreName();
   const sales = useSyncExternalStore(
     subscribeToSalesList,
     getSalesListSnapshot,
@@ -143,7 +145,7 @@ export default function InvoicePage() {
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
-                <p style={{ margin: "0 0 5px", color: "#16845f", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>PHARMECY CLUSTER</p>
+                <p style={{ margin: "0 0 5px", color: "#16845f", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>{storeName || "Pharmacy Cluster"}</p>
                 <h2 id="invoice-preview-title" style={{ margin: 0, color: "#20342a", fontSize: 20 }}>Sales Invoice · {selectedInvoice.invoice}</h2>
               </div>
               <button type="button" aria-label="Close invoice" onClick={() => setSelectedInvoice(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 26, lineHeight: 1, cursor: "pointer" }}>×</button>
@@ -192,7 +194,7 @@ export default function InvoicePage() {
               <button type="button" onClick={() => setSelectedInvoice(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
               <button type="button" onClick={() => {
                 try {
-                  downloadSaleInvoicePdf(selectedInvoice);
+                  downloadSaleInvoicePdf(selectedInvoice, storeName);
                   setInvoiceActionError("");
                 } catch (error) {
                   setInvoiceActionError(error instanceof Error ? error.message : "Could not download invoice.");

@@ -1,4 +1,5 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+import type { StaffPageAction } from "@/lib/pharmacy-staff-permissions";
 
 export const PAYMENT_METHODS_STORAGE_KEY = "pharmecy-payment-methods-v1";
 
@@ -74,11 +75,11 @@ export function subscribeToPaymentMethods(listener: () => void) {
   };
 }
 
-export function savePaymentMethods(rows: PaymentMethod[]) {
+export function savePaymentMethods(rows: PaymentMethod[], action: StaffPageAction = "edit") {
   if (!rows.every(isPaymentMethod)) {
     throw new Error("Payment method data is invalid.");
   }
-  setPharmacyDataJson(PAYMENT_METHODS_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(PAYMENT_METHODS_STORAGE_KEY, JSON.stringify(rows), action);
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(paymentMethodsUpdatedEvent));
 }

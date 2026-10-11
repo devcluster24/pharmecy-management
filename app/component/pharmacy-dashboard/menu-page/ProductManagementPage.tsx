@@ -1,10 +1,11 @@
 'use client';
 
-import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
+import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import { supabase } from "@/lib/supabase/client";
+import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
 import { ProductDocumentUpload } from "./ProductDocumentUpload";
 import { type ExtractedProductDetails } from "@/lib/ocr/extractProductDetails";
 import { getProductIdentityKey, getProductNameKey, type ProductImportCandidate } from "./productImport";
@@ -330,14 +331,13 @@ async function loadPharmacyProductNames(ownerUserId: string) {
 }
 
 function ProductManagementHeader() {
+  const storeName = usePharmacyStoreName();
+
   return (
     <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
-      <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none" }}>
-        <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "#2ad49a", color: "#07372b", fontSize: 14 }}>✚</span>
-        <span style={{ fontSize: 14, fontWeight: 700 }}>Pharmecy Cluster</span>
-      </Link>
+      <PharmacyDashboardBrand />
       <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
-        <span>Green Valley Pharmacy</span>
+        <span>{storeName || "Pharmacy Cluster"}</span>
         <PharmacyProfileMenu />
       </div>
     </header>
@@ -392,15 +392,16 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         const user = session?.user ?? null;
         if (authError || !user) throw authError ?? new Error("Sign in to load your product list.");
 
-        setPharmacyUserId(user.id);
-        const firstPage = await loadPharmacyProductPage(user.id, 1, DEFAULT_PRODUCT_PAGE_SIZE, "");
+        const ownerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
+        setPharmacyUserId(ownerId);
+        const firstPage = await loadPharmacyProductPage(ownerId, 1, DEFAULT_PRODUCT_PAGE_SIZE, "");
         if (!active) return;
         setProducts(firstPage.products);
         setTotalProductCount(firstPage.count);
         setStorageReady(true);
-        initialQueryKey.current = `${user.id}:1:${DEFAULT_PRODUCT_PAGE_SIZE}:`;
+        initialQueryKey.current = `${ownerId}:1:${DEFAULT_PRODUCT_PAGE_SIZE}:`;
 
-        void loadPharmacyProductNames(user.id)
+        void loadPharmacyProductNames(ownerId)
           .then(({ companyNames, genericNames }) => {
             if (!active) return;
             setPharmacyCompanyNames(companyNames);

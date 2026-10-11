@@ -246,13 +246,16 @@ export function persistSale(
   };
   const rows = [row, ...existingRows];
   const purchaseRows = getPurchaseRowsAfterSale(lines);
-  notifyPurchaseListRowsChanged(purchaseRows);
-  cachedSnapshot = { rows, error: "" };
-  window.dispatchEvent(new Event(salesListUpdatedEvent));
   setPharmacyDataBatch({
     [PURCHASE_STORAGE_KEY]: purchaseRows,
     [SALES_STORAGE_KEY]: rows,
+  }, {
+    [PURCHASE_STORAGE_KEY]: "edit",
+    [SALES_STORAGE_KEY]: "create",
   });
+  notifyPurchaseListRowsChanged(purchaseRows);
+  cachedSnapshot = { rows, error: "" };
+  window.dispatchEvent(new Event(salesListUpdatedEvent));
   return row;
 }
 
@@ -326,8 +329,8 @@ export function addSalePaymentAcrossInvoices(
     updatedRows[invoiceIndex] = updatedInvoices[allocationIndex];
   });
 
+  setPharmacyDataBatch({ [SALES_STORAGE_KEY]: updatedRows }, "edit");
   cachedSnapshot = { rows: updatedRows, error: "" };
   window.dispatchEvent(new Event(salesListUpdatedEvent));
-  setPharmacyDataBatch({ [SALES_STORAGE_KEY]: updatedRows });
   return updatedInvoices;
 }

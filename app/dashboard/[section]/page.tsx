@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { ComponentType } from "react";
 import CustomerManagementPage from "../../component/pharmacy-dashboard/menu-page/CustomerManagementPage";
+import DashboardProfilePage from "../../component/pharmacy-dashboard/menu-page/DashboardProfilePage";
 import ExpensesPage from "../../component/pharmacy-dashboard/menu-page/ExpensesPage";
 import InvoicePage from "../../component/pharmacy-dashboard/menu-page/InvoicePage";
 import InventoryPage from "../../component/pharmacy-dashboard/menu-page/InventoryPage";
@@ -27,20 +28,25 @@ const sectionPages: Record<string, ComponentType> = {
   expenses: ExpensesPage,
   staff: StaffManagementPage,
   settings: SettingPage,
+  profile: DashboardProfilePage,
 };
 
-export function generateStaticParams() {
-  return dashboardNavItems
-    .filter((item) => item.slug !== "")
-    .map((item) => ({ section: item.slug }));
+export function generateStaticParams(): { section: string }[] {
+  return [
+    ...dashboardNavItems
+      .filter((item) => item.slug !== "")
+      .map((item) => ({ section: item.slug })),
+    { section: "Profile" },
+  ];
 }
 
 export default async function Page({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params;
+  const normalizedSection = section.toLocaleLowerCase();
 
-  const SectionPage = sectionPages[section];
+  const SectionPage = sectionPages[normalizedSection];
 
-  if (!SectionPage || !dashboardNavItems.some((item) => item.slug === section)) {
+  if (!SectionPage || (normalizedSection !== "profile" && !dashboardNavItems.some((item) => item.slug === normalizedSection))) {
     notFound();
   }
 

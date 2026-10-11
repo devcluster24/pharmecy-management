@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
 import { dashboardNavItems } from "../navigation";
 
 export default function Sidebar() {
@@ -26,7 +27,7 @@ export default function Sidebar() {
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {dashboardNavItems.map((item) => {
+        {dashboardNavItems.filter((item) => canPharmacyStaffAccess(item.slug || "overview")).map((item) => {
           const isActive = pathname === item.href;
 
           return (

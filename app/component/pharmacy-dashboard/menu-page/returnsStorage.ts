@@ -104,7 +104,7 @@ export function saveReturnRecords(rows: ReturnRecord[]) {
   if (!rows.every(isReturnRecord)) {
     throw new Error("Return record data is invalid.");
   }
-  setPharmacyDataJson(RETURNS_STORAGE_KEY, JSON.stringify(rows));
+  setPharmacyDataJson(RETURNS_STORAGE_KEY, JSON.stringify(rows), "create");
   cachedSnapshot = { rows, error: "" };
   window.dispatchEvent(new Event(returnsUpdatedEvent));
 }
@@ -114,11 +114,14 @@ export function saveReturnRecordsAndInventory(rows: ReturnRecord[], purchaseRows
     throw new Error("Return record data is invalid.");
   }
 
-  notifyPurchaseListRowsChanged(purchaseRows);
-  cachedSnapshot = { rows, error: "" };
-  window.dispatchEvent(new Event(returnsUpdatedEvent));
   setPharmacyDataBatch({
     [PURCHASE_STORAGE_KEY]: purchaseRows,
     [RETURNS_STORAGE_KEY]: rows,
+  }, {
+    [PURCHASE_STORAGE_KEY]: "edit",
+    [RETURNS_STORAGE_KEY]: "create",
   });
+  notifyPurchaseListRowsChanged(purchaseRows);
+  cachedSnapshot = { rows, error: "" };
+  window.dispatchEvent(new Event(returnsUpdatedEvent));
 }

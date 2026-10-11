@@ -239,7 +239,7 @@ function saveSupplierDuePayment(key: string, amount: number, paymentMethod: stri
     ],
   };
   cachedSupplierDuePaymentSnapshot = { payments, error: "" };
-  setPharmacyDataJson(supplierDuePaymentStorageKey, JSON.stringify(payments));
+  setPharmacyDataJson(supplierDuePaymentStorageKey, JSON.stringify(payments), "create");
 }
 
 export default function SupplierManagementPage() {

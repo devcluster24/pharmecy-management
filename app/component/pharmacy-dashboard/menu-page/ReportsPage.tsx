@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
   emptyPurchaseListSnapshot,
   getAvailablePurchaseQuantity,
@@ -529,6 +530,7 @@ function getReturnItemNames(records: ReturnRecord[]) {
 }
 
 export default function ReportsPage() {
+  const storeName = usePharmacyStoreName();
   const sales = useSyncExternalStore(subscribeToSalesList, getSalesListSnapshot, () => emptySalesListSnapshot);
   const purchases = useSyncExternalStore(subscribeToPurchaseList, getPurchaseListSnapshot, () => emptyPurchaseListSnapshot);
   const returns = useSyncExternalStore(subscribeToReturns, getReturnsSnapshot, () => emptyReturnsSnapshot);
@@ -1176,7 +1178,11 @@ export default function ReportsPage() {
       const rangeLabel = dateRange
         ? `${toDateInputValue(dateRange.start)}-to-${toDateInputValue(dateRange.end)}`
         : "invalid-range";
-      downloadCsv(`pharmacy-${activeTab}-report-${rangeLabel}.csv`, exportRows.columns, exportRows.rows);
+      const safeStoreName = (storeName || "Pharmacy Cluster")
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+        .replace(/[. ]+$/g, "")
+        .trim();
+      downloadCsv(`${safeStoreName}-${activeTab}-report-${rangeLabel}.csv`, exportRows.columns, exportRows.rows);
     } catch (error) {
       setExportError(error instanceof Error ? `CSV export failed: ${error.message}` : "CSV export failed.");
     }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { downloadSaleInvoicePdf } from "./saleInvoicePdf";
+import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
+import { downloadSaleInvoicePdf, printSaleInvoicePdf } from "./saleInvoicePdf";
 import {
   emptySalesListSnapshot,
   getCashRoundingAmount,
@@ -158,6 +159,7 @@ function getProductGroupKey(product: SaleProduct) {
 }
 
 export default function SalesActions() {
+  const storeName = usePharmacyStoreName();
   const inventorySnapshot = useSyncExternalStore(
     subscribeToPurchaseList,
     getPurchaseListSnapshot,
@@ -535,7 +537,7 @@ export default function SalesActions() {
       setSaleInvoice(savedSale);
       setInvoicePdfError("");
       try {
-        downloadSaleInvoicePdf(savedSale);
+        downloadSaleInvoicePdf(savedSale, storeName);
       } catch (error) {
         setInvoicePdfError(getErrorMessage(error));
       }
@@ -547,7 +549,7 @@ export default function SalesActions() {
   function saveInvoicePdf() {
     if (!saleInvoice) return;
     try {
-      downloadSaleInvoicePdf(saleInvoice);
+      downloadSaleInvoicePdf(saleInvoice, storeName);
       setInvoicePdfError("");
     } catch (error) {
       setInvoicePdfError(getErrorMessage(error));
@@ -1103,7 +1105,7 @@ export default function SalesActions() {
           >
             <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, paddingBottom: 18, borderBottom: "1px solid #e9eeea" }}>
               <div>
-                <p style={{ margin: "0 0 5px", color: "#17704e", fontSize: 12, fontWeight: 700 }}>Pharmecy Cluster</p>
+                <p style={{ margin: "0 0 5px", color: "#17704e", fontSize: 12, fontWeight: 700 }}>{storeName || "Pharmacy Cluster"}</p>
                 <h2 id="sale-invoice-title" style={{ margin: 0, color: "#20342a", fontSize: 22 }}>Sales invoice</h2>
               </div>
               <strong style={{ color: "#17704e", fontSize: 16 }}>{saleInvoice.invoice}</strong>
@@ -1171,7 +1173,15 @@ export default function SalesActions() {
             </div>
             <footer className="sale-invoice-print-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 24, paddingTop: 16, borderTop: "1px solid #e9eeea" }}>
               {invoicePdfError && <p role="alert" style={{ margin: "0 auto 0 0", color: "#ad4b43", fontSize: 12 }}>{invoicePdfError}</p>}
-              <button type="button" onClick={() => window.print()} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Print invoice</button>
+              <button type="button" onClick={() => {
+                if (!saleInvoice) return;
+                try {
+                  printSaleInvoicePdf(saleInvoice, storeName);
+                  setInvoicePdfError("");
+                } catch (error) {
+                  setInvoicePdfError(getErrorMessage(error));
+                }
+              }} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Print invoice</button>
               <button type="button" onClick={saveInvoicePdf} style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Save PDF</button>
               <button type="button" onClick={() => setSaleInvoice(null)} style={{ border: 0, borderRadius: 6, background: "#eef2ef", color: "#405248", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
             </footer>
