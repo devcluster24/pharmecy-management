@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { confirmDelete } from "@/lib/confirmDelete";
 import { supabase } from "@/lib/supabase/client";
 import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
@@ -304,12 +305,14 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const [receiveTaxRate, setReceiveTaxRate] = useState("0");
   const [receivePaymentMethod, setReceivePaymentMethod] = useState("cash");
   const [receivePayAmount, setReceivePayAmount] = useState("");
+  const [isMobileReceiveSummaryOpen, setIsMobileReceiveSummaryOpen] = useState(false);
   const [batchEntryError, setBatchEntryError] = useState("");
   const [purchaseSaveError, setPurchaseSaveError] = useState("");
   const [placeOrderCompany, setPlaceOrderCompany] = useState("");
   const [placeOrderDraft, setPlaceOrderDraft] = useState({ productId: "", packPrice: "", quantity: "", purchasePrice: "" });
   const [placeOrderPackSize, setPlaceOrderPackSize] = useState("");
   const [placeOrderItems, setPlaceOrderItems] = useState<PlaceOrderLine[]>([]);
+  const [expandedPlaceOrderItemId, setExpandedPlaceOrderItemId] = useState<number | null>(null);
   const [nextPlaceOrderLineId, setNextPlaceOrderLineId] = useState(0);
   const [placeOrderError, setPlaceOrderError] = useState("");
 
@@ -409,6 +412,20 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const receiveDueAmount = validReceivePayAmount
     ? Number(Math.max(0, receiveSubTotal - receivePaidAmount).toFixed(2))
     : receiveSubTotal;
+  const activeCompanySelection = companySelections.find((selection) => selection.id === activeCompanySelectionId);
+  const billSupplierField = focusedSupplierInput?.selectionId === activeCompanySelectionId
+    ? focusedSupplierInput.field
+    : null;
+  const billSupplierSearch = billSupplierField === "phone"
+    ? activeCompanySelection?.supplierPhone.replace(/\D/g, "") ?? ""
+    : activeCompanySelection?.supplierContactName.trim().toLocaleLowerCase() ?? "";
+  const billSupplierSuggestions = billSupplierField && billSupplierSearch
+    ? getSavedSupplierContacts().filter((contact) =>
+      billSupplierField === "phone"
+        ? contact.phone.replace(/\D/g, "").includes(billSupplierSearch)
+        : contact.name.toLocaleLowerCase().includes(billSupplierSearch),
+    ).slice(0, 5)
+    : [];
   const receivePaymentMethodOptions = [
     { value: "cash", label: "Cash" },
     ...paymentMethodsSnapshot.rows.map((method) => ({
@@ -867,13 +884,15 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         setBatchEntryError("");
       } else if (isPlaceOrderOpen) {
         closePlaceOrderModal();
+      } else if (isMobileReceiveSummaryOpen) {
+        setIsMobileReceiveSummaryOpen(false);
       } else {
         closeModal();
       }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isOpen, isPlaceOrderOpen, pendingBatchEntry, standalone, closeModal]);
+  }, [isOpen, isPlaceOrderOpen, isMobileReceiveSummaryOpen, pendingBatchEntry, standalone, closeModal]);
 
   function saveBatchEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1097,6 +1116,107 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     setNextBrandSelectionId((current) => current + 1);
   }
 
+  const receiveInvoiceColumns = [
+    "Company Name",
+    "Brand Name",
+    "Batch Number",
+    "Date",
+    "Box MRP",
+    "Pack Size",
+    "Unit Price",
+    "Box Quantity",
+    "Total Purchase Price",
+    "Actions",
+  ];
+  const receiveInvoiceTableRows: ReactNode[][] = [
+    ...selectedBatchDetails.map(({ companySelection, selection, product, batch, batchIndex }) => {
+      const brandName = product?.brand || product?.medicine_name || selection.customBrand;
+      const brandDetails = [product?.strength, product?.dosage_form].filter((part) => part && part !== "-").join(" · ");
+      return [
+        companySelection.company,
+        <div key={`selected-brand-${companySelection.id}-${selection.id}-${batchIndex}`} title={batchIndex === 0 ? displayValue(product?.generic_name) : undefined} style={{ display: "grid", gap: 3 }}>
+          <span>{batchIndex === 0 ? displayValue(brandName) : ""}</span>
+          {batchIndex === 0 && <span style={{ color: "#77857d", fontSize: 10 }}>{brandDetails}</span>}
+        </div>,
+        <div key={`selected-batch-${companySelection.id}-${selection.id}-${batchIndex}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>{displayValue(batch.batchNumber)}</span>
+          {batchIndex === 0 && (
+            <button
+              type="button"
+              aria-label={`Add batch for ${displayValue(brandName)}`}
+              title="Add batch"
+              onClick={() => openBatchEntry(companySelection.id, selection.id, {
+                productId: selection.productId,
+                customBrand: selection.customBrand,
+                brandDraft: selection.brandDraft,
+              }, selection.batches)}
+              style={{ width: 22, height: 22, border: "1px solid #b9dfd0", borderRadius: 5, background: "#fff", color: "#16845f", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
+            >+</button>
+          )}
+        </div>,
+        `${formatMonthYear(batch.mfgDate)}\n${formatMonthYear(batch.expDate)}`,
+        batch.mrp,
+        batch.packSize,
+        getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+        batch.quantity,
+        batch.totalPrice,
+        <div key={`selected-action-${companySelection.id}-${selection.id}-${batchIndex}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="receive-invoice-action-status" style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
+          <button
+            type="button"
+            aria-label={`Delete batch ${batch.batchNumber}`}
+            title="Delete batch"
+            onClick={() => void deleteBatchAfterConfirmation(batch.batchNumber, () => {
+              updateBrandSelection(companySelection.id, selection.id, {
+                batches: selection.batches.filter((_, currentBatchIndex) => currentBatchIndex !== batchIndex),
+              });
+            })}
+            style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
+          >×</button>
+        </div>,
+      ];
+    }),
+    ...receivedInvoiceRows.map((row) => [
+      row.supplier,
+      <div key={`received-brand-${row.id}`} title={displayValue(row.genericName)} style={{ display: "grid", gap: 3 }}>
+        <span>{displayValue(row.brand)}</span>
+        <span style={{ color: "#77857d", fontSize: 10 }}>
+          {[row.strength, row.dosageForm].filter((part) => part && part !== "-").join(" · ")}
+        </span>
+      </div>,
+      row.batchNumber,
+      `${formatMonthYear(row.mfgDate)}\n${formatMonthYear(row.expDate)}`,
+      row.mrp ?? "",
+      row.packSize,
+      getUnitPrice(row.unitPrice, row.mrp, row.packSize),
+      row.quantity ?? "",
+      row.totalPrice ?? "",
+      <div key={`received-action-${row.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="receive-invoice-action-status" style={{ color: "#16845f", fontSize: 11, fontWeight: 600 }}>Received</span>
+        <button
+          type="button"
+          aria-label={`Remove ${row.brand} from Receive Invoice`}
+          title="Remove from Receive Invoice"
+          onClick={() => setPendingOrderReceipts((current) =>
+            current
+              .map((receipt) => ({
+                ...receipt,
+                rows: receipt.rows.filter((receiptRow) => receiptRow.id !== row.id),
+              }))
+              .filter((receipt) => receipt.rows.length > 0),
+          )}
+          style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
+        >×</button>
+      </div>,
+    ]),
+  ];
+  const receiveInvoiceRowKeys = [
+    ...selectedBatchDetails.map(({ companySelection, selection, batch, batchIndex }) =>
+      `selected:${companySelection.id}:${selection.id}:${batchIndex}:${batch.batchNumber}`,
+    ),
+    ...receivedInvoiceRows.map((row) => `received:${row.id}`),
+  ];
+
   return (
     <>
       {!standalone && (
@@ -1132,9 +1252,16 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
               ? { display: "flex", flexDirection: "column", width: "100%", minHeight: "70vh", overflow: "visible", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }
               : { display: "flex", flexDirection: "column", width: "min(1280px, 100%)", height: "96%", maxHeight: "96%", overflow: "hidden", borderRadius: 10, background: "#fff" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="receive-order-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
-                <h2 id="create-purchase-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Receive Order</h2>
+                <div className="receive-order-title-row">
+                  <h2 id="create-purchase-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Receive Order</h2>
+                  <button
+                    className="receive-order-mobile-bill-action"
+                    type="button"
+                    onClick={() => setIsMobileReceiveSummaryOpen(true)}
+                  >Bill</button>
+                </div>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Select a company, then choose one of its products.</p>
               </div>
               <button type="button" aria-label={standalone ? "Back to purchase" : "Close"} onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>{standalone ? "←" : "×"}</button>
@@ -1276,8 +1403,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                         )}
                       </div>
                       </div>
-                      <div style={{ display: "contents" }}>
-                        <label style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
+                      <div className="receive-order-supplier-fields" style={{ display: "contents" }}>
+                        <label className="receive-order-supplier-field" style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
                           Supplier Name
                           <input
                             aria-label={`Supplier Name for ${companySelection.company || "company"}`}
@@ -1298,7 +1425,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                           />
                           {renderSupplierSuggestions("name")}
                         </label>
-                        <label style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
+                        <label className="receive-order-supplier-field" style={{ position: "relative", display: "grid", gap: 5, color: "#526158", fontSize: 11, fontWeight: 600 }}>
                           Phone Number
                           <input
                             aria-label={`Supplier Phone Number for ${companySelection.company || "company"}`}
@@ -1462,8 +1589,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
 
             {(selectedBatchDetails.length > 0 || receivedInvoiceRows.length > 0) && (
               <>
-                <h3 style={{ margin: "0 0 10px", color: "#526158", fontSize: 13, fontWeight: 700 }}>Receive Invoice</h3>
-                <div style={{ margin: "0 0 18px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
+                <h3 id="receive-invoice-title" style={{ margin: "0 0 10px", color: "#526158", fontSize: 13, fontWeight: 700 }}>Receive Invoice</h3>
+                <div className="receive-order-invoice-desktop" style={{ margin: "0 0 18px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
                   <table aria-label="Selected brand details" style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left" }}>
                     <colgroup>
                       <col style={{ width: "10%" }} />
@@ -1602,13 +1729,100 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                     </tbody>
                   </table>
                 </div>
+                <div className="receive-order-invoice-mobile" aria-labelledby="receive-invoice-title">
+                  <DashboardSectionInvoiceTable
+                    columns={receiveInvoiceColumns}
+                    rows={receiveInvoiceTableRows}
+                    rowKeys={receiveInvoiceRowKeys}
+                    mobileOnly
+                  />
+                </div>
               </>
             )}
             {purchaseSaveError && <p role="alert" style={{ margin: "0 24px 12px", color: "#b34b43", fontSize: 12 }}>{purchaseSaveError}</p>}
               </div>
 
-              <aside className="receive-order-summary" aria-label="Bill summary" style={{ position: "sticky", top: 0, alignSelf: "start", display: "grid", alignContent: "start", gap: 10, padding: 14, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
-                <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+              {isMobileReceiveSummaryOpen && (
+                <button
+                  type="button"
+                  className="receive-order-bill-backdrop"
+                  aria-label="Close bill summary"
+                  onClick={() => setIsMobileReceiveSummaryOpen(false)}
+                />
+              )}
+              <aside className={`receive-order-summary${isMobileReceiveSummaryOpen ? " is-open" : ""}`} aria-label="Bill summary" style={{ position: "sticky", top: 0, alignSelf: "start", display: "grid", alignContent: "start", gap: 10, padding: 14, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                <div className="receive-order-summary-header">
+                  <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+                  <button
+                    type="button"
+                    aria-label="Close bill summary"
+                    onClick={() => setIsMobileReceiveSummaryOpen(false)}
+                  >X</button>
+                </div>
+                <div className="mobile-bill-customer-fields receive-order-bill-supplier-fields">
+                  {(["name", "phone"] as const).map((field) => {
+                    const inputId = `receive-order-supplier-${field}`;
+                    const suggestionsId = `${inputId}-suggestions`;
+                    const label = field === "name" ? "Supplier Name" : "Phone Number";
+                    const value = field === "name"
+                      ? activeCompanySelection?.supplierContactName ?? ""
+                      : activeCompanySelection?.supplierPhone ?? "";
+                    const isFocused = billSupplierField === field;
+
+                    return (
+                      <label key={field} className="new-sale-customer-field receive-order-supplier-summary-field" htmlFor={inputId}>
+                        <span>{label}</span>
+                        <input
+                          id={inputId}
+                          aria-label={label}
+                          role="combobox"
+                          type={field === "phone" ? "tel" : "text"}
+                          inputMode={field === "phone" ? "tel" : undefined}
+                          autoComplete="off"
+                          aria-autocomplete="list"
+                          aria-expanded={isFocused && billSupplierSuggestions.length > 0}
+                          aria-controls={suggestionsId}
+                          value={value}
+                          onFocus={() => setFocusedSupplierInput({ selectionId: activeCompanySelectionId, field })}
+                          onChange={(event) => {
+                            setFocusedSupplierInput({ selectionId: activeCompanySelectionId, field });
+                            updateCompanySelection(activeCompanySelectionId, field === "name"
+                              ? { supplierContactName: event.currentTarget.value }
+                              : { supplierPhone: event.currentTarget.value });
+                          }}
+                          onBlur={() => setFocusedSupplierInput((current) =>
+                            current?.selectionId === activeCompanySelectionId && current.field === field ? null : current,
+                          )}
+                          placeholder={field === "name" ? `${activeCompanySelection?.company || "Company"} Distributor` : "Phone number"}
+                          style={{ ...fieldStyle, width: "100%", padding: "5px 8px", fontSize: 10, fontWeight: 400 }}
+                        />
+                        {isFocused && billSupplierSuggestions.length > 0 && (
+                          <div id={suggestionsId} role="listbox" aria-label="Saved supplier contacts" className="receive-order-supplier-suggestions">
+                            {billSupplierSuggestions.map((contact) => (
+                              <button
+                                key={`${contact.name}-${contact.phone}`}
+                                type="button"
+                                role="option"
+                                aria-selected="false"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  updateCompanySelection(activeCompanySelectionId, {
+                                    supplierContactName: contact.name,
+                                    supplierPhone: contact.phone,
+                                  });
+                                  setFocusedSupplierInput(null);
+                                }}
+                              >
+                                <span>{contact.name}</span>
+                                <span>{contact.phone}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
                 <div style={{ display: "grid", gap: 8, color: "#526158", fontSize: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <span>Total Company</span>
@@ -1751,23 +1965,25 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
 
             {pendingBatchEntry && (
               <div
+                className="purchase-batch-details-overlay"
                 onMouseDown={(event) => { if (event.target === event.currentTarget) cancelBatchEntry(); }}
                 style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.56)" }}
               >
                 <section
+                  className="purchase-batch-details-dialog"
                   role="dialog"
                   aria-modal="true"
                   aria-labelledby="purchase-batch-title"
                   style={{ width: "min(680px, 100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
                 >
-                  <div style={{ padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+                  <div className="purchase-batch-details-header" style={{ padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
                     <h2 id="purchase-batch-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Add Batch Details</h2>
                     <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>
                       {pendingBatchEntry.customBrand || products.find((product) => product.id === pendingBatchEntry.productId)?.brand || "Selected product"}
                     </p>
                   </div>
-                  <form onSubmit={saveBatchEntry} noValidate style={{ minHeight: 0, overflowY: "auto" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, padding: "18px 24px" }}>
+                  <form className="purchase-batch-details-form" onSubmit={saveBatchEntry} noValidate style={{ minHeight: 0, overflowY: "auto" }}>
+                    <div className="purchase-batch-details-fields" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, padding: "18px 24px" }}>
                       <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
                         Batch Number
                         <input
@@ -1849,9 +2065,9 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                           style={{ ...fieldStyle, padding: "6px 8px", fontSize: 12 }}
                         />
                       </label>
-                      <div style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
+                      <div className="purchase-batch-price-field" style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
                         <span>Purchase Price (Box)</span>
-                        <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 5, padding: "4px 0", background: "#fff" }}>
+                        <div className="purchase-batch-price-controls" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 5, padding: "4px 0", background: "#fff" }}>
                           {(["flat", "percent"] as const).map((mode) => (
                             <button
                               key={mode}
@@ -1865,18 +2081,19 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                             >{mode === "flat" ? "Flat ৳" : "%"}</button>
                           ))}
                           {batchPurchasePriceMode === "percent" && batchPurchasePriceRate.trim() !== "" && (
-                            <span aria-label="Discount percentage and calculated purchase price" style={{ alignSelf: "center", color: "#526158", fontSize: 12, fontWeight: 700 }}>
+                            <span className="purchase-batch-price-calculated-value" aria-label="Discount percentage and calculated purchase price" style={{ alignSelf: "center", color: "#526158", fontSize: 12, fontWeight: 700 }}>
                               {getCurrentBatchPurchasePrice() !== null ? `৳${getCurrentBatchPurchasePrice()}` : ""}
                             </span>
                           )}
                           {batchPurchasePriceMode === "flat" && getCurrentBatchPurchasePrice() !== null && (
-                            <span aria-label="Purchase price" style={{ alignSelf: "center", color: "#17704e", fontSize: 12, fontWeight: 700 }}>
+                            <span className="purchase-batch-price-calculated-value" aria-label="Purchase price" style={{ alignSelf: "center", color: "#17704e", fontSize: 12, fontWeight: 700 }}>
                               ৳{getCurrentBatchPurchasePrice()}
                             </span>
                           )}
                         </div>
                         {batchPurchasePriceMode === "percent" ? (
                           <input
+                            className="purchase-batch-price-value-input"
                             aria-label="Purchase Price (Box) discount percentage"
                             type="number"
                             inputMode="decimal"
@@ -1890,6 +2107,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                           />
                         ) : (
                           <input
+                            className="purchase-batch-price-value-input"
                             aria-label="Purchase Price (Box)"
                             type="number"
                             inputMode="decimal"
@@ -1917,7 +2135,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                       </label>
                     </div>
                     {pendingBatchEntry.batches.length > 0 && (
-                      <div style={{ margin: "0 24px 16px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
+                      <div className="purchase-batch-details-table-scroll" style={{ margin: "0 24px 16px", overflowX: "auto", border: "1px solid #dce5df", borderRadius: 6 }}>
                         <table aria-label="Added batch details" style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                           <thead>
                             <tr>
@@ -1961,8 +2179,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                         </table>
                       </div>
                     )}
-                    {batchEntryError && <p role="alert" style={{ margin: "0 24px 14px", color: "#b34b43", fontSize: 12 }}>{batchEntryError}</p>}
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+                    {batchEntryError && <p className="purchase-batch-details-error" role="alert" style={{ margin: "0 24px 14px", color: "#b34b43", fontSize: 12 }}>{batchEntryError}</p>}
+                    <div className="purchase-batch-details-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
                       <button type="button" onClick={cancelBatchEntry} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
                       <button type="submit" style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Done</button>
                     </div>
@@ -1976,6 +2194,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
       )}
       {isPlaceOrderOpen && (
         <div
+          className="purchase-place-order-overlay"
           onMouseDown={(event) => { if (event.target === event.currentTarget) closePlaceOrderModal(); }}
           style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
         >
@@ -1983,18 +2202,19 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
             role="dialog"
             aria-modal="true"
             aria-labelledby="place-order-title"
+            className="purchase-place-order-dialog"
             style={{ width: "min(1080px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="purchase-place-order-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="place-order-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Place Order</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Select a company and one or more brands to place an order.</p>
               </div>
               <button type="button" aria-label="Close Place Order" onClick={closePlaceOrderModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <form onSubmit={submitPlaceOrder}>
-              <div style={{ display: "grid", gap: 18, padding: "22px 24px" }}>
-                <label style={{ display: "grid", gridTemplateColumns: "120px minmax(220px, 1fr)", alignItems: "center", maxWidth: 520, gap: 12, color: "#526158", fontSize: 12, fontWeight: 400 }}>
+            <form className="purchase-place-order-form" onSubmit={submitPlaceOrder}>
+              <div className="purchase-place-order-body" style={{ display: "grid", gap: 18, padding: "22px 24px" }}>
+                <label className="purchase-place-order-company" style={{ display: "grid", gridTemplateColumns: "120px minmax(220px, 1fr)", alignItems: "center", maxWidth: 520, gap: 12, color: "#526158", fontSize: 12, fontWeight: 400 }}>
                   <span>Company Name</span>
                   <select
                     aria-label="Place Order Company Name"
@@ -2018,7 +2238,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
 
                 {placeOrderCompany && (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.5fr) repeat(4, minmax(115px, 1fr)) auto", alignItems: "end", gap: 12 }}>
+                    <div className="purchase-place-order-fields" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.5fr) repeat(4, minmax(115px, 1fr)) auto", alignItems: "end", gap: 12 }}>
                       <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
                         Brand Name
                         <select
@@ -2106,7 +2326,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                       >Add</button>
                     </div>
                     {placeOrderItems.length > 0 && (
-                      <div style={{ overflowX: "auto", borderTop: "1px solid #e8ede9", borderBottom: "1px solid #e8ede9" }}>
+                      <div className="purchase-place-order-items">
+                        <div className="purchase-place-order-items-desktop" style={{ overflowX: "auto", borderTop: "1px solid #e8ede9", borderBottom: "1px solid #e8ede9" }}>
                         <table aria-label="Place order items" style={{ width: "100%", minWidth: 680, borderCollapse: "collapse", textAlign: "left" }}>
                           <thead>
                             <tr>
@@ -2118,10 +2339,11 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                           <tbody>
                             {placeOrderItems.map((item) => {
                               const product = products.find((candidate) => candidate.id === item.productId);
+                              const brandName = product?.brand.trim() || product?.medicine_name.trim() || "";
                               return (
                                 <tr key={item.id}>
                                   {[
-                                    product?.brand.trim() || product?.medicine_name.trim() || "",
+                                    brandName,
                                     item.packPrice || "-",
                                     displayValue(item.packSize),
                                     item.quantity,
@@ -2136,7 +2358,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                                   <td style={{ padding: "8px 12px", borderBottom: "1px solid #f0f2f0" }}>
                                     <button
                                       type="button"
-                                      aria-label={`Remove ${product?.brand.trim() || product?.medicine_name.trim() || "brand"} from order`}
+                                      aria-label={`Remove ${brandName || "brand"} from order`}
                                       onClick={() => setPlaceOrderItems((current) => current.filter((entry) => entry.id !== item.id))}
                                       style={{ border: 0, background: "transparent", color: "#b34b43", fontSize: 18, cursor: "pointer" }}
                                     >×</button>
@@ -2146,17 +2368,92 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                             })}
                           </tbody>
                         </table>
+                        </div>
+                        <div className="purchase-place-order-items-mobile">
+                          <div className="purchase-place-order-item-header-scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  {["Brand Name", "Pack Price", "Pack Size", "Box Quantity", "Purchase Price (Box)", "Total Price", "Unit Purchase Price", "Actions"].map((heading) => (
+                                    <th key={heading}>{heading}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                            </table>
+                          </div>
+                          {placeOrderItems.map((item) => {
+                            const product = products.find((candidate) => candidate.id === item.productId);
+                            const brandName = product?.brand.trim() || product?.medicine_name.trim() || "";
+                            const rowValues: ReactNode[] = [
+                              brandName,
+                              item.packPrice || "-",
+                              displayValue(item.packSize),
+                              item.quantity,
+                              `৳${item.purchasePrice}`,
+                              `৳${Number(item.totalPrice).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                              calculateUnitPurchasePrice(item.packSize, item.totalPrice, item.quantity) === "-"
+                                ? "-"
+                                : `৳${Number(calculateUnitPurchasePrice(item.packSize, item.totalPrice, item.quantity)).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                              <button
+                                key={`${item.id}-remove`}
+                                type="button"
+                                aria-label={`Remove ${brandName || "brand"} from order`}
+                                onClick={() => setPlaceOrderItems((current) => current.filter((entry) => entry.id !== item.id))}
+                              >×</button>,
+                            ];
+                            const isExpanded = expandedPlaceOrderItemId === item.id;
+                            return (
+                              <div className="purchase-place-order-mobile-record" key={`mobile-${item.id}`}>
+                                <div className="purchase-place-order-item-scroll">
+                                  <table>
+                                    <tbody>
+                                      <tr
+                                        className="purchase-place-order-item-row"
+                                        tabIndex={0}
+                                        aria-expanded={isExpanded}
+                                        onClick={(event) => {
+                                          if (!window.matchMedia("(max-width: 767px)").matches
+                                            || (event.target instanceof Element && event.target.closest("button"))) return;
+                                          setExpandedPlaceOrderItemId((current) => current === item.id ? null : item.id);
+                                        }}
+                                        onKeyDown={(event) => {
+                                          if (!window.matchMedia("(max-width: 767px)").matches
+                                            || (event.target instanceof Element && event.target.closest("button"))
+                                            || (event.key !== "Enter" && event.key !== " ")) return;
+                                          event.preventDefault();
+                                          setExpandedPlaceOrderItemId((current) => current === item.id ? null : item.id);
+                                        }}
+                                      >
+                                        {rowValues.map((value, index) => <td key={`${item.id}-${index}`}>{value}</td>)}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {isExpanded && (
+                                  <div className="purchase-place-order-item-expanded">
+                                    {rowValues.map((value, index) => (
+                                      <div className="purchase-place-order-item-expanded-value" key={`${item.id}-expanded-${index}`}>
+                                        <span>{["Brand Name", "Pack Price", "Pack Size", "Box Quantity", "Purchase Price (Box)", "Total Price", "Unit Purchase Price", "Actions"][index]}</span>
+                                        <strong>{value}</strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </>
                 )}
-                <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 16px", borderRadius: 7, background: "#f4f7f5", color: "#20342a", fontSize: 13, fontWeight: 700 }}>
+                <div className="purchase-place-order-total" style={{ display: "flex", justifyContent: "flex-end", padding: "14px 16px", borderRadius: 7, background: "#f4f7f5", color: "#20342a", fontSize: 13, fontWeight: 700 }}>
                   Total Order Price: ৳{placeOrderTotal.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
               {placeOrderError && <p role="alert" style={{ margin: "0 24px 14px", color: "#b34b43", fontSize: 12 }}>{placeOrderError}</p>}
               {errorMessage && <p role="alert" style={{ margin: "0 24px 14px", color: "#b34b43", fontSize: 12 }}>{errorMessage}</p>}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+              <div className="purchase-place-order-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
                 <button type="button" onClick={closePlaceOrderModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
                 <button type="submit" disabled={isLoading || !placeOrderCompany} style={{ border: 0, borderRadius: 6, background: isLoading || !placeOrderCompany ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isLoading || !placeOrderCompany ? "not-allowed" : "pointer" }}>Place Order</button>
               </div>

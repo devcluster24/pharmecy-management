@@ -176,7 +176,7 @@ export default function PurchasePage() {
         data={pageData}
         listTitle=""
         listNavigation={
-          <div role="group" aria-label="Purchase list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <div className="purchase-list-tabs" role="group" aria-label="Purchase list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
             {([
               ["place", "Place Order List"],
               ["receive", "Receive Order List"],
@@ -201,6 +201,7 @@ export default function PurchasePage() {
       />
       {selectedPriceOrder && (
         <div
+          className="purchase-order-items-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setSelectedPriceOrder(null);
           }}
@@ -210,13 +211,15 @@ export default function PurchasePage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="place-order-items-title"
+            className="purchase-order-items-dialog"
             style={{ width: "min(620px, 100%)", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="purchase-order-items-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
               <h2 id="place-order-items-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Order Items · {selectedPriceOrder}</h2>
               <button type="button" aria-label="Close order items" onClick={() => setSelectedPriceOrder(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <div style={{ overflow: "auto", padding: 18 }}>
+            <div className="purchase-order-items-body">
+              <div className="purchase-order-items-table-scroll">
               <table aria-label={`Items in purchase order ${selectedPriceOrder}`} style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                 <thead>
                   <tr>
@@ -235,8 +238,9 @@ export default function PurchasePage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", borderTop: "1px solid #e9eeea", padding: "12px 18px" }}>
+            <div className="purchase-order-items-footer" style={{ display: "flex", justifyContent: "flex-end", borderTop: "1px solid #e9eeea", padding: "12px 18px" }}>
               <button type="button" onClick={() => setSelectedPriceOrder(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 12px", fontSize: 12, cursor: "pointer" }}>Close</button>
             </div>
           </section>
@@ -244,6 +248,7 @@ export default function PurchasePage() {
       )}
       {selectedOrder && (
         <div
+          className="purchase-order-history-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setSelectedOrder(null);
           }}
@@ -253,16 +258,17 @@ export default function PurchasePage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="purchase-history-title"
+            className="purchase-order-history-dialog"
             style={{ width: "min(1040px, 100%)", maxHeight: "85vh", overflow: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="purchase-order-history-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="purchase-history-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Order history · {selectedOrder}</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>All brands and batches in this purchase order.</p>
               </div>
               <button type="button" aria-label="Close order history" onClick={() => setSelectedOrder(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <div style={{ overflowX: "auto", padding: 24 }}>
+            <div className="purchase-order-history-table-scroll" style={{ overflowX: "auto", padding: 24 }}>
               <table aria-label={`Purchase history for ${selectedOrder}`} style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", textAlign: "left" }}>
                 <thead>
                   <tr>
@@ -303,7 +309,7 @@ export default function PurchasePage() {
               </table>
             </div>
             {activeList === "receive" && (
-              <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 24px 20px", color: "#20342a", fontSize: 13, fontWeight: 650 }}>
+              <div className="purchase-order-history-total" style={{ display: "flex", justifyContent: "flex-end", padding: "0 24px 20px", color: "#20342a", fontSize: 13, fontWeight: 650 }}>
                 Total Purchase Amount: {formatCurrency(getOrderTotal(selectedOrderRows))}
               </div>
             )}

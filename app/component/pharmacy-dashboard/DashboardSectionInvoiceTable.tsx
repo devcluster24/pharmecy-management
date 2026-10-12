@@ -3,17 +3,23 @@
 import { isValidElement, useState, type ReactNode } from "react";
 
 function getRowIdentity(row: ReactNode[], rowIndex: number) {
-  return isValidElement<{ children?: ReactNode }>(row[0])
-    ? String(row[0].props.children)
-    : String(rowIndex);
+  if (isValidElement<{ children?: ReactNode }>(row[0])) {
+    return String(row[0].props.children);
+  }
+  if (typeof row[1] === "string") return row[1];
+  return String(row[0] ?? rowIndex);
 }
 
 export default function DashboardSectionInvoiceTable({
   columns,
   rows,
+  rowKeys,
+  mobileOnly = false,
 }: {
   columns: string[];
   rows: ReactNode[][];
+  rowKeys?: string[];
+  mobileOnly?: boolean;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
@@ -36,36 +42,43 @@ export default function DashboardSectionInvoiceTable({
   }
 
   return (
-    <div className="dashboard-invoice-table-container">
-      <div className="dashboard-invoice-desktop-table dashboard-invoice-table-scroll" style={{ overflowX: "auto" }}>
-        <table className="dashboard-invoice-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column} style={{ padding: "11px 16px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={`invoice-${getRowIdentity(row, rowIndex)}`}>
-                {row.map((cell, cellIndex) => (
-                  <td key={`${getRowIdentity(row, rowIndex)}-${cellIndex}`} style={{ padding: "13px 16px", borderBottom: rowIndex === rows.length - 1 ? 0 : "1px solid #f0f2f0", color: cellIndex === 0 ? "#26352f" : "#687871", fontSize: 12, fontWeight: cellIndex === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+    <div className={`dashboard-invoice-table-container${mobileOnly ? " dashboard-invoice-mobile-only" : ""}`}>
+      {!mobileOnly && (
+        <div className="dashboard-invoice-desktop-table dashboard-invoice-table-scroll" style={{ overflowX: "auto" }}>
+          <table className="dashboard-invoice-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column} style={{ padding: "11px 16px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
                 ))}
               </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} style={{ padding: "24px 16px", color: "#87928d", fontSize: 12, textAlign: "center" }}>
-                  No records found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`invoice-${getRowIdentity(row, rowIndex)}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${getRowIdentity(row, rowIndex)}-${cellIndex}`} style={{ padding: "13px 16px", borderBottom: rowIndex === rows.length - 1 ? 0 : "1px solid #f0f2f0", color: cellIndex === 0 ? "#26352f" : "#687871", fontSize: 12, fontWeight: cellIndex === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={columns.length} style={{ padding: "24px 16px", color: "#87928d", fontSize: 12, textAlign: "center" }}>
+                    No records found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      <div className="dashboard-invoice-mobile-table">
+      <div
+        className="dashboard-invoice-mobile-table"
+        style={{
+          "--dashboard-invoice-mobile-table-width": `calc(100vw - 50px + ${Math.max(0, columns.length - 4) * 80}px)`,
+        } as React.CSSProperties}
+      >
         <div className="dashboard-invoice-table-scroll" style={{ overflowX: "auto" }}>
           <table className="dashboard-invoice-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
             <thead>
@@ -80,7 +93,7 @@ export default function DashboardSectionInvoiceTable({
         {rows.length === 0 ? (
           <div className="dashboard-invoice-mobile-empty">No records found.</div>
         ) : rows.map((row, rowIndex) => {
-          const rowIdentity = getRowIdentity(row, rowIndex);
+          const rowIdentity = rowKeys?.[rowIndex] ?? getRowIdentity(row, rowIndex);
           const isExpanded = expandedRow === rowIdentity;
 
           return (

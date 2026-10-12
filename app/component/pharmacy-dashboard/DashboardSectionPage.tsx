@@ -79,7 +79,13 @@ export default function DashboardSectionPage({
       <div style={{ display: "flex", minHeight: "calc(100vh - 62px)" }}>
         <Sidebar />
         <main
-          className={sectionSlug === "sales" ? "dashboard-main-sales" : sectionSlug === "invoice" ? "dashboard-main-invoice" : undefined}
+          className={sectionSlug === "sales"
+            ? "dashboard-main-sales"
+            : sectionSlug === "invoice"
+              ? "dashboard-main-invoice"
+              : sectionSlug === "purchase"
+                ? "dashboard-main-purchase"
+                : undefined}
           style={{
             flex: 1,
             minWidth: 0,
@@ -132,8 +138,8 @@ export default function DashboardSectionPage({
           {content}
 
           {data.columns.length > 0 && (
-            <section className={sectionSlug === "invoice" ? "dashboard-invoice-list" : undefined} style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
-            <div className={sectionSlug === "invoice" ? "dashboard-invoice-list-header" : undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
+            <section className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list" : undefined} style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list-header" : undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
                 {listNavigation}
                 {listTitle !== "" && (
@@ -143,7 +149,7 @@ export default function DashboardSectionPage({
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 {searchAccessory}
                 <input
-                  className={sectionSlug === "invoice" ? "dashboard-invoice-search" : undefined}
+                  className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-search" : undefined}
                   aria-label={`Search ${navItem.label.toLowerCase()}`}
                   placeholder="Search..."
                   value={searchValue}
@@ -152,7 +158,7 @@ export default function DashboardSectionPage({
                 />
               </div>
             </div>
-            {sectionSlug === "invoice" ? (
+            {sectionSlug === "invoice" || sectionSlug === "purchase" ? (
               <DashboardSectionInvoiceTable columns={data.columns} rows={data.rows} />
             ) : (
               <div style={{ overflowX: "auto" }}>
