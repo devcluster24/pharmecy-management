@@ -6,9 +6,7 @@ import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import { supabase } from "@/lib/supabase/client";
 import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
-import { ProductDocumentUpload } from "./ProductDocumentUpload";
-import { type ExtractedProductDetails } from "@/lib/ocr/extractProductDetails";
-import { getProductIdentityKey, getProductNameKey, type ProductImportCandidate } from "./productImport";
+import { getProductIdentityKey, type ProductImportCandidate } from "./productImport";
 
 type Product = {
   id: string;
@@ -305,28 +303,22 @@ async function loadAllPharmacyProducts(ownerUserId: string) {
   }
 }
 
-async function loadPharmacyProductNames(ownerUserId: string) {
+async function loadPharmacyCompanyNames(ownerUserId: string) {
   const companyNames = new Set<string>();
-  const genericNames = new Set<string>();
   for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("pharmacy_catalog_products")
-      .select("manufacturer, generic_name")
+      .select("manufacturer")
       .eq("owner_user_id", ownerUserId)
       .order("manufacturer", { ascending: true })
       .range(offset, offset + CATALOG_PAGE_SIZE - 1);
     if (error) throw error;
-    const page = (data ?? []) as { manufacturer: string; generic_name: string }[];
-    page.forEach(({ manufacturer, generic_name }) => {
+    const page = (data ?? []) as { manufacturer: string }[];
+    page.forEach(({ manufacturer }) => {
       const companyName = manufacturer.trim();
-      const genericName = generic_name.trim();
       if (companyName && companyName !== "-") companyNames.add(companyName);
-      if (genericName && genericName !== "-") genericNames.add(genericName);
     });
-    if (page.length < CATALOG_PAGE_SIZE) return {
-      companyNames: [...companyNames],
-      genericNames: [...genericNames],
-    };
+    if (page.length < CATALOG_PAGE_SIZE) return [...companyNames];
   }
 }
 
@@ -347,7 +339,6 @@ function ProductManagementHeader() {
 export default function ProductManagementPage({ adminMode = false }: { adminMode?: boolean } = {}) {
   const [products, setProducts] = useState<Product[]>([]);
   const [storageReady, setStorageReady] = useState(adminMode);
-  const [isAddOpen, setIsAddOpen] = useState(false);
   const [isNewNameOpen, setIsNewNameOpen] = useState(false);
   const [isGeneratingNewNameId, setIsGeneratingNewNameId] = useState(false);
   const [isSavingNewName, setIsSavingNewName] = useState(false);
@@ -361,16 +352,12 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PRODUCT_PAGE_SIZE);
   const [totalProductCount, setTotalProductCount] = useState(0);
-  const [productDocuments, setProductDocuments] = useState<File[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ phase: "", checked: 0, total: 0 });
   const [importSummary, setImportSummary] = useState({ added: 0, duplicates: 0 });
   const [importError, setImportError] = useState("");
   const [availableCompanies, setAvailableCompanies] = useState<CatalogCompany[]>([]);
   const [pharmacyCompanyNames, setPharmacyCompanyNames] = useState<string[]>([]);
-  const [pharmacyCompanyNamesError, setPharmacyCompanyNamesError] = useState("");
-  const [pharmacyGenericNames, setPharmacyGenericNames] = useState<string[]>([]);
-  const [pharmacyGenericNamesError, setPharmacyGenericNamesError] = useState("");
   const [totalCatalogCount, setTotalCatalogCount] = useState(0);
   const [pharmacyUserId, setPharmacyUserId] = useState("");
   const [selectedCompany, setSelectedCompany] = useState("");
@@ -401,17 +388,15 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         setStorageReady(true);
         initialQueryKey.current = `${ownerId}:1:${DEFAULT_PRODUCT_PAGE_SIZE}:`;
 
-        void loadPharmacyProductNames(ownerId)
-          .then(({ companyNames, genericNames }) => {
+        void loadPharmacyCompanyNames(ownerId)
+          .then((companyNames) => {
             if (!active) return;
             setPharmacyCompanyNames(companyNames);
-            setPharmacyGenericNames(genericNames);
           })
           .catch((error: unknown) => {
             if (!active) return;
             const message = getErrorMessage(error);
-            setPharmacyCompanyNamesError(`Could not load company names from your product list: ${message}`);
-            setPharmacyGenericNamesError(`Could not load generic names from your product list: ${message}`);
+            setImportError(`Could not load product name suggestions: ${message}`);
           });
 
         void loadCatalogCompanies()
@@ -517,18 +502,17 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }, [adminMode, pharmacyUserId]);
 
   useEffect(() => {
-    if (!isAddOpen && !isNewNameOpen && !selectedProduct) return;
+    if (!isNewNameOpen && !selectedProduct) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (isGeneratingNewNameId || isSavingNewName) return;
-        setIsAddOpen(false);
         setIsNewNameOpen(false);
         setSelectedProduct(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAddOpen, isGeneratingNewNameId, isNewNameOpen, isSavingNewName, selectedProduct]);
+  }, [isGeneratingNewNameId, isNewNameOpen, isSavingNewName, selectedProduct]);
 
   const saveEditedProduct = useCallback(async () => {
     if (!editingProduct || !pharmacyUserId || savingProductRef.current) return;
@@ -631,101 +615,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         ? { ...current, unitPrice: value, retailPrice: value }
         : { ...current, [field]: value }
       : current);
-  }
-
-  function openAddProduct() {
-    if (!pharmacyUserId || isImporting || !storageReady) return;
-    setProductDocuments([]);
-    setImportError("");
-    setIsAddOpen(true);
-  }
-
-  async function saveOcrProduct(details: ExtractedProductDetails) {
-    if (!pharmacyUserId) throw new Error("Could not verify the signed-in pharmacy account.");
-    const brand = details.brandName.trim();
-    const genericName = details.genericName.trim();
-    const manufacturer = details.company.trim();
-    if (!brand || !manufacturer) {
-      throw new Error("Brand Name and Company are required.");
-    }
-
-    const productFields: ProductImportCandidate = {
-      medicineName: brand || genericName,
-      brand,
-      genericName: genericName || "-",
-      manufacturer,
-      productType: "Medicine",
-      category: "",
-      dosageForm: details.dosageForm.trim() || "-",
-      strength: details.strength.trim() || "-",
-      packSize: details.packSize.trim() || "-",
-      unit: "-",
-      barcode: "-",
-    };
-
-    const { data: matchingRows, error: duplicateCheckError } = await supabase
-      .from("pharmacy_catalog_products")
-      .select("*")
-      .eq("owner_user_id", pharmacyUserId)
-      .ilike("medicine_name", productFields.medicineName);
-    if (duplicateCheckError) throw duplicateCheckError;
-    const matchingProducts = ((matchingRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
-    const identityKey = getProductIdentityKey(productFields);
-    if (identityKey && matchingProducts.some((product) => getProductIdentityKey(product) === identityKey)) {
-      throw new Error("This product already exists with the same name, strength, dosage form, and company.");
-    }
-    const nameKey = getProductNameKey(productFields);
-    if (matchingProducts.some((product) => getProductNameKey(product) === nameKey && !getProductIdentityKey(product))) {
-      throw new Error("A product with this name has incomplete details. Resolve that record before adding another.");
-    }
-
-    const { data: identifiers, error: identifierError } = await supabase.rpc("reserve_pharmacy_product_identifiers");
-    if (identifierError) throw identifierError;
-    const reserved = (identifiers ?? [])[0] as { serial_number?: string; product_id?: string } | undefined;
-    if (!reserved?.serial_number || !reserved.product_id) {
-      throw new Error("The database did not return product identifiers. Apply the latest Supabase migration and retry.");
-    }
-
-    const unitPrice = details.unitPrice.trim() || "-";
-    const product: Product = {
-      ...productFields,
-      id: reserved.product_id,
-      serialNumber: reserved.serial_number,
-      retailPrice: unitPrice,
-      unitPrice,
-      packPrice: details.packPrice.trim() || "-",
-      usageType: "Medicine",
-      darCode: "-",
-      medicineTypeCategory: "",
-      registrationInformation: "-",
-    };
-    const { data, error } = await supabase
-      .from("pharmacy_catalog_products")
-      .insert(mapProductToPharmacyRow(product, pharmacyUserId))
-      .select("*")
-      .single();
-    if (error) throw error;
-
-    const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
-    initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
-    setCurrentPage(1);
-    setSearchTerm("");
-    setImportError("");
-    try {
-      const refreshed = await loadPharmacyProductPage(pharmacyUserId, 1, pageSize, "");
-      setProducts(refreshed.products);
-      setTotalProductCount(refreshed.count);
-    } catch (error) {
-      setProducts([savedProduct]);
-      setTotalProductCount((count) => count + 1);
-      setImportError(`Product was saved, but the product list could not be refreshed: ${getErrorMessage(error)}`);
-    }
-    setPharmacyCompanyNames((current) => current.includes(manufacturer) ? current : [...current, manufacturer]);
-    if (genericName !== "-") {
-      setPharmacyGenericNames((current) => current.includes(genericName) ? current : [...current, genericName]);
-    }
-    setProductDocuments([]);
-    setIsAddOpen(false);
   }
 
   async function openNewNameModal() {
@@ -863,9 +752,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         setImportError(`Product was saved, but the product list could not be refreshed: ${getErrorMessage(error)}`);
       }
       setPharmacyCompanyNames((current) => current.includes(manufacturer) ? current : [...current, manufacturer]);
-      if (genericName && genericName !== "-") {
-        setPharmacyGenericNames((current) => current.includes(genericName) ? current : [...current, genericName]);
-      }
       setIsNewNameOpen(false);
     } catch (error) {
       console.error("Could not save new product name:", error);
@@ -952,9 +838,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }
 
   function closeModal() {
-    setIsAddOpen(false);
     setSelectedProduct(null);
-    setProductDocuments([]);
   }
 
   return (
@@ -970,10 +854,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
               <p style={{ margin: adminMode ? "7px 0 0" : "8px 0 0", color: adminMode ? "#78867f" : "#6a7973", fontSize: adminMode ? 12 : 14 }}>{adminMode ? "Import, validate, search, and manage the shared product catalog." : "Manage your pharmacy catalog, prices, and product availability."}</p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button type="button" disabled={isImporting || !storageReady} onClick={openAddProduct} style={{ border: 0, borderRadius: 7, background: isImporting || !storageReady ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady ? "not-allowed" : "pointer" }}>
-                Read product label
-              </button>
-
               {!adminMode && (
                 <button type="button" disabled={isImporting || !storageReady || !pharmacyUserId} onClick={openNewNameModal} style={{ border: "1px solid #179c70", borderRadius: 7, background: "#fff", color: "#16845f", padding: "9px 13px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer", opacity: isImporting || !storageReady || !pharmacyUserId ? 0.6 : 1 }}>
                   + Add New
@@ -1125,29 +1005,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
           </section>
         </main>
       </div>
-
-      {isAddOpen && (
-        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="add-product-title" style={{ width: "min(760px, 100%)", maxHeight: "min(90vh, 820px)", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
-            <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
-              <div>
-                <h2 id="add-product-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Read product label</h2>
-                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Scan product images and review the extracted details.</p>
-              </div>
-              <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
-            </div>
-            <ProductDocumentUpload
-              files={productDocuments}
-              onFilesChange={setProductDocuments}
-              companyNames={pharmacyCompanyNames}
-              companyNamesError={pharmacyCompanyNamesError}
-              genericNames={pharmacyGenericNames}
-              genericNamesError={pharmacyGenericNamesError}
-              onSaveProduct={saveOcrProduct}
-            />
-          </section>
-        </div>
-      )}
 
       {isNewNameOpen && (
         <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNameModal(); }} style={{ position: "fixed", inset: 0, zIndex: 51, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
