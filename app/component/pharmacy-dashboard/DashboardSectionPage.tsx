@@ -13,6 +13,7 @@ export type SectionData = {
   metrics: { label: string; value: string; detail: string }[];
   columns: string[];
   rows: ReactNode[][];
+  rowKeys?: string[];
   listTitle?: string;
   listNavigation?: ReactNode;
   listFooter?: ReactNode;
@@ -85,7 +86,11 @@ export default function DashboardSectionPage({
               ? "dashboard-main-invoice"
               : sectionSlug === "purchase"
                 ? "dashboard-main-purchase"
-                : undefined}
+                : sectionSlug === "inventory"
+                  ? "dashboard-main-inventory"
+                    : sectionSlug === "returns"
+                      ? "dashboard-main-returns"
+                  : undefined}
           style={{
             flex: 1,
             minWidth: 0,
@@ -101,7 +106,7 @@ export default function DashboardSectionPage({
             locked={sectionSlug !== "settings"}
           >
           {sectionSlug !== "sales" && !hidePageHeader && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
+            <div className={sectionSlug === "inventory" ? "dashboard-inventory-page-header" : sectionSlug === "returns" ? "dashboard-returns-page-header" : undefined} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
               <div>
                 <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / {pageTitle ?? navItem.label}</div>
                 <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>{pageTitle ?? navItem.label}</h1>
@@ -124,7 +129,7 @@ export default function DashboardSectionPage({
           )}
 
           {data.metrics.length > 0 && (
-            <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
+            <section className={sectionSlug === "returns" ? "dashboard-returns-metrics" : undefined} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
               {data.metrics.map((metric) => (
                 <article key={metric.label} style={{ minHeight: 104, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", padding: "16px 18px" }}>
                   <div style={{ color: "#687871", fontSize: 12 }}>{metric.label}</div>
@@ -138,8 +143,8 @@ export default function DashboardSectionPage({
           {content}
 
           {data.columns.length > 0 && (
-            <section className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list" : undefined} style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
-            <div className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list-header" : undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
+            <section className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list" : sectionSlug === "inventory" ? "dashboard-inventory-list" : sectionSlug === "returns" ? "dashboard-returns-list" : undefined} style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-list-header" : sectionSlug === "inventory" ? "dashboard-inventory-list-header" : sectionSlug === "returns" ? "dashboard-returns-list-header" : undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
                 {listNavigation}
                 {listTitle !== "" && (
@@ -149,7 +154,7 @@ export default function DashboardSectionPage({
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 {searchAccessory}
                 <input
-                  className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-search" : undefined}
+                  className={sectionSlug === "invoice" || sectionSlug === "purchase" ? "dashboard-invoice-search" : sectionSlug === "inventory" ? "dashboard-inventory-search" : sectionSlug === "returns" ? "dashboard-returns-search" : undefined}
                   aria-label={`Search ${navItem.label.toLowerCase()}`}
                   placeholder="Search..."
                   value={searchValue}
@@ -160,9 +165,73 @@ export default function DashboardSectionPage({
             </div>
             {sectionSlug === "invoice" || sectionSlug === "purchase" ? (
               <DashboardSectionInvoiceTable columns={data.columns} rows={data.rows} />
+            ) : sectionSlug === "inventory" ? (
+              <>
+                <div className="dashboard-invoice-desktop-table dashboard-inventory-table-scroll" style={{ overflowX: "auto" }}>
+                  <table className="dashboard-inventory-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
+                    <thead>
+                      <tr>
+                        {data.columns.map((column) => (
+                          <th key={column} style={{ padding: "11px 16px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.rows.map((row, rowIndex) => (
+                        <tr key={`${sectionSlug}-${data.rowKeys?.[rowIndex] ?? rowIndex}`}>
+                          {row.map((cell, cellIndex) => (
+                            <td key={`${sectionSlug}-${data.rowKeys?.[rowIndex] ?? rowIndex}-${cellIndex}`} style={{ padding: "13px 16px", borderBottom: rowIndex === data.rows.length - 1 ? 0 : "1px solid #f0f2f0", color: cellIndex === 0 ? "#26352f" : "#687871", fontSize: 12, fontWeight: cellIndex === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                      {data.rows.length === 0 && (
+                        <tr>
+                          <td colSpan={data.columns.length} style={{ padding: "24px 16px", color: "#87928d", fontSize: 12, textAlign: "center" }}>
+                            No records found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <DashboardSectionInvoiceTable columns={data.columns} rows={data.rows} rowKeys={data.rowKeys} mobileOnly />
+              </>
+            ) : sectionSlug === "returns" ? (
+              <>
+                <div className="dashboard-invoice-desktop-table dashboard-returns-table-scroll" style={{ overflowX: "auto" }}>
+                  <table className="dashboard-returns-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
+                    <thead>
+                      <tr>
+                        {data.columns.map((column) => (
+                          <th key={column} style={{ padding: "11px 16px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.rows.map((row, rowIndex) => (
+                        <tr key={`${sectionSlug}-${data.rowKeys?.[rowIndex] ?? rowIndex}`}>
+                          {row.map((cell, cellIndex) => (
+                            <td key={`${sectionSlug}-${data.rowKeys?.[rowIndex] ?? rowIndex}-${cellIndex}`} style={{ padding: "13px 16px", borderBottom: rowIndex === data.rows.length - 1 ? 0 : "1px solid #f0f2f0", color: cellIndex === 0 ? "#26352f" : "#687871", fontSize: 12, fontWeight: cellIndex === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                      {data.rows.length === 0 && (
+                        <tr>
+                          <td colSpan={data.columns.length} style={{ padding: "24px 16px", color: "#87928d", fontSize: 12, textAlign: "center" }}>
+                            No records found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="dashboard-returns-mobile-table">
+                  <DashboardSectionInvoiceTable columns={data.columns} rows={data.rows} rowKeys={data.rowKeys} mobileOnly />
+                </div>
+              </>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
+              <div className={sectionSlug === "inventory" ? "dashboard-inventory-table-scroll" : undefined} style={{ overflowX: "auto" }}>
+                <table className={sectionSlug === "inventory" ? "dashboard-inventory-table" : undefined} style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
                 <thead>
                   <tr>
                     {data.columns.map((column) => (

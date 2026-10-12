@@ -160,6 +160,7 @@ export default function InventoryPage() {
     action: "Adjust stock",
     metrics: [],
     columns: receiveOrderColumns,
+    rowKeys: pageRows.map((row) => row.id),
     rows: pageRows.map((row) => {
       const cells = [
         formatDateTime(row),
@@ -269,7 +270,7 @@ export default function InventoryPage() {
         </label>
       ) : undefined}
       listNavigation={
-        <div role="group" aria-label="Inventory list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <div className="inventory-list-tabs" role="group" aria-label="Inventory list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
           {([
             ["inventory", "Inventory"],
             ["expire-soon", "Expire Soon"],
@@ -292,12 +293,14 @@ export default function InventoryPage() {
     />
     {selectedReturnBatch && (
       <div
+        className="inventory-dialog-overlay inventory-return-overlay"
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) setSelectedReturnBatch(null);
         }}
         style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", padding: 20, background: "rgba(18, 35, 27, 0.45)" }}
       >
         <section
+          className="inventory-dialog inventory-return-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby="return-invoice-history-title"
@@ -342,12 +345,14 @@ export default function InventoryPage() {
     )}
     {selectedRow && (
       <div
+        className="inventory-dialog-overlay inventory-item-overlay"
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) setSelectedRow(null);
         }}
         style={{ position: "fixed", inset: 0, zIndex: 7, display: "grid", placeItems: "center", padding: 20, background: "rgba(18, 35, 27, 0.45)" }}
       >
         <section
+          className="inventory-dialog inventory-item-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby="inventory-item-title"

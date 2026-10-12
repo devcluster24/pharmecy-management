@@ -97,11 +97,18 @@ export default function ReturnSystemPage() {
   const [customerName, setCustomerName] = useState("Walk-in customer");
   const [customerPhone, setCustomerPhone] = useState("");
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
+  const [selectedSalesInvoice, setSelectedSalesInvoice] = useState<SalesListRow | null>(null);
+  const [isMobileBillOpen, setIsMobileBillOpen] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsModalOpen(false);
+      if (event.key === "Escape") {
+        setIsModalOpen(false);
+        setIsMobileBillOpen(false);
+        setSelectedReturnId(null);
+        setSelectedSalesInvoice(null);
+      }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
@@ -145,6 +152,7 @@ export default function ReturnSystemPage() {
     setReturnMethod("Cash Return");
     setCustomerName("Walk-in customer");
     setCustomerPhone("");
+    setIsMobileBillOpen(false);
     setError(returnDeductionSettings.error);
     setIsModalOpen(true);
   }
@@ -224,6 +232,7 @@ export default function ReturnSystemPage() {
   const returnRows: ReactNode[][] = [
     ...pageRecords.map((record) => {
       const returnId = record.returnId ?? record.id;
+      const originalInvoice = sales.rows.find((sale) => sale.invoice === record.invoice);
       return [
         <button
           key={`${record.id}-return-id`}
@@ -239,7 +248,20 @@ export default function ReturnSystemPage() {
           {record.phone && <span style={{ color: "#77857d", fontSize: 11 }}>{record.phone}</span>}
         </span>,
         record.reInvoice ?? getReInvoice(record.invoice),
-        record.invoice,
+        <span key={`${record.id}-invoice-cell`} className="return-invoice-cell">
+          <span className="return-desktop-invoice">{record.invoice}</span>
+          {originalInvoice && (
+            <button
+              key={`${record.id}-invoice`}
+              className="return-mobile-invoice-link"
+              type="button"
+              onClick={() => setSelectedSalesInvoice(originalInvoice)}
+            >
+              {record.invoice}
+            </button>
+          )}
+          {!originalInvoice && <span className="return-mobile-invoice-fallback">{record.invoice}</span>}
+        </span>,
         record.product,
         record.quantity ?? "—",
         record.amount === undefined
@@ -307,8 +329,9 @@ export default function ReturnSystemPage() {
     errorMessage: sales.error || returns.error || error || undefined,
     metrics,
     rows: returnRows,
+    rowKeys: pageRecords.map((record) => record.id),
     listFooter: (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+      <div className="return-list-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
         <span>
           {returnRowCount === 0
             ? "Showing 0 records"
@@ -346,6 +369,7 @@ export default function ReturnSystemPage() {
       }}
       actionContent={(
         <button
+          className="return-record-launch-button"
           type="button"
           onClick={openModal}
           style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}
@@ -355,12 +379,14 @@ export default function ReturnSystemPage() {
       )}
       content={selectedReturnId ? (
         <div
+          className="return-details-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setSelectedReturnId(null);
           }}
           style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
         >
           <section
+            className="return-details-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="return-id-details-title"
@@ -406,27 +432,106 @@ export default function ReturnSystemPage() {
             </div>
           </section>
         </div>
+      ) : selectedSalesInvoice ? (
+        <div
+          className="return-sales-invoice-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedSalesInvoice(null);
+          }}
+          style={{ position: "fixed", inset: 0, zIndex: 95, display: "grid", placeItems: "center", overflowY: "auto", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
+        >
+          <section
+            className="return-sales-invoice-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="return-sales-invoice-title"
+            style={{ width: "min(1100px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
+          >
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
+              <div>
+                <p style={{ margin: "0 0 4px", color: "#16845f", fontSize: 10, fontWeight: 700 }}>{selectedSalesInvoice.customer || "Walk-in customer"}{selectedSalesInvoice.phone ? ` · ${selectedSalesInvoice.phone}` : ""}</p>
+                <h2 id="return-sales-invoice-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Sales Invoice · {selectedSalesInvoice.invoice}</h2>
+              </div>
+              <button type="button" aria-label="Close sales invoice" onClick={() => setSelectedSalesInvoice(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+            </header>
+            <div className="return-sales-invoice-body" style={{ padding: 20 }}>
+              <div className="return-sales-invoice-meta" style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 16, color: "#526158", fontSize: 12 }}>
+                <span>Date: {new Date(selectedSalesInvoice.createdAt).toLocaleString("en-BD")}</span>
+                <span>Payment: {selectedSalesInvoice.paymentMethodName ?? "Cash"}</span>
+                <span>Status: {selectedSalesInvoice.payment}</span>
+              </div>
+              <div className="return-sales-invoice-table-scroll" style={{ overflowX: "auto", border: "1px solid #edf0ed", borderRadius: 6 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                  <thead>
+                    <tr>
+                      {["Product", "Details", "Batch", "Qty", "Unit price", "Total"].map((heading) => (
+                        <th key={heading} style={{ padding: "8px 10px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 10, whiteSpace: "nowrap" }}>{heading}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedSalesInvoice.lines ?? []).map((line, index) => (
+                      <tr key={`${line.batchNumber}-${index}`}>
+                        {[line.brand, line.details || "-", line.batchNumber || "-", String(line.quantity), `৳${line.unitPrice.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `৳${line.totalPrice.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`].map((value, cellIndex) => (
+                          <td key={cellIndex} style={{ padding: "8px 10px", borderBottom: index === (selectedSalesInvoice.lines?.length ?? 0) - 1 ? 0 : "1px solid #f0f2f0", color: "#34453b", fontSize: 11, whiteSpace: cellIndex === 1 ? "normal" : "nowrap", overflowWrap: "anywhere" }}>{value}</td>
+                        ))}
+                      </tr>
+                    ))}
+                    {(!selectedSalesInvoice.lines || selectedSalesInvoice.lines.length === 0) && (
+                      <tr><td colSpan={6} style={{ padding: 16, color: "#87928d", fontSize: 11, textAlign: "center" }}>No item details are available for this invoice.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="return-sales-invoice-total" style={{ display: "grid", justifyContent: "end", gap: 5, marginTop: 14, color: "#526158", fontSize: 11 }}>
+                <span>Subtotal: ৳{(selectedSalesInvoice.subtotalAmount ?? selectedSalesInvoice.amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                {(selectedSalesInvoice.discountAmount ?? 0) > 0 && <span>Discount: −৳{selectedSalesInvoice.discountAmount?.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                {(selectedSalesInvoice.taxAmount ?? 0) > 0 && <span>VAT/TAX: ৳{selectedSalesInvoice.taxAmount?.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                {(selectedSalesInvoice.cashRoundingAmount ?? 0) !== 0 && <span>Cash rounding: ৳{selectedSalesInvoice.cashRoundingAmount?.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                <strong style={{ color: "#16845f", fontSize: 13 }}>Grand total: ৳{selectedSalesInvoice.amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <span>Paid: ৳{(selectedSalesInvoice.paidAmount ?? selectedSalesInvoice.amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>Due: ৳{(selectedSalesInvoice.dueAmount ?? 0).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+            <footer className="return-sales-invoice-footer" style={{ display: "flex", justifyContent: "flex-end", padding: "12px 20px", borderTop: "1px solid #e9eeea" }}>
+              <button type="button" onClick={() => setSelectedSalesInvoice(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "8px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Close</button>
+            </footer>
+          </section>
+        </div>
       ) : isModalOpen ? (
         <div
+          className="return-record-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setIsModalOpen(false);
           }}
           style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
         >
           <section
+            className="return-record-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="record-return-title"
             style={{ display: "flex", flexDirection: "column", width: "min(1100px, 100%)", height: "calc(100vh - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "hidden", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}
           >
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
+            <header className="return-record-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
               <h2 id="record-return-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Record Return</h2>
-              <button type="button" aria-label="Close Record Return" onClick={() => setIsModalOpen(false)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+              <div className="return-record-header-actions">
+                <button className="return-mobile-bill-button" type="button" aria-label="Open bill summary" onClick={() => setIsMobileBillOpen(true)}>Bill</button>
+                <button type="button" aria-label="Close Record Return" onClick={() => setIsModalOpen(false)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
+              </div>
             </header>
-            <form onSubmit={recordReturn} style={{ display: "flex", flex: 1, flexDirection: "column", gap: 14, minHeight: 0, padding: 20 }}>
-              <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: 14, minHeight: 0, overflow: "hidden" }}>
-              <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: 18, minHeight: 0 }}>
-                <section aria-labelledby="return-search-title" style={{ display: "grid", alignContent: "start", gap: 10, minWidth: 0 }}>
+            <form className="return-record-form" onSubmit={recordReturn} style={{ display: "flex", flex: 1, flexDirection: "column", gap: 14, minHeight: 0, padding: 20 }}>
+              {isMobileBillOpen && (
+                <button
+                  type="button"
+                  className="return-mobile-bill-backdrop"
+                  aria-label="Close bill summary"
+                  onClick={() => setIsMobileBillOpen(false)}
+                />
+              )}
+              <div className="return-record-scroll" style={{ display: "flex", flex: 1, flexDirection: "column", gap: 14, minHeight: 0, overflow: "hidden" }}>
+              <div className="return-record-main" style={{ display: "flex", flex: 1, flexDirection: "column", gap: 18, minHeight: 0 }}>
+                <section className="return-product-search" aria-labelledby="return-search-title" style={{ display: "grid", alignContent: "start", gap: 10, minWidth: 0 }}>
                   <h3 id="return-search-title" style={{ margin: 0, color: "#34453b", fontSize: 13, fontWeight: 650, whiteSpace: "nowrap" }}>Search Invoice Products by Invoice Number or Brand Name</h3>
                   <input
                     aria-label="Search invoice products by invoice number or brand name"
@@ -467,8 +572,8 @@ export default function ReturnSystemPage() {
                     </div>
                   )}
                 </section>
-                <div style={{ display: "grid", flex: 1, gridTemplateColumns: "minmax(0, 1fr) minmax(250px, 0.42fr)", alignItems: "stretch", gap: 14, minHeight: 0 }}>
-                <section aria-labelledby="return-invoice-title" style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, minHeight: 0, padding: 12, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb", overflow: "hidden" }}>
+                <div className="return-record-columns" style={{ display: "grid", flex: 1, gridTemplateColumns: "minmax(0, 1fr) minmax(250px, 0.42fr)", alignItems: "stretch", gap: 14, minHeight: 0 }}>
+                <section className="return-items-panel" aria-labelledby="return-invoice-title" style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, minHeight: 0, padding: 12, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb", overflow: "hidden" }}>
                   <h3 id="return-invoice-title" style={{ margin: 0, color: "#34453b", fontSize: 13, fontWeight: 650 }}>Return Invoice ({selectedItems.length})</h3>
                   {selectedItems.length === 0 ? (
                     <p style={{ margin: 0, color: "#77857d", fontSize: 12 }}>Search and add invoice products to this return.</p>
@@ -547,8 +652,11 @@ export default function ReturnSystemPage() {
                     </div>
                   )}
                 </section>
-                <section aria-labelledby="return-bill-summary-title" style={{ display: "grid", alignContent: "start", gap: 14, minWidth: 0, padding: 14, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
-                  <h3 id="return-bill-summary-title" style={{ margin: 0, color: "#34453b", fontSize: 13, fontWeight: 650 }}>Bill Summary</h3>
+                <aside className={`return-bill-summary${isMobileBillOpen ? " is-open" : ""}`} aria-label="Bill summary" style={{ display: "grid", alignContent: "start", gap: 14, minWidth: 0, padding: 14, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                  <div className="return-bill-summary-header">
+                    <h3 id="return-bill-summary-title" style={{ margin: 0, color: "#34453b", fontSize: 13, fontWeight: 650 }}>Bill Summary</h3>
+                    <button type="button" aria-label="Close bill summary" onClick={() => setIsMobileBillOpen(false)}>×</button>
+                  </div>
                   <div style={{ display: "grid", gap: 12, color: "#526158", fontSize: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                       <span>Total Return Unit</span>
@@ -655,17 +763,17 @@ export default function ReturnSystemPage() {
                       />
                     </label>
                   </div>
-                </section>
+                  <footer className="return-record-footer" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: 12, flexShrink: 0, paddingTop: 12, borderTop: "1px solid #e9eeea" }}>
+                    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <button type="button" onClick={() => setIsModalOpen(false)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 13px", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                      <button type="submit" disabled={selectedItems.length === 0} style={{ border: 0, borderRadius: 6, background: selectedItems.length > 0 ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: selectedItems.length > 0 ? "pointer" : "not-allowed" }}>Record Return</button>
+                    </div>
+                  </footer>
+                </aside>
                 </div>
               </div>
               {error && <p role="alert" style={{ margin: 0, color: "#b34b43", fontSize: 12 }}>{error}</p>}
               </div>
-              <footer style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: 12, flexShrink: 0, paddingTop: 12, borderTop: "1px solid #e9eeea" }}>
-                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <button type="button" onClick={() => setIsModalOpen(false)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 13px", fontSize: 12, cursor: "pointer" }}>Cancel</button>
-                  <button type="submit" disabled={selectedItems.length === 0} style={{ border: 0, borderRadius: 6, background: selectedItems.length > 0 ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 13px", fontSize: 12, fontWeight: 650, cursor: selectedItems.length > 0 ? "pointer" : "not-allowed" }}>Record Return</button>
-                </div>
-              </footer>
             </form>
           </section>
         </div>
