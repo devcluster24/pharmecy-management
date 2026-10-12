@@ -1,132 +1,105 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import styles from "./Navbar.module.css";
+
+const navLinks = [
+  { href: "/features", label: "Features" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/faq", label: "FAQ" },
+  { href: "/contact", label: "Contact" },
+];
 
 export default function Navbar() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <header
-      style={{
-        position: "relative",
-        zIndex: 1,
-        width: "100%",
-        borderBottom: "1px solid rgba(13,44,42,0.08)",
-        background: "rgba(238,243,239,0.96)",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1260,
-          margin: "0 auto",
-          height: 88,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 30px",
-        }}
-      >
-        <Link href="/" aria-label="Pharmacy Cluster home" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", cursor: "pointer" }}>
-          <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 900,
-              letterSpacing: "-0.08em",
-              color: "#0d2c2a",
-              lineHeight: 1,
-            }}
-          >
-            Pharmacy<span style={{ color: "#1ec688" }}> Cluster</span>
-          </div>
+    <header className={styles.header}>
+      <div className={styles.container}>
+        <Link
+          href="/"
+          aria-label="Pharmacy Cluster home"
+          className={styles.brand}
+        >
+          <Image
+            src="/pharmacy-icon.png"
+            alt=""
+            width={36}
+            height={36}
+            aria-hidden="true"
+            className={styles.logo}
+          />
+          <span className={styles.brandName}>
+            Pharmacy<span className={styles.brandAccent}> Cluster</span>
+          </span>
         </Link>
 
-        <nav
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 32,
-            color: "#0d2c2a",
-            fontSize: 14,
-            fontWeight: 500,
-          }}
-        >
-          <Link
-            href="/features"
-            style={{
-              color: "#0d2c2a",
-              textDecoration: "none",
-              opacity: 0.9,
-            }}
-          >
-            Features
-          </Link>
-          <Link
-            href="/pricing"
-            style={{
-              color: "#0d2c2a",
-              textDecoration: "none",
-              opacity: 0.9,
-            }}
-          >
-            Pricing
-          </Link>
-          <Link
-            href="/faq"
-            style={{
-              color: "#0d2c2a",
-              textDecoration: "none",
-              opacity: 0.9,
-            }}
-          >
-            FAQ
-          </Link>
-          <Link
-            href="/contact"
-            style={{
-              color: "#0d2c2a",
-              textDecoration: "none",
-              opacity: 0.9,
-            }}
-          >
-            Contact
-          </Link>
+        <nav className={styles.desktopNav} aria-label="Main navigation">
+          {navLinks.map(({ href, label }) => (
+            <Link key={href} href={href} className={styles.navLink}>
+              {label}
+            </Link>
+          ))}
         </nav>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          <Link
-            href="/login"
-            style={{
-              display: "inline-block",
-              border: "1px solid rgba(13,44,42,0.1)",
-              background: "transparent",
-              color: "#0d2c2a",
-              padding: "6px 16px",
-              borderRadius: 10,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              textDecoration: "none",
-            }}
-          >
+        <div className={styles.desktopActions}>
+          <Link href="/login" className={styles.loginButton}>
             Login
           </Link>
-          <Link
-            href="/register"
-            style={{
-              display: "inline-block",
-              border: "none",
-              background: "#2ad49a",
-              color: "#082a28",
-              padding: "6px 18px",
-              borderRadius: 10,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              boxShadow: "0 10px 20px rgba(42,212,154,0.25)",
-              textDecoration: "none",
-            }}
-          >
-            Get Started <span style={{ marginLeft: 10 }}>→</span>
+          <Link href="/register" className={styles.startButton}>
+            Get Started <span aria-hidden="true">→</span>
           </Link>
         </div>
+
+        <button
+          type="button"
+          className={styles.menuButton}
+          aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-navigation"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span className={menuOpen ? styles.menuIconOpen : styles.menuIcon}>
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+
+        {menuOpen && (
+          <div className={styles.mobileMenu} id="mobile-navigation">
+            <nav className={styles.mobileNav} aria-label="Mobile navigation">
+              {navLinks.map(({ href, label }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className={styles.mobileNavLink}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {label}
+                </Link>
+              ))}
+            </nav>
+            <div className={styles.mobileActions}>
+              <Link
+                href="/login"
+                className={styles.loginButton}
+                onClick={() => setMenuOpen(false)}
+              >
+                Login
+              </Link>
+              <Link
+                href="/register"
+                className={styles.startButton}
+                onClick={() => setMenuOpen(false)}
+              >
+                Get Started <span aria-hidden="true">→</span>
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
     </header>
   );

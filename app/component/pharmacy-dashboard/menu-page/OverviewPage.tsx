@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from "react";
+import { Fragment, useState, useSyncExternalStore } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
@@ -163,14 +163,19 @@ function ProductTable({
   rows: string[][];
   emptyMessage: string;
 }) {
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+
   return (
-    <section style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+    <section className="overview-product-table" style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
       <div style={{ padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
-        <h2 style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>{title}</h2>
-        <p style={{ margin: "5px 0 0", color: "#7a8981", fontSize: 11 }}>{subtitle}</p>
+        <h2 className="overview-table-title" style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>{title}</h2>
+        <p className="overview-table-subtitle" style={{ margin: "5px 0 0", color: "#7a8981", fontSize: 11 }}>{subtitle}</p>
       </div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 430, borderCollapse: "collapse", textAlign: "left" }}>
+      <div
+        className="overview-product-table-scroll"
+        style={{ overflowX: "auto" }}
+      >
+        <table className="overview-product-table-grid" style={{ width: "100%", minWidth: 430, borderCollapse: "collapse", textAlign: "left" }}>
           <thead>
             <tr>
               {columns.map((column) => (
@@ -180,17 +185,61 @@ function ProductTable({
           </thead>
           <tbody>
             {rows.length > 0
-              ? rows.map((row) => (
-                <tr key={row[0]}>
-                  {row.map((cell, index) => (
-                    <td key={`${index}-${cell}`} style={{ padding: "12px 14px", borderBottom: "1px solid #f0f2f0", color: index === 0 ? "#26372f" : "#64736b", fontSize: 11, fontWeight: index === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
-                  ))}
-                </tr>
+              ? rows.map((row, rowIndex) => (
+                <Fragment key={row[0]}>
+                  <tr
+                    className={expandedRow === rowIndex ? "overview-product-row is-expanded" : "overview-product-row"}
+                    tabIndex={0}
+                    aria-expanded={expandedRow === rowIndex}
+                    onClick={() => {
+                      if (!window.matchMedia("(max-width: 767px)").matches) return;
+                      setExpandedRow((current) => current === rowIndex ? null : rowIndex);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        if (!window.matchMedia("(max-width: 767px)").matches) return;
+                        event.preventDefault();
+                        setExpandedRow((current) => current === rowIndex ? null : rowIndex);
+                      }
+                    }}
+                  >
+                    {row.map((cell, index) => (
+                      <td key={`${index}-${cell}`} style={{ padding: "12px 14px", borderBottom: "1px solid #f0f2f0", color: index === 0 ? "#26372f" : "#64736b", fontSize: 11, fontWeight: index === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+                    ))}
+                  </tr>
+                </Fragment>
               ))
               : <tr><td colSpan={columns.length} style={{ padding: "18px 14px", color: "#87938c", fontSize: 11 }}>{emptyMessage}</td></tr>}
           </tbody>
         </table>
       </div>
+      {expandedRow !== null && rows[expandedRow] && (
+        <div
+          className="overview-product-details-panel"
+          role="button"
+          tabIndex={0}
+          aria-label={`Collapse details for ${rows[expandedRow][0]}`}
+          onClick={() => setExpandedRow(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setExpandedRow(null);
+            }
+          }}
+        >
+          <div className="overview-product-details">
+            {rows[expandedRow].map((cell, index) => (
+              <span
+                className="overview-product-detail-value"
+                data-column={columns[index]}
+                key={`${columns[index]}-${cell}`}
+              >
+                {cell}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ padding: "10px 14px", color: "#87938c", fontSize: 10 }}>Showing {rows.length} products</div>
     </section>
   );
@@ -418,22 +467,22 @@ export default function OverviewPage() {
       : "Monthly totals for the last 6 months";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f7f5", color: "#1f2d26", fontFamily: "Inter, Arial, sans-serif" }}>
-      <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e6ebe7" }}>
+    <div className="dashboard-overview-page" style={{ minHeight: "100vh", background: "#f5f7f5", color: "#1f2d26", fontFamily: "Inter, Arial, sans-serif" }}>
+      <header className="dashboard-navbar" style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e6ebe7" }}>
         <PharmacyDashboardBrand />
-        <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#66756d", fontSize: 12 }}>
-          <span>{storeName || "Pharmacy Cluster"}</span>
+        <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 12, color: "#66756d", fontSize: 12 }}>
+          <span className="dashboard-navbar-store-name">{storeName || "Pharmacy Cluster"}</span>
           <PharmacyProfileMenu />
         </div>
       </header>
 
       <div style={{ display: "flex", minHeight: "calc(100vh - 62px)" }}>
         <Sidebar />
-        <main style={{ flex: 1, minWidth: 0, padding: "28px clamp(16px, 3vw, 38px) 44px" }}>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
+        <main className="dashboard-overview" style={{ flex: 1, minWidth: 0, padding: "28px clamp(16px, 3vw, 38px) 44px" }}>
+          <div className="overview-heading-row" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
             <div>
               <div style={{ color: "#78867f", fontSize: 11, marginBottom: 6 }}>{dateLabel}</div>
-              <h1 style={{ margin: 0, color: "#1d2c25", fontSize: 26, lineHeight: 1.2, fontWeight: 750 }}>Overview</h1>
+              <h1 className="overview-heading" style={{ margin: 0, color: "#1d2c25", fontSize: 26, lineHeight: 1.2, fontWeight: 750 }}>Overview</h1>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#627168", fontSize: 11 }}>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#23a876" }} />
@@ -447,24 +496,24 @@ export default function OverviewPage() {
             </div>
           )}
 
-          <section aria-label="Today's business metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 12, marginBottom: 18 }}>
+          <section className="overview-metrics" aria-label="Today's business metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 12, marginBottom: 18 }}>
             {metrics.map((metric) => (
-              <article key={metric.label} style={{ minWidth: 0, minHeight: 112, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "14px 15px", border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff" }}>
+              <article className="overview-metric-card" key={metric.label} style={{ minWidth: 0, minHeight: 112, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "14px 15px", border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ color: "#68776f", fontSize: 11, fontWeight: 550 }}>{metric.label}</span>
-                  <span style={{ width: 25, height: 25, display: "grid", placeItems: "center", flex: "0 0 auto", borderRadius: 6, background: metric.background, color: metric.color, fontSize: 13, fontWeight: 700 }}>{metric.icon}</span>
+                  <span className="overview-metric-label" style={{ color: "#68776f", fontSize: 11, fontWeight: 550 }}>{metric.label}</span>
+                  <span className="overview-metric-icon" style={{ width: 25, height: 25, display: "grid", placeItems: "center", flex: "0 0 auto", borderRadius: 6, background: metric.background, color: metric.color, fontSize: 13, fontWeight: 700 }}>{metric.icon}</span>
                 </div>
-                <div style={{ marginTop: 11, color: "#203128", fontSize: 20, fontWeight: 720 }}>{metric.value}</div>
-                <div style={{ marginTop: 4, color: metric.label === "Expired Stock" || metric.label === "Low Stock" ? "#a15c12" : "#89958e", fontSize: 10 }}>{metric.note}</div>
+                <div className="overview-metric-value" style={{ marginTop: 11, color: "#203128", fontSize: 20, fontWeight: 720 }}>{metric.value}</div>
+                <div className="overview-metric-note" style={{ marginTop: 4, color: metric.label === "Expired Stock" || metric.label === "Low Stock" ? "#a15c12" : "#89958e", fontSize: 10 }}>{metric.note}</div>
               </article>
             ))}
           </section>
 
-          <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(250px, 0.9fr)", gap: 14, marginBottom: 18 }}>
-            <article style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", padding: "16px 18px 12px" }}>
+          <section className="overview-sales-payments" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(250px, 0.9fr)", gap: 14, marginBottom: 18 }}>
+            <article className="overview-sales-card" style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", padding: "16px 18px 12px" }}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  <h2 style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>Sales &amp; Purchase</h2>
+                  <h2 className="overview-section-title" style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>Sales &amp; Purchase</h2>
                   <p style={{ margin: "5px 0 0", color: "#7a8981", fontSize: 11 }}>{chartPeriodDescription}</p>
                 </div>
                 <div aria-label="Chart period" style={{ display: "inline-flex", padding: 3, borderRadius: 6, background: "#f1f4f1", gap: 2 }}>
@@ -490,8 +539,8 @@ export default function OverviewPage() {
               </div>
             </article>
 
-            <article style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", padding: "16px 18px" }}>
-              <h2 style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>Recorded payments</h2>
+            <article className="overview-payments-card" style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", padding: "16px 18px" }}>
+              <h2 className="overview-section-title" style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>Recorded payments</h2>
               <p style={{ margin: "5px 0 16px", color: "#7a8981", fontSize: 11 }}>All-time paid amounts saved on sales invoices; not account balances</p>
               <div style={{ display: "flex", alignItems: "baseline", gap: 5, paddingBottom: 15, borderBottom: "1px solid #edf0ed" }}>
                 <span style={{ color: "#203128", fontSize: 27, fontWeight: 750 }}>{formatCurrency(recordedPaymentTotal)}</span>
@@ -508,7 +557,7 @@ export default function OverviewPage() {
             </article>
           </section>
 
-          <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))", gap: 14 }}>
+          <section className="overview-product-tables" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))", gap: 14 }}>
             <ProductTable title="Fast-moving products" subtitle="Top products by units sold today" columns={["Product", "Brand", "Units sold", "Sales"]} rows={fastMovingProducts} emptyMessage="No saved product-line sales for today." />
             <ProductTable title="Dead stock" subtitle="Available batches with no recorded sale for 60+ days; old invoice batch details may be incomplete" columns={["Product", "On hand", "No sale for", "Stock value"]} rows={deadStock} emptyMessage="No qualifying dead-stock batches found in available records." />
           </section>

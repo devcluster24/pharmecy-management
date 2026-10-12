@@ -43,6 +43,7 @@ const questions = [
 export default function FAQPage() {
   return (
     <main
+      className="public-page"
       style={{
         minHeight: "100vh",
         background: "#eef3ef",

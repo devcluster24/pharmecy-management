@@ -12,6 +12,7 @@ export default function Sidebar() {
 
   return (
     <aside
+      className="dashboard-sidebar"
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
       style={{
@@ -26,13 +27,14 @@ export default function Sidebar() {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div className="dashboard-sidebar-items" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {dashboardNavItems.filter((item) => canPharmacyStaffAccess(item.slug || "overview")).map((item) => {
           const isActive = pathname === item.href;
 
           return (
             <Link
               key={item.label}
+              className="dashboard-sidebar-item"
               href={item.href}
               style={{
                 display: "flex",
@@ -50,6 +52,7 @@ export default function Sidebar() {
               }}
             >
               <span
+                className="dashboard-sidebar-icon"
                 style={{
                   width: 18,
                   minWidth: 18,
@@ -63,6 +66,7 @@ export default function Sidebar() {
               </span>
 
               <span
+                className="dashboard-sidebar-label"
                 style={{
                   opacity: expanded ? 1 : 0,
                   transform: expanded ? "translateX(0)" : "translateX(-10px)",
@@ -82,6 +86,7 @@ export default function Sidebar() {
       </div>
 
       <div
+        className="dashboard-sidebar-footer"
         style={{
           position: "absolute",
           left: 0,
@@ -92,6 +97,7 @@ export default function Sidebar() {
         }}
       >
         <span
+          className="dashboard-sidebar-footer-icon"
           style={{
             display: "inline-flex",
             alignItems: "center",

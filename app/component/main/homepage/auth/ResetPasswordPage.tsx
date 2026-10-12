@@ -76,7 +76,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#f6f5f4", color: "#1f2937", fontFamily: "Inter, Arial, sans-serif" }}>
+    <main className="public-page" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#f6f5f4", color: "#1f2937", fontFamily: "Inter, Arial, sans-serif" }}>
       <section style={{ width: "min(440px, 100%)", padding: 32, border: "1px solid #e5e9e6", borderRadius: 14, background: "#fff", boxShadow: "0 16px 40px rgba(15, 28, 21, 0.08)" }}>
         <h1 style={{ margin: "0 0 8px", fontSize: 24 }}>Reset your password</h1>
         <p style={{ margin: "0 0 24px", color: "#687871", fontSize: 14, lineHeight: 1.5 }}>Choose a new password for your account.</p>

@@ -5,6 +5,7 @@ export default function HomepagePage() {
   return (
     <>
       <main
+        className="public-page public-homepage"
         style={{
           minHeight: "100vh",
           background: "#eef3ef",
@@ -162,7 +163,7 @@ export default function HomepagePage() {
             {[
               "Lowest setup fees",
               "From ৳1,500/mo",
-              "Made for Modern Pharmacies",
+              "Advance Payment Discount",
             ].map((item) => (
               <div
                 key={item}

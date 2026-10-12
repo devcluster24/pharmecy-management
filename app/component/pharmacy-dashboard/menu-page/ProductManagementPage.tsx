@@ -326,10 +326,10 @@ function ProductManagementHeader() {
   const storeName = usePharmacyStoreName();
 
   return (
-    <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
+    <header className="dashboard-navbar" style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
       <PharmacyDashboardBrand />
-      <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
-        <span>{storeName || "Pharmacy Cluster"}</span>
+      <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
+        <span className="dashboard-navbar-store-name">{storeName || "Pharmacy Cluster"}</span>
         <PharmacyProfileMenu />
       </div>
     </header>

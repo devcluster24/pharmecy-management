@@ -69,8 +69,8 @@ export default function DashboardSectionPage({
         }}
       >
         <PharmacyDashboardBrand />
-        <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
-          <PharmacyDashboardStoreName />
+        <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
+          <span className="dashboard-navbar-store-name"><PharmacyDashboardStoreName /></span>
           <PharmacyProfileMenu />
         </div>
       </header>

@@ -50,9 +50,9 @@ export default function PharmacyDashboardBrand() {
   const storeName = usePharmacyStoreName();
 
   return (
-    <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none", minWidth: 0 }}>
+    <Link href="/dashboard" className="dashboard-navbar-brand" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none", minWidth: 0 }}>
       <Image src="/pharmacy-icon.png" alt="" width={28} height={28} aria-hidden="true" style={{ flex: "0 0 28px" }} />
-      <span style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span className="dashboard-navbar-brand-name" style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {storeName || "Pharmacy Cluster"}
       </span>
     </Link>

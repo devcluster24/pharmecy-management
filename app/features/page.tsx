@@ -47,6 +47,7 @@ const features = [
 export default function FeaturesPage() {
   return (
     <main
+      className="public-page"
       style={{
         minHeight: "100vh",
         background: "#eef3ef",

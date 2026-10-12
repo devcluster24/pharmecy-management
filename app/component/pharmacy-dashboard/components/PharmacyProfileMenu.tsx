@@ -84,11 +84,13 @@ export default function PharmacyProfileMenu() {
 
   return (
     <div
+      className="dashboard-profile-menu"
       style={{ position: "relative" }}
       onBlur={closeOnFocusLeave}
     >
       <button
         type="button"
+        className="dashboard-profile-trigger"
         aria-label="User profile menu"
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -115,6 +117,7 @@ export default function PharmacyProfileMenu() {
 
       {isOpen && (
         <div
+          className="dashboard-profile-actions"
           role="menu"
           aria-label="Pharmacy profile actions"
           style={{

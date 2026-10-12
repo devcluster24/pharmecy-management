@@ -28,6 +28,7 @@ const contactMethods = [
 export default function ContactPage() {
   return (
     <main
+      className="public-page"
       style={{
         minHeight: "100vh",
         background: "#eef3ef",

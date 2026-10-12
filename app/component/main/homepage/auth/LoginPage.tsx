@@ -188,6 +188,7 @@ export default function LoginPage() {
 
   return (
     <div
+      className="public-auth-page"
       style={{
         minHeight: "100vh",
         background: "#f6f5f4",
@@ -211,6 +212,7 @@ export default function LoginPage() {
       </div>
 
       <div
+        className="public-auth-layout"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1.2fr",
@@ -218,6 +220,7 @@ export default function LoginPage() {
         }}
       >
         <section
+          className="public-auth-panel"
           style={{
             padding: "52px 52px 40px 52px",
             display: "flex",
@@ -423,6 +426,7 @@ export default function LoginPage() {
         </section>
 
         <section
+          className="public-auth-aside"
           style={{
             position: "relative",
             display: "flex",
@@ -444,6 +448,7 @@ export default function LoginPage() {
           />
 
           <div
+            className="public-auth-promo"
             style={{
               position: "relative",
               zIndex: 1,
@@ -456,31 +461,14 @@ export default function LoginPage() {
               flexWrap: "wrap",
             }}
           >
-            <div
-              style={{
-                width: 42,
-                height: 72,
-                borderRadius: 12,
-                background: "linear-gradient(180deg, #2d2d2d 0%, #b9b9b9 100%)",
-                transform: "skewY(-18deg)",
-                opacity: 0.9,
-              }}
-            />
-
-            <div
-              style={{
-                fontSize: "27px",
-                letterSpacing: "-0.05em",
-                lineHeight: 1.2,
-                color: "#111827",
-              }}
-            >
+            <span className="public-auth-promo-icon" aria-hidden="true">💊</span>
+            <div className="public-auth-promo-text">
               Pharmacy Cluster makes work easier.
-              <span style={{ marginLeft: 8 }}>💊</span>
             </div>
           </div>
 
           <div
+            className="public-auth-signature"
             style={{
               position: "absolute",
               bottom: 110,
@@ -492,16 +480,8 @@ export default function LoginPage() {
               zIndex: 1,
             }}
           >
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: "50%",
-                background: "linear-gradient(135deg, #f6d365, #fda085, #a78bfa)",
-                border: "2px solid #fff",
-              }}
-            />
-            <span style={{ fontSize: 16, color: "#4b5563" }}>Pharmacy Cluster</span>
+            <span className="public-auth-signature-icon" aria-hidden="true">💊</span>
+            <span className="public-auth-signature-text">Pharmacy Cluster</span>
           </div>
         </section>
       </div>
