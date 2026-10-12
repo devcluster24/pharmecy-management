@@ -183,6 +183,7 @@ export default function SalesActions() {
   );
   const [matchingProducts, setMatchingProducts] = useState<SaleProduct[]>([]);
   const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
+  const [isMobileBillOpen, setIsMobileBillOpen] = useState(false);
   const [customerName, setCustomerName] = useState("Walk-in customer");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerSuggestionField, setCustomerSuggestionField] = useState<"name" | "phone" | null>(null);
@@ -199,6 +200,7 @@ export default function SalesActions() {
   const [productError, setProductError] = useState("");
   const [saleSaveError, setSaleSaveError] = useState("");
   const [saleInvoice, setSaleInvoice] = useState<SalesListRow | null>(null);
+  const [expandedInvoiceLineIndex, setExpandedInvoiceLineIndex] = useState<number | null>(null);
   const [invoicePdfError, setInvoicePdfError] = useState("");
   const [expiredProduct, setExpiredProduct] = useState<SaleProduct | null>(null);
   const searchSequence = useRef(0);
@@ -287,10 +289,11 @@ export default function SalesActions() {
       if (event.key !== "Escape") return;
       if (expiredProduct) setExpiredProduct(null);
       else if (batchSelectionLineId) setBatchSelectionLineId(null);
+      else if (isMobileBillOpen) setIsMobileBillOpen(false);
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [batchSelectionLineId, expiredProduct]);
+  }, [batchSelectionLineId, expiredProduct, isMobileBillOpen]);
 
   const totalUnits = saleLines.reduce(
     (total, line) => total + getQuantityTotal(line.quantity),
@@ -522,6 +525,7 @@ export default function SalesActions() {
       setSaleSaveError("");
       setSaleLines([]);
       setSelectedProductIds([]);
+      setIsMobileBillOpen(false);
       setCustomerName("Walk-in customer");
       setCustomerPhone("");
       setCustomerSuggestionField(null);
@@ -537,6 +541,7 @@ export default function SalesActions() {
       setBatchSearchTerm("");
       setIsSearchingProducts(false);
       setSaleInvoice(savedSale);
+      setExpandedInvoiceLineIndex(null);
       setInvoicePdfError("");
       try {
         downloadSaleInvoicePdf(savedSale, storeName);
@@ -575,11 +580,22 @@ export default function SalesActions() {
       >
             <div className="new-sale-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "10px 16px", borderBottom: "1px solid #e9eeea" }}>
               <div>
-                <h2 id="new-sale-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>New Sale</h2>
+                <div className="new-sale-title-row">
+                  <h2 id="new-sale-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>New Sale</h2>
+                  <span className="mobile-bill-action">
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileBillOpen(true)}
+                      style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "6px 12px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}
+                    >
+                      Bill
+                    </button>
+                  </span>
+                </div>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>Search the Product List and add quantities.</p>
               </div>
               <div className="new-sale-customer-fields" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginLeft: "auto" }}>
-                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, minWidth: 180, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "center", gap: 8, minWidth: 250, flex: "1 1 250px", color: "#526158", fontSize: 11, fontWeight: 650 }}>
                   <span>
                     Customer Name <span aria-hidden="true" style={{ color: "#ad4b43" }}>*</span>
                   </span>
@@ -606,7 +622,7 @@ export default function SalesActions() {
                       setCustomerSuggestionField(null);
                     }}
                     placeholder="Walk-in customer"
-                    style={{ ...inputStyle, width: "100%", padding: "7px 9px", fontSize: 12 }}
+                    style={{ ...inputStyle, width: "100%", padding: "5px 8px", fontSize: 10, fontWeight: 400 }}
                   />
                   {customerSuggestionField === "name" && customerSuggestions.length > 0 && (
                     <div id="customer-name-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
@@ -627,7 +643,7 @@ export default function SalesActions() {
                     </div>
                   )}
                 </label>
-                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, minWidth: 160, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "center", gap: 8, minWidth: 250, flex: "1 1 250px", color: "#526158", fontSize: 11, fontWeight: 650 }}>
                   <span>Phone Number <span style={{ color: "#77857d", fontWeight: 400 }}>(optional)</span></span>
                   <input
                     aria-label="Phone Number"
@@ -645,7 +661,7 @@ export default function SalesActions() {
                     }}
                     onBlur={() => setCustomerSuggestionField(null)}
                     placeholder="Enter phone number"
-                    style={{ ...inputStyle, width: "100%", padding: "7px 9px", fontSize: 12 }}
+                    style={{ ...inputStyle, width: "100%", padding: "5px 8px", fontSize: 10, fontWeight: 400 }}
                   />
                   {customerSuggestionField === "phone" && customerSuggestions.length > 0 && (
                     <div id="customer-phone-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
@@ -727,7 +743,6 @@ export default function SalesActions() {
                   </div>
                 )}
               </div>
-
               {saleLines.length > 0 && (
                 <div className="new-sale-line-list" style={{ display: "grid", gap: 10, overflowX: "auto" }}>
                   <div
@@ -753,10 +768,10 @@ export default function SalesActions() {
                       <div key={line.id}>
                       <article className="new-sale-line" style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "4px 0" }}>
                           <div className="new-sale-line-product" style={{ minWidth: 0 }}>
-                          <strong style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <strong className="new-sale-line-brand" style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {[line.product.brand, line.product.strength].filter(Boolean).join(" · ")}
                           </strong>
-                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}>
+                            <div className="new-sale-line-batch-row" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}>
                               {line.selectedBatches.map((batch) => (
                                 <small key={batch.id} style={{ borderRadius: 4, background: "#eef6f1", padding: "3px 5px", color: "#17704e", fontSize: 10, whiteSpace: "nowrap" }}>
                                   {batch.batchNumber || "-"}
@@ -774,17 +789,25 @@ export default function SalesActions() {
                               >
                                 +
                               </button>
+                              {expiredBatches.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpiredProduct(expiredBatches[0])}
+                                  style={{ marginLeft: 4, border: 0, background: "transparent", color: "#b42318", padding: 0, fontSize: 10, cursor: "pointer" }}
+                                >
+                                  Expaired batch info
+                                </button>
+                              )}
                             </div>
-                            {expiredBatches.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setExpiredProduct(expiredBatches[0])}
-                                style={{ marginTop: 4, border: 0, background: "transparent", color: "#b42318", padding: 0, fontSize: 10, cursor: "pointer" }}
-                              >
-                                Expaired batch info
-                              </button>
-                            )}
                           </div>
+                          <button
+                            className="new-sale-line-delete-mobile"
+                            type="button"
+                            aria-label={`Remove ${line.product.brand}`}
+                            onClick={() => void removeProduct(line.id)}
+                          >
+                            X
+                          </button>
                           <span className="new-sale-line-pack" style={{ overflow: "hidden", color: "#526158", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.packSize || "-"}</span>
                           <span className="new-sale-line-box-price" style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(boxPrice)}</span>
                           <span className="new-sale-line-unit-price" style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(unitPrice)}</span>
@@ -810,7 +833,7 @@ export default function SalesActions() {
                                     : currentLine,
                                 ));
                               }}
-                              placeholder={line.selectedBatches.length > 0 ? "0" : "Select batch first"}
+                              placeholder="Quantity"
                               style={{ ...inputStyle, display: "block", width: "100%", padding: "7px 5px", textAlign: "left", opacity: line.selectedBatches.length > 0 ? 1 : 0.55 }}
                             />
                             {quantity > 0 && stockErrorLine?.id === line.id && (
@@ -822,7 +845,7 @@ export default function SalesActions() {
                           <div className="new-sale-line-total" style={{ textAlign: "left" }}>
                             <strong style={{ color: "#17704e", fontSize: 12 }}>{formatPrice(lineTotal)}</strong>
                           </div>
-                          <button className="new-sale-line-delete" type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => void removeProduct(line.id)} style={{ justifySelf: "start", border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "4px 9px", fontSize: 12, cursor: "pointer" }}>Delete</button>
+                          <button className="new-sale-line-delete new-sale-line-delete-desktop" type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => void removeProduct(line.id)} style={{ justifySelf: "start", border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "4px 9px", fontSize: 12, cursor: "pointer" }}>Delete</button>
                         </article>
                       </div>
                     );
@@ -831,8 +854,26 @@ export default function SalesActions() {
               )}
               </div>
 
-              <aside className="new-sale-summary" aria-label="Bill summary" style={{ display: "grid", alignContent: "start", gap: 9, padding: 12, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
-                <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+              {isMobileBillOpen && (
+                <button
+                  type="button"
+                  className="mobile-bill-backdrop"
+                  aria-label="Close bill summary"
+                  onClick={() => setIsMobileBillOpen(false)}
+                />
+              )}
+              <aside className={`new-sale-summary${isMobileBillOpen ? " is-open" : ""}`} aria-label="Bill summary" style={{ display: "grid", alignContent: "start", gap: 9, padding: 12, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                <div className="mobile-bill-summary-header">
+                  <h3 style={{ margin: 0, color: "#20342a", fontSize: 15, fontWeight: 700 }}>Bill Summary</h3>
+                  <button
+                    type="button"
+                    aria-label="Close bill summary"
+                    onClick={() => setIsMobileBillOpen(false)}
+                    style={{ border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "5px 9px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    X
+                  </button>
+                </div>
                 <div style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <span>Total units</span>
@@ -988,6 +1029,106 @@ export default function SalesActions() {
                     </strong>
                   </div>
                 </div>
+                <div className="mobile-bill-customer-fields">
+                  <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                    <span>
+                      Customer Name <span aria-hidden="true" style={{ color: "#ad4b43" }}>*</span>
+                    </span>
+                    <input
+                      aria-label="Customer Name"
+                      role="combobox"
+                      type="text"
+                      required
+                      aria-required="true"
+                      aria-autocomplete="list"
+                      aria-expanded={customerSuggestionField === "name" && customerSuggestions.length > 0}
+                      aria-controls="mobile-customer-name-suggestions"
+                      value={customerName}
+                      onFocus={() => {
+                        setCustomerName((current) => current === "Walk-in customer" ? "" : current);
+                        setCustomerSuggestionField("name");
+                      }}
+                      onChange={(event) => {
+                        setCustomerName(event.currentTarget.value);
+                        setCustomerSuggestionField("name");
+                      }}
+                      onBlur={(event) => {
+                        if (!event.currentTarget.value.trim()) setCustomerName("Walk-in customer");
+                        setCustomerSuggestionField(null);
+                      }}
+                      placeholder="Walk-in customer"
+                      style={{ ...inputStyle, width: "100%", padding: "5px 8px", fontSize: 10, fontWeight: 400 }}
+                    />
+                    {customerSuggestionField === "name" && customerSuggestions.length > 0 && (
+                      <div id="mobile-customer-name-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 52, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
+                        {customerSuggestions.map((customer) => (
+                          <button
+                            key={`${customer.name}-${customer.phone}`}
+                            type="button"
+                            role="option"
+                            aria-selected="false"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectCustomerSuggestion(customer)}
+                            style={{ display: "grid", width: "100%", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#26352f", padding: "8px 10px", textAlign: "left", cursor: "pointer" }}
+                          >
+                            <span style={{ fontSize: 12, fontWeight: 650 }}>{customer.name}</span>
+                            <span style={{ color: "#77857d", fontSize: 11 }}>{customer.phone || "No phone number saved"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </label>
+                  <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                    <span>Phone Number <span style={{ color: "#77857d", fontWeight: 400 }}>(optional)</span></span>
+                    <input
+                      aria-label="Phone Number"
+                      role="combobox"
+                      type="tel"
+                      inputMode="tel"
+                      aria-autocomplete="list"
+                      aria-expanded={customerSuggestionField === "phone" && customerSuggestions.length > 0}
+                      aria-controls="mobile-customer-phone-suggestions"
+                      value={customerPhone}
+                      onFocus={() => setCustomerSuggestionField("phone")}
+                      onChange={(event) => {
+                        setCustomerPhone(event.currentTarget.value);
+                        setCustomerSuggestionField("phone");
+                      }}
+                      onBlur={() => setCustomerSuggestionField(null)}
+                      placeholder="Enter phone number"
+                      style={{ ...inputStyle, width: "100%", padding: "5px 8px", fontSize: 10, fontWeight: 400 }}
+                    />
+                    {customerSuggestionField === "phone" && customerSuggestions.length > 0 && (
+                      <div id="mobile-customer-phone-suggestions" role="listbox" aria-label="Matching customers" style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 52, overflow: "hidden", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 24px rgba(18, 35, 27, 0.14)" }}>
+                        {customerSuggestions.map((customer) => (
+                          <button
+                            key={`${customer.name}-${customer.phone}`}
+                            type="button"
+                            role="option"
+                            aria-selected="false"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectCustomerSuggestion(customer)}
+                            style={{ display: "grid", width: "100%", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#26352f", padding: "8px 10px", textAlign: "left", cursor: "pointer" }}
+                          >
+                            <span style={{ fontSize: 12, fontWeight: 650 }}>{customer.name}</span>
+                            <span style={{ color: "#77857d", fontSize: 11 }}>{customer.phone || "No phone number saved"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </label>
+                </div>
+                <div className="mobile-bill-save-footer">
+                  {saleSaveError && <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>{saleSaveError}</p>}
+                  <button
+                    type="button"
+                    onClick={saveSale}
+                    disabled={!validPayAmount || !validDiscount}
+                    style={{ border: 0, borderRadius: 6, background: validPayAmount && validDiscount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount && validDiscount ? "pointer" : "not-allowed" }}
+                  >
+                    Save
+                  </button>
+                </div>
               </aside>
             </div>
 
@@ -1125,7 +1266,7 @@ export default function SalesActions() {
             <p style={{ margin: "-8px 0 16px", color: "#526158", fontSize: 12 }}>
               Payment Method: <strong>{saleInvoice.paymentMethodName ?? "Cash"}</strong>
             </p>
-            <div style={{ overflowX: "auto" }}>
+            <div className="sale-invoice-desktop-lines" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                 <thead>
                   <tr>
@@ -1149,6 +1290,30 @@ export default function SalesActions() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="sale-invoice-mobile-lines">
+              {saleInvoice.lines?.map((line, index) => (
+                <section className="sale-invoice-mobile-line" key={`${line.brand}-${index}`}>
+                  <button
+                    type="button"
+                    className="sale-invoice-mobile-line-toggle"
+                    aria-expanded={expandedInvoiceLineIndex === index}
+                    onClick={() => setExpandedInvoiceLineIndex((current) => current === index ? null : index)}
+                  >
+                    <strong>{line.brand}</strong>
+                    <span aria-hidden="true">{expandedInvoiceLineIndex === index ? "−" : "+"}</span>
+                  </button>
+                  {expandedInvoiceLineIndex === index && (
+                    <div className="sale-invoice-mobile-line-details">
+                      {line.details && <span>Details: <strong>{line.details}</strong></span>}
+                      <span>Batch: <strong>{line.batchNumber}</strong></span>
+                      <span>Quantity: <strong>{line.quantity}</strong></span>
+                      <span>Unit price: <strong>{formatPrice(line.unitPrice)}</strong></span>
+                      <span>Total: <strong>{formatPrice(line.totalPrice)}</strong></span>
+                    </div>
+                  )}
+                </section>
+              ))}
             </div>
             <div style={{ display: "grid", justifyItems: "end", gap: 6, marginTop: 18, color: "#526158", fontSize: 13 }}>
               {saleInvoice.discountAmount || saleInvoice.taxAmount ? (
