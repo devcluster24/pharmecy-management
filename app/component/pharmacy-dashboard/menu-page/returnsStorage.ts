@@ -5,7 +5,7 @@ import {
 } from "./purchaseStorage";
 import { getPharmacyDataJson, setPharmacyDataBatch, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const RETURNS_STORAGE_KEY = "pharmecy-return-records-v1";
+export const RETURNS_STORAGE_KEY = "pharmacy-return-records-v1";
 
 export type ReturnRecord = {
   id: string;
@@ -33,7 +33,7 @@ export type ReturnsSnapshot = {
 };
 
 export const emptyReturnsSnapshot: ReturnsSnapshot = { rows: [], error: "" };
-const returnsUpdatedEvent = "pharmecy-return-records-updated";
+const returnsUpdatedEvent = "pharmacy-return-records-updated";
 let cachedSnapshot: ReturnsSnapshot | null = null;
 
 function isReturnRecord(value: unknown): value is ReturnRecord {

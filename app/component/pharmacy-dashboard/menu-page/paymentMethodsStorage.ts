@@ -1,7 +1,7 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 import type { StaffPageAction } from "@/lib/pharmacy-staff-permissions";
 
-export const PAYMENT_METHODS_STORAGE_KEY = "pharmecy-payment-methods-v1";
+export const PAYMENT_METHODS_STORAGE_KEY = "pharmacy-payment-methods-v1";
 
 export type PaymentMethod =
   | { id: string; type: "mobile"; name: string; phone: string }
@@ -13,7 +13,7 @@ export type PaymentMethodsSnapshot = {
 };
 
 export const emptyPaymentMethodsSnapshot: PaymentMethodsSnapshot = { rows: [], error: "" };
-const paymentMethodsUpdatedEvent = "pharmecy-payment-methods-updated";
+const paymentMethodsUpdatedEvent = "pharmacy-payment-methods-updated";
 let cachedSnapshot: PaymentMethodsSnapshot | null = null;
 
 function isPaymentMethod(value: unknown): value is PaymentMethod {

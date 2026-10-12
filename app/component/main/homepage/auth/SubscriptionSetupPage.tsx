@@ -259,7 +259,7 @@ export default function SubscriptionSetupPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span aria-hidden="true" style={{ display: "grid", placeItems: "center", width: 26, height: 26, borderRadius: 8, background: "linear-gradient(135deg, #2ad49a, #1ac490)", color: "#fff", fontSize: 14, fontWeight: 800 }}>⚡</span>
             <div>
-              <div style={{ color: "#102d2a", fontSize: 20, fontWeight: 700, letterSpacing: "-0.04em" }}>Pharmecy Cluster</div>
+              <div style={{ color: "#102d2a", fontSize: 20, fontWeight: 700, letterSpacing: "-0.04em" }}>Pharmacy Cluster</div>
               <div style={{ color: "#5f7a73", fontSize: 12 }}>Choose your plan</div>
             </div>
           </div>

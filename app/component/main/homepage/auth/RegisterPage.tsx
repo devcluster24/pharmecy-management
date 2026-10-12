@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "@/app/component/PasswordInput";
 import { supabase } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
@@ -9,6 +11,91 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [hasError, setHasError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hasHandledGoogleCallback = useRef(false);
+
+  useEffect(() => {
+    if (hasHandledGoogleCallback.current) return;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("google_signup") !== "1") return;
+    hasHandledGoogleCallback.current = true;
+
+    async function completeGoogleSignup() {
+      setIsSubmitting(true);
+      setMessage("");
+      setHasError(false);
+
+      try {
+        const oauthError = searchParams.get("error_description");
+        if (oauthError) throw new Error(oauthError);
+
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) throw new Error("Google sign-up did not complete. Please try again.");
+
+        const userId = data.session.user.id;
+        const { data: profile, error: profileError } = await supabase
+          .from("user_profiles")
+          .select("role, approval_status")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profileError || !profile) {
+          throw new Error(profileError?.message ?? "Your account profile is not ready yet.");
+        }
+        if (profile.role !== "pharmacy_user") {
+          throw new Error("This Google account is not registered as a pharmacy account. Please sign in instead.");
+        }
+        if (profile.approval_status !== "approved") {
+          throw new Error("Your account is awaiting approval.");
+        }
+
+        const { data: pharmacy, error: pharmacyError } = await supabase
+          .from("pharmacies")
+          .select("id")
+          .eq("owner_user_id", userId)
+          .maybeSingle();
+
+        if (pharmacyError) throw pharmacyError;
+        router.replace(pharmacy ? "/dashboard" : "/shop-setup");
+      } catch (error) {
+        const errorMessage = error instanceof Error
+          ? error.message
+          : "Could not complete Google sign-up.";
+        let signOutMessage = "";
+        try {
+          const { error: signOutError } = await supabase.auth.signOut();
+          if (signOutError) signOutMessage = ` Sign out also failed: ${signOutError.message}`;
+        } catch (signOutError) {
+          signOutMessage = ` Sign out also failed: ${signOutError instanceof Error ? signOutError.message : "unknown error"}`;
+        }
+        setMessage(`${errorMessage}${signOutMessage}`);
+        setHasError(true);
+        setIsSubmitting(false);
+      }
+    }
+
+    void completeGoogleSignup();
+  }, [router]);
+
+  async function handleGoogleSignup() {
+    setIsSubmitting(true);
+    setMessage("");
+    setHasError(false);
+
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/register?google_signup=1`,
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start Google sign-up.");
+      setHasError(true);
+      setIsSubmitting(false);
+    }
+  }
 
   async function handleSignup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,39 +154,10 @@ export default function RegisterPage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 6,
-              background: "linear-gradient(135deg, #2ad49a, #1ac490)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 900,
-            }}
-          >
-            ⚡
-          </div>
-          <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.04em" }}>Pharmecy Cluster</span>
+          <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
+          <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.04em" }}>Pharmacy Cluster</span>
         </div>
 
-        <button
-          style={{
-            border: "1px solid #dfe4e2",
-            background: "#fff",
-            color: "#1f2937",
-            borderRadius: 10,
-            padding: "10px 16px",
-            fontSize: 14,
-            fontWeight: 500,
-            cursor: "pointer",
-          }}
-        >
-          📘 Documentation
-        </button>
       </div>
 
       <div
@@ -137,6 +195,9 @@ export default function RegisterPage() {
             </p>
 
             <button
+              type="button"
+              onClick={handleGoogleSignup}
+              disabled={isSubmitting}
               style={{
                 width: "100%",
                 border: "1px solid #dfe4e2",
@@ -151,7 +212,8 @@ export default function RegisterPage() {
                 fontSize: 15,
                 fontWeight: 600,
                 marginBottom: 18,
-                cursor: "pointer",
+                cursor: isSubmitting ? "wait" : "pointer",
+                opacity: isSubmitting ? 0.7 : 1,
               }}
             >
               <span
@@ -317,8 +379,7 @@ export default function RegisterPage() {
               </div>
 
               <div style={{ position: "relative" }}>
-                <input
-                  type="password"
+                <PasswordInput
                   name="password"
                   required
                   minLength={8}
@@ -335,18 +396,6 @@ export default function RegisterPage() {
                     boxSizing: "border-box",
                   }}
                 />
-                <span
-                  style={{
-                    position: "absolute",
-                    right: 14,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "#8a9198",
-                    fontSize: 18,
-                  }}
-                >
-                  ◉
-                </span>
               </div>
               </div>
 
@@ -438,8 +487,8 @@ export default function RegisterPage() {
                 color: "#111827",
               }}
             >
-              Pharmecy Cluster
-              <span style={{ color: "#f59e0b", marginLeft: 8 }}>⚡</span>
+              Pharmacy Cluster
+              <span style={{ marginLeft: 8 }}>💊</span>
             </div>
           </div>
 
@@ -464,7 +513,7 @@ export default function RegisterPage() {
                 border: "2px solid #fff",
               }}
             />
-            <span style={{ fontSize: 16, color: "#4b5563" }}>@pharmacy</span>
+            <span style={{ fontSize: 16, color: "#4b5563" }}>@Dev Cluster</span>
           </div>
         </section>
       </div>

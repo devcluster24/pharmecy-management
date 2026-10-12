@@ -72,9 +72,9 @@ type ReturnSummary = {
   refundAmount: number;
 };
 
-const supplierDueAdjustmentStorageKey = "pharmecy-supplier-due-adjustments-v1";
-const supplierDuePaymentStorageKey = "pharmecy-supplier-due-payments-v1";
-const supplierDueLedgerUpdatedEvent = "pharmecy-supplier-dues-updated";
+const supplierDueAdjustmentStorageKey = "pharmacy-supplier-due-adjustments-v1";
+const supplierDuePaymentStorageKey = "pharmacy-supplier-due-payments-v1";
+const supplierDueLedgerUpdatedEvent = "pharmacy-supplier-dues-updated";
 const reportsPerPage = 10;
 const emptySupplierDueLedgerSnapshot: SupplierDueLedgerSnapshot = {
   adjustments: {},

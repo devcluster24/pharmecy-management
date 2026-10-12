@@ -1,3 +1,6 @@
+import Image from "next/image";
+import Link from "next/link";
+
 export default function Navbar() {
   return (
     <header
@@ -21,32 +24,7 @@ export default function Navbar() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "linear-gradient(135deg, #1dcf8d, #19b479)",
-              position: "relative",
-              boxShadow: "0 6px 12px rgba(26,168,119,0.25)",
-            }}
-          >
-            <span
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#fff",
-                fontSize: 18,
-                fontWeight: 700,
-                lineHeight: 1,
-              }}
-            >
-              +
-            </span>
-          </div>
+          <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
           <div
             style={{
               fontSize: 24,
@@ -56,7 +34,7 @@ export default function Navbar() {
               lineHeight: 1,
             }}
           >
-            Pharmecy<span style={{ color: "#1ec688" }}> Cluster</span>
+            Pharmacy<span style={{ color: "#1ec688" }}> Cluster</span>
           </div>
         </div>
 
@@ -73,10 +51,8 @@ export default function Navbar() {
           {[
             "Features",
             "Pricing",
-            "Reviews",
             "FAQ",
             "Contact",
-            "Blog",
           ].map((item) => (
             <a
               key={item}
@@ -93,8 +69,10 @@ export default function Navbar() {
         </nav>
 
         <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          <button
+          <Link
+            href="/login"
             style={{
+              display: "inline-block",
               border: "1px solid rgba(13,44,42,0.1)",
               background: "transparent",
               color: "#0d2c2a",
@@ -103,12 +81,15 @@ export default function Navbar() {
               fontSize: 14,
               fontWeight: 600,
               cursor: "pointer",
+              textDecoration: "none",
             }}
           >
-            Sign In
-          </button>
-          <button
+            Login
+          </Link>
+          <Link
+            href="/register"
             style={{
+              display: "inline-block",
               border: "none",
               background: "#2ad49a",
               color: "#082a28",
@@ -118,10 +99,11 @@ export default function Navbar() {
               fontWeight: 600,
               cursor: "pointer",
               boxShadow: "0 10px 20px rgba(42,212,154,0.25)",
+              textDecoration: "none",
             }}
           >
             Get Started <span style={{ marginLeft: 10 }}>→</span>
-          </button>
+          </Link>
         </div>
       </div>
     </header>

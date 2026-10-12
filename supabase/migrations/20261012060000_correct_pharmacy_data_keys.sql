@@ -1,0 +1,98 @@
+create or replace function public.pharmacy_data_page(requested_key text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case requested_key
+    when 'pharmacy-sales-list-v1' then 'sales'
+    when 'pharmacy-purchase-list-v1' then 'purchase'
+    when 'pharmacy-place-order-list-v1' then 'purchase'
+    when 'pharmacy-expenses-v1' then 'expenses'
+    when 'pharmacy-return-records-v1' then 'returns'
+    when 'pharmacy-low-stock-threshold-v1' then 'settings'
+    when 'pharmacy-payment-methods-v1' then 'settings'
+    when 'pharmacy-vat-tax-settings-v1' then 'settings'
+    when 'pharmacy-return-deduction-settings-v1' then 'settings'
+    when 'pharmacy-invoice-templates-v1' then 'settings'
+    when 'pharmacy-supplier-status-v1' then 'suppliers'
+    when 'pharmacy-supplier-due-adjustments-v1' then 'suppliers'
+    when 'pharmacy-supplier-due-payments-v1' then 'suppliers'
+  end;
+$$;
+
+alter table public.pharmacy_app_data
+  drop constraint if exists pharmacy_app_data_data_key_check;
+
+insert into public.pharmacy_app_data as existing_data (
+  owner_user_id,
+  data_key,
+  payload,
+  updated_at
+)
+select
+  owner_user_id,
+  replace(data_key, 'pharmecy', 'pharmacy'),
+  payload,
+  updated_at
+from public.pharmacy_app_data
+where data_key like 'pharmecy-%'
+on conflict (owner_user_id, data_key) do update
+set payload = excluded.payload,
+    updated_at = excluded.updated_at
+where excluded.updated_at > existing_data.updated_at;
+
+delete from public.pharmacy_app_data
+where data_key like 'pharmecy-%';
+
+alter table public.pharmacy_app_data
+  add constraint pharmacy_app_data_data_key_check check (
+    data_key in (
+      'pharmacy-sales-list-v1',
+      'pharmacy-purchase-list-v1',
+      'pharmacy-place-order-list-v1',
+      'pharmacy-expenses-v1',
+      'pharmacy-return-records-v1',
+      'pharmacy-low-stock-threshold-v1',
+      'pharmacy-payment-methods-v1',
+      'pharmacy-vat-tax-settings-v1',
+      'pharmacy-return-deduction-settings-v1',
+      'pharmacy-invoice-templates-v1',
+      'pharmacy-supplier-status-v1',
+      'pharmacy-supplier-due-adjustments-v1',
+      'pharmacy-supplier-due-payments-v1'
+    )
+  );
+
+drop policy if exists pharmacy_app_data_owner_access
+  on public.pharmacy_app_data;
+create policy pharmacy_app_data_owner_access
+on public.pharmacy_app_data
+for select to authenticated
+using (
+  (
+    owner_user_id = (select auth.uid())
+    and exists (
+      select 1
+      from public.user_profiles as profile
+      where profile.id = (select auth.uid())
+        and profile.role = 'pharmacy_user'
+        and profile.approval_status = 'approved'
+    )
+  )
+  or (
+    (select public.pharmacy_user_can_access_page(
+      owner_user_id,
+      public.pharmacy_data_page(data_key),
+      'view'
+    ))
+    or (
+      data_key in (
+        'pharmacy-supplier-status-v1',
+        'pharmacy-supplier-due-adjustments-v1',
+        'pharmacy-supplier-due-payments-v1'
+      )
+      and (select public.pharmacy_user_can_access_page(owner_user_id, 'reports', 'view'))
+    )
+  )
+);

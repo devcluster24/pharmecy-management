@@ -58,10 +58,40 @@ class ProductCollectionAccessError extends Error {
   }
 }
 
-const PRODUCT_STORAGE_KEY = "pharmecy-medex-collected-products";
+const PRODUCT_STORAGE_KEY = "pharmacy-medex-collected-products";
 const PRODUCT_CHUNK_SIZE = 250;
-const PROGRESS_STORAGE_KEY = "pharmecy-medex-collection-progress";
+const PROGRESS_STORAGE_KEY = "pharmacy-medex-collection-progress";
+const LEGACY_PRODUCT_STORAGE_KEY = "pharmecy-medex-collected-products";
+const LEGACY_PROGRESS_STORAGE_KEY = "pharmecy-medex-collection-progress";
 const MAX_UNKNOWN_LISTING_PAGE_FAILURES = 3;
+
+function migrateLegacyProductStorage() {
+  const legacyManifest = localStorage.getItem(LEGACY_PRODUCT_STORAGE_KEY);
+  if (legacyManifest !== null && localStorage.getItem(PRODUCT_STORAGE_KEY) === null) {
+    localStorage.setItem(PRODUCT_STORAGE_KEY, legacyManifest);
+  }
+
+  const legacyProgress = localStorage.getItem(LEGACY_PROGRESS_STORAGE_KEY);
+  if (legacyProgress !== null && localStorage.getItem(PROGRESS_STORAGE_KEY) === null) {
+    localStorage.setItem(PROGRESS_STORAGE_KEY, legacyProgress);
+  }
+
+  const legacyChunkPrefix = `${LEGACY_PRODUCT_STORAGE_KEY}:chunk:`;
+  const productChunkPrefix = `${PRODUCT_STORAGE_KEY}:chunk:`;
+  const legacyChunkKeys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+    .filter((key): key is string => key !== null && key.startsWith(legacyChunkPrefix));
+  for (const legacyChunkKey of legacyChunkKeys) {
+    const newChunkKey = `${productChunkPrefix}${legacyChunkKey.slice(legacyChunkPrefix.length)}`;
+    if (localStorage.getItem(newChunkKey) === null) {
+      const chunk = localStorage.getItem(legacyChunkKey);
+      if (chunk !== null) localStorage.setItem(newChunkKey, chunk);
+    }
+    localStorage.removeItem(legacyChunkKey);
+  }
+
+  localStorage.removeItem(LEGACY_PRODUCT_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_PROGRESS_STORAGE_KEY);
+}
 
 const fieldStyle = {
   boxSizing: "border-box" as const,
@@ -423,6 +453,7 @@ export default function DataCollectPage() {
 
     async function loadSavedData() {
       try {
+        migrateLegacyProductStorage();
         setHasSavedData(
           localStorage.getItem(PRODUCT_STORAGE_KEY) !== null ||
           localStorage.getItem(PROGRESS_STORAGE_KEY) !== null ||

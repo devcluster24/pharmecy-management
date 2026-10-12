@@ -1,7 +1,7 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const INVOICE_TEMPLATE_SETTINGS_KEY = "pharmecy-invoice-templates-v1" as const;
-const invoiceTemplateUpdatedEvent = "pharmecy-invoice-templates-updated";
+export const INVOICE_TEMPLATE_SETTINGS_KEY = "pharmacy-invoice-templates-v1" as const;
+const invoiceTemplateUpdatedEvent = "pharmacy-invoice-templates-updated";
 const maxTemplateItems = 8;
 const maxSignatureImageLength = 2_800_000;
 

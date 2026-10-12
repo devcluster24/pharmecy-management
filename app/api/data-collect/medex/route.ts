@@ -68,7 +68,7 @@ async function fetchMedexHtml(startUrl: URL) {
       signal: AbortSignal.timeout(20_000),
       headers: {
         Accept: "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; PharmecyDataCollector/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; PharmacyDataCollector/1.0)",
       },
     });
 

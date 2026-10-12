@@ -1,6 +1,6 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const VAT_TAX_SETTINGS_STORAGE_KEY = "pharmecy-vat-tax-settings-v1";
+export const VAT_TAX_SETTINGS_STORAGE_KEY = "pharmacy-vat-tax-settings-v1";
 
 export type VatTaxSettingsSnapshot = {
   defaultRate: number;
@@ -12,7 +12,7 @@ export const emptyVatTaxSettingsSnapshot: VatTaxSettingsSnapshot = {
   error: "",
 };
 
-const vatTaxSettingsUpdatedEvent = "pharmecy-vat-tax-settings-updated";
+const vatTaxSettingsUpdatedEvent = "pharmacy-vat-tax-settings-updated";
 let cachedSnapshot: VatTaxSettingsSnapshot | null = null;
 
 function readSnapshot(): VatTaxSettingsSnapshot {

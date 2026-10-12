@@ -1,6 +1,6 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const EXPENSES_STORAGE_KEY = "pharmecy-expenses-v1";
+export const EXPENSES_STORAGE_KEY = "pharmacy-expenses-v1";
 
 export type ExpenseRecord = {
   id: string;
@@ -18,7 +18,7 @@ export type ExpensesSnapshot = {
 };
 
 export const emptyExpensesSnapshot: ExpensesSnapshot = { rows: [], error: "" };
-const expensesUpdatedEvent = "pharmecy-expenses-updated";
+const expensesUpdatedEvent = "pharmacy-expenses-updated";
 let cachedSnapshot: ExpensesSnapshot | null = null;
 
 function isExpenseRecord(value: unknown): value is ExpenseRecord {

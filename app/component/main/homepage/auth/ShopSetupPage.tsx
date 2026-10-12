@@ -167,7 +167,7 @@ export default function ShopSetupPage() {
               ⚡
             </div>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.04em" }}>Pharmecy Cluster</div>
+              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.04em" }}>Pharmacy Cluster</div>
               <div style={{ fontSize: 12, color: "#5f7a73" }}>Setup your pharmacy</div>
             </div>
           </div>

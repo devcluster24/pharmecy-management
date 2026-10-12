@@ -5,7 +5,7 @@ import {
 } from "./purchaseStorage";
 import { getPharmacyDataJson, setPharmacyDataBatch } from "@/lib/pharmacy-data-sync";
 
-export const SALES_STORAGE_KEY = "pharmecy-sales-list-v1";
+export const SALES_STORAGE_KEY = "pharmacy-sales-list-v1";
 
 export type SalesInvoiceItem = {
   brand: string;
@@ -51,7 +51,7 @@ export type SalesListSnapshot = {
 };
 
 export const emptySalesListSnapshot: SalesListSnapshot = { rows: [], error: "" };
-const salesListUpdatedEvent = "pharmecy-sales-list-updated";
+const salesListUpdatedEvent = "pharmacy-sales-list-updated";
 let cachedSnapshot: SalesListSnapshot | null = null;
 
 export function getCashRoundingAmount(amount: number) {

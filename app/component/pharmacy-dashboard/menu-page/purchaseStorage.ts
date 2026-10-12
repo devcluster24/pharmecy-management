@@ -1,7 +1,7 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const PURCHASE_STORAGE_KEY = "pharmecy-purchase-list-v1";
-export const PLACE_ORDER_STORAGE_KEY = "pharmecy-place-order-list-v1";
+export const PURCHASE_STORAGE_KEY = "pharmacy-purchase-list-v1";
+export const PLACE_ORDER_STORAGE_KEY = "pharmacy-place-order-list-v1";
 
 export type PurchaseListRow = {
   id: string;
@@ -45,7 +45,7 @@ export type GroupedPurchaseOrder = {
 };
 
 export const emptyPurchaseListSnapshot: PurchaseListSnapshot = { rows: [], error: "" };
-const purchaseListUpdatedEvent = "pharmecy-purchase-list-updated";
+const purchaseListUpdatedEvent = "pharmacy-purchase-list-updated";
 let cachedSnapshot: PurchaseListSnapshot | null = null;
 let cachedPlaceOrderSnapshot: PurchaseListSnapshot | null = null;
 

@@ -5,19 +5,19 @@ import {
 } from "@/lib/pharmacy-staff-permissions";
 
 export const pharmacyDataKeys = [
-  "pharmecy-sales-list-v1",
-  "pharmecy-purchase-list-v1",
-  "pharmecy-place-order-list-v1",
-  "pharmecy-expenses-v1",
-  "pharmecy-return-records-v1",
-  "pharmecy-low-stock-threshold-v1",
-  "pharmecy-payment-methods-v1",
-  "pharmecy-vat-tax-settings-v1",
-  "pharmecy-return-deduction-settings-v1",
-  "pharmecy-invoice-templates-v1",
-  "pharmecy-supplier-status-v1",
-  "pharmecy-supplier-due-adjustments-v1",
-  "pharmecy-supplier-due-payments-v1",
+  "pharmacy-sales-list-v1",
+  "pharmacy-purchase-list-v1",
+  "pharmacy-place-order-list-v1",
+  "pharmacy-expenses-v1",
+  "pharmacy-return-records-v1",
+  "pharmacy-low-stock-threshold-v1",
+  "pharmacy-payment-methods-v1",
+  "pharmacy-vat-tax-settings-v1",
+  "pharmacy-return-deduction-settings-v1",
+  "pharmacy-invoice-templates-v1",
+  "pharmacy-supplier-status-v1",
+  "pharmacy-supplier-due-adjustments-v1",
+  "pharmacy-supplier-due-payments-v1",
 ] as const;
 
 export type PharmacyDataKey = (typeof pharmacyDataKeys)[number];
@@ -25,27 +25,27 @@ type SyncState = "idle" | "syncing" | "synced" | "error";
 type SyncStatus = { state: SyncState; message: string; lastSyncedAt: number | null };
 type CloudDataRow = { data_key: string; payload: unknown };
 
-const syncStatusEvent = "pharmecy-data-sync-status";
+const syncStatusEvent = "pharmacy-data-sync-status";
 const localCacheKeys = [
   ...pharmacyDataKeys,
   "pharmacy-cluster-products",
-  "pharmecy-data-sync-owner-v1",
-  "pharmecy-data-sync-state-v1",
+  "pharmacy-data-sync-owner-v1",
+  "pharmacy-data-sync-state-v1",
 ] as const;
 const keyEvents: Record<PharmacyDataKey, string> = {
-  "pharmecy-sales-list-v1": "pharmecy-sales-list-updated",
-  "pharmecy-purchase-list-v1": "pharmecy-purchase-list-updated",
-  "pharmecy-place-order-list-v1": "pharmecy-purchase-list-updated",
-  "pharmecy-expenses-v1": "pharmecy-expenses-updated",
-  "pharmecy-return-records-v1": "pharmecy-return-records-updated",
-  "pharmecy-low-stock-threshold-v1": "pharmecy-low-stock-threshold-updated",
-  "pharmecy-payment-methods-v1": "pharmecy-payment-methods-updated",
-  "pharmecy-vat-tax-settings-v1": "pharmecy-vat-tax-settings-updated",
-  "pharmecy-return-deduction-settings-v1": "pharmecy-return-deduction-settings-updated",
-  "pharmecy-invoice-templates-v1": "pharmecy-invoice-templates-updated",
-  "pharmecy-supplier-status-v1": "pharmecy-supplier-dues-updated",
-  "pharmecy-supplier-due-adjustments-v1": "pharmecy-supplier-dues-updated",
-  "pharmecy-supplier-due-payments-v1": "pharmecy-supplier-dues-updated",
+  "pharmacy-sales-list-v1": "pharmacy-sales-list-updated",
+  "pharmacy-purchase-list-v1": "pharmacy-purchase-list-updated",
+  "pharmacy-place-order-list-v1": "pharmacy-purchase-list-updated",
+  "pharmacy-expenses-v1": "pharmacy-expenses-updated",
+  "pharmacy-return-records-v1": "pharmacy-return-records-updated",
+  "pharmacy-low-stock-threshold-v1": "pharmacy-low-stock-threshold-updated",
+  "pharmacy-payment-methods-v1": "pharmacy-payment-methods-updated",
+  "pharmacy-vat-tax-settings-v1": "pharmacy-vat-tax-settings-updated",
+  "pharmacy-return-deduction-settings-v1": "pharmacy-return-deduction-settings-updated",
+  "pharmacy-invoice-templates-v1": "pharmacy-invoice-templates-updated",
+  "pharmacy-supplier-status-v1": "pharmacy-supplier-dues-updated",
+  "pharmacy-supplier-due-adjustments-v1": "pharmacy-supplier-dues-updated",
+  "pharmacy-supplier-due-payments-v1": "pharmacy-supplier-dues-updated",
 };
 
 const emptySyncStatus: SyncStatus = { state: "idle", message: "", lastSyncedAt: null };
@@ -120,19 +120,19 @@ export function getPharmacyDataJson(key: PharmacyDataKey) {
 }
 
 const dataKeyPages: Record<PharmacyDataKey, string> = {
-  "pharmecy-sales-list-v1": "sales",
-  "pharmecy-purchase-list-v1": "purchase",
-  "pharmecy-place-order-list-v1": "purchase",
-  "pharmecy-expenses-v1": "expenses",
-  "pharmecy-return-records-v1": "returns",
-  "pharmecy-low-stock-threshold-v1": "settings",
-  "pharmecy-payment-methods-v1": "settings",
-  "pharmecy-vat-tax-settings-v1": "settings",
-  "pharmecy-return-deduction-settings-v1": "settings",
-  "pharmecy-invoice-templates-v1": "settings",
-  "pharmecy-supplier-status-v1": "suppliers",
-  "pharmecy-supplier-due-adjustments-v1": "suppliers",
-  "pharmecy-supplier-due-payments-v1": "suppliers",
+  "pharmacy-sales-list-v1": "sales",
+  "pharmacy-purchase-list-v1": "purchase",
+  "pharmacy-place-order-list-v1": "purchase",
+  "pharmacy-expenses-v1": "expenses",
+  "pharmacy-return-records-v1": "returns",
+  "pharmacy-low-stock-threshold-v1": "settings",
+  "pharmacy-payment-methods-v1": "settings",
+  "pharmacy-vat-tax-settings-v1": "settings",
+  "pharmacy-return-deduction-settings-v1": "settings",
+  "pharmacy-invoice-templates-v1": "settings",
+  "pharmacy-supplier-status-v1": "suppliers",
+  "pharmacy-supplier-due-adjustments-v1": "suppliers",
+  "pharmacy-supplier-due-payments-v1": "suppliers",
 };
 
 export function setPharmacyDataJson(

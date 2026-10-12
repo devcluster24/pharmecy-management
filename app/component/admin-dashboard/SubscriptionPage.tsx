@@ -735,7 +735,7 @@ export default function SubscriptionPage() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "18px 20px", borderBottom: "1px solid #edf0ed" }}>
                   <div>
-                    <p style={{ margin: "0 0 5px", color: "#16845d", fontSize: 10, fontWeight: 750, letterSpacing: 0.8 }}>PHARMECY CLUSTER</p>
+                    <p style={{ margin: "0 0 5px", color: "#16845d", fontSize: 10, fontWeight: 750, letterSpacing: 0.8 }}>PHARMACY CLUSTER</p>
                     <h2 id="subscription-dialog-title" style={{ margin: 0, color: "#203128", fontSize: 17, fontWeight: 750 }}>Payment Invoice · {selectedPaymentInvoice.invoice_number}</h2>
                   </div>
                   <button type="button" aria-label="Close invoice" onClick={() => setSelectedPaymentInvoice(null)} style={{ alignSelf: "flex-start", border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>

@@ -15,10 +15,10 @@ import {
 } from "./paymentMethodsStorage";
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-const supplierStatusStorageKey = "pharmecy-supplier-status-v1";
-const supplierDueAdjustmentStorageKey = "pharmecy-supplier-due-adjustments-v1";
-const supplierDuePaymentStorageKey = "pharmecy-supplier-due-payments-v1";
-const supplierDueLedgerUpdatedEvent = "pharmecy-supplier-dues-updated";
+const supplierStatusStorageKey = "pharmacy-supplier-status-v1";
+const supplierDueAdjustmentStorageKey = "pharmacy-supplier-due-adjustments-v1";
+const supplierDuePaymentStorageKey = "pharmacy-supplier-due-payments-v1";
+const supplierDueLedgerUpdatedEvent = "pharmacy-supplier-dues-updated";
 const SUPPLIERS_PER_PAGE = 10;
 type SupplierStatus = "Active" | "Inactive";
 type SupplierStatusSnapshot = { statuses: Record<string, SupplierStatus>; error: string };

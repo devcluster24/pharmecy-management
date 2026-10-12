@@ -1,7 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "@/app/component/PasswordInput";
 import { supabase } from "@/lib/supabase/client";
 import { dashboardNavItems } from "@/app/component/pharmacy-dashboard/navigation";
 import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
@@ -11,6 +13,9 @@ export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
+  const emailInputRef = useRef<HTMLInputElement>(null);
   const hasHandledGoogleCallback = useRef(false);
 
   const completeSignIn = useCallback(async (userId: string) => {
@@ -134,20 +139,10 @@ export default function LoginPage() {
     setMessage("");
 
     const formData = new FormData(event.currentTarget);
-    const loginId = String(formData.get("login_id") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
 
-    const isPhone = !loginId.includes("@");
-    const phone = loginId.replace(/[^\d+]/g, "");
-    if (isPhone && !/^\+[1-9]\d{6,14}$/.test(phone)) {
-      setMessage("Enter your phone number in international format, for example +8801XXXXXXXXX.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signInWithPassword(isPhone
-      ? { phone, password }
-      : { email: loginId.toLowerCase(), password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error || !data.user) {
       setMessage(error?.message ?? "Sign in failed. Please try again.");
@@ -160,6 +155,34 @@ export default function LoginPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed. Please try again.");
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    const email = emailInputRef.current?.value.trim().toLowerCase() ?? "";
+    if (!email) {
+      setResetMessage("Enter your email address first.");
+      emailInputRef.current?.focus();
+      return;
+    }
+    if (!emailInputRef.current?.checkValidity()) {
+      setResetMessage("Enter a valid email address.");
+      emailInputRef.current?.focus();
+      return;
+    }
+
+    setIsSendingReset(true);
+    setResetMessage("");
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      setResetMessage("If an account exists for this email, a password reset link has been sent.");
+    } catch (error) {
+      setResetMessage(error instanceof Error ? error.message : "Could not send the password reset email.");
+    } finally {
+      setIsSendingReset(false);
     }
   }
 
@@ -181,39 +204,10 @@ export default function LoginPage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 6,
-              background: "linear-gradient(135deg, #2ad49a, #1ac490)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 900,
-            }}
-          >
-            ⚡
-          </div>
-          <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.04em" }}>Pharmecy Cluster</span>
+          <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
+          <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.04em" }}>Pharmacy Cluster</span>
         </div>
 
-        <button
-          style={{
-            border: "1px solid #dfe4e2",
-            background: "#fff",
-            color: "#1f2937",
-            borderRadius: 10,
-            padding: "10px 16px",
-            fontSize: 14,
-            fontWeight: 500,
-            cursor: "pointer",
-          }}
-        >
-          📘 Documentation
-        </button>
       </div>
 
       <div
@@ -315,6 +309,7 @@ export default function LoginPage() {
             <form onSubmit={handleLogin}>
             <div style={{ marginBottom: 18 }}>
               <label
+                htmlFor="login-email"
                 style={{
                   display: "block",
                   marginBottom: 8,
@@ -323,14 +318,16 @@ export default function LoginPage() {
                   fontWeight: 500,
                 }}
               >
-                Email or Phone Number
+                Email
               </label>
               <input
-                type="text"
-                name="login_id"
+                ref={emailInputRef}
+                id="login-email"
+                type="email"
+                name="email"
                 required
-                autoComplete="username"
-                placeholder="you@example.com or +8801XXXXXXXXX"
+                autoComplete="email"
+                placeholder="you@example.com"
                 style={{
                   width: "100%",
                   background: "#fff",
@@ -355,6 +352,7 @@ export default function LoginPage() {
                 }}
               >
                 <label
+                  htmlFor="login-password"
                   style={{
                     fontSize: 14,
                     color: "#1f2937",
@@ -363,12 +361,19 @@ export default function LoginPage() {
                 >
                   Password
                 </label>
-                <span style={{ fontSize: 16, color: "#4b5563" }}>Forgot password?</span>
+                <button
+                  type="button"
+                  onClick={() => void handleForgotPassword()}
+                  disabled={isSendingReset}
+                  style={{ border: 0, padding: 0, background: "transparent", color: "#4b5563", fontSize: 14, cursor: isSendingReset ? "wait" : "pointer" }}
+                >
+                  {isSendingReset ? "Sending..." : "Forgot password?"}
+                </button>
               </div>
 
               <div style={{ position: "relative" }}>
-                <input
-                  type="password"
+                <PasswordInput
+                  id="login-password"
                   name="password"
                   required
                   autoComplete="current-password"
@@ -385,18 +390,6 @@ export default function LoginPage() {
                     boxSizing: "border-box",
                   }}
                 />
-                <span
-                  style={{
-                    position: "absolute",
-                    right: 14,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "#8a9198",
-                    fontSize: 18,
-                  }}
-                >
-                  ◉
-                </span>
               </div>
             </div>
 
@@ -420,6 +413,7 @@ export default function LoginPage() {
               {isSubmitting ? "Signing in..." : "Sign in"}
             </button>
             {message && <p role="alert" style={{ margin: "-12px 0 18px", color: "#ad4b43", fontSize: 13 }}>{message}</p>}
+            {resetMessage && <p role="status" style={{ margin: "-12px 0 18px", color: resetMessage.startsWith("If an account exists") ? "#17704e" : "#ad4b43", fontSize: 13 }}>{resetMessage}</p>}
             </form>
 
             <div style={{ textAlign: "center", fontSize: 14, color: "#4b5563" }}>
@@ -475,14 +469,14 @@ export default function LoginPage() {
 
             <div
               style={{
-                fontSize: "54px",
+                fontSize: "27px",
                 letterSpacing: "-0.05em",
                 lineHeight: 1.2,
                 color: "#111827",
               }}
             >
-              Supabase is really good.
-              <span style={{ color: "#f59e0b", marginLeft: 8 }}>⚡</span>
+              Pharmacy Cluster makes work easier.
+              <span style={{ marginLeft: 8 }}>💊</span>
             </div>
           </div>
 
@@ -507,7 +501,7 @@ export default function LoginPage() {
                 border: "2px solid #fff",
               }}
             />
-            <span style={{ fontSize: 16, color: "#4b5563" }}>@shadcn</span>
+            <span style={{ fontSize: 16, color: "#4b5563" }}>Pharmacy Cluster</span>
           </div>
         </section>
       </div>

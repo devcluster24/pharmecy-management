@@ -1,6 +1,6 @@
 import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
 
-export const LOW_STOCK_THRESHOLD_STORAGE_KEY = "pharmecy-low-stock-threshold-v1";
+export const LOW_STOCK_THRESHOLD_STORAGE_KEY = "pharmacy-low-stock-threshold-v1";
 
 export type LowStockThresholdSnapshot = {
   threshold: string;
@@ -12,7 +12,7 @@ export const emptyLowStockThresholdSnapshot: LowStockThresholdSnapshot = {
   error: "",
 };
 
-const lowStockThresholdUpdatedEvent = "pharmecy-low-stock-threshold-updated";
+const lowStockThresholdUpdatedEvent = "pharmacy-low-stock-threshold-updated";
 let cachedSnapshot: LowStockThresholdSnapshot | null = null;
 
 export function getLowStockThresholdSnapshot() {

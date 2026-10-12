@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "@/app/component/PasswordInput";
 import AdminDashboardShell from "./AdminDashboardShell";
 import { supabase } from "@/lib/supabase/client";
 
@@ -165,7 +166,7 @@ export default function UserManagementPage() {
             <label style={{ display: "grid", gap: 5, color: "#66756d", fontSize: 11 }}>Username<input aria-label="Admin username" required minLength={3} value={adminForm.username} onChange={(event) => setAdminForm((current) => ({ ...current, username: event.target.value }))} style={inputStyle} /></label>
             <label style={{ display: "grid", gap: 5, color: "#66756d", fontSize: 11 }}>Email<input aria-label="Admin email" required type="email" value={adminForm.email} onChange={(event) => setAdminForm((current) => ({ ...current, email: event.target.value }))} style={inputStyle} /></label>
             <label style={{ display: "grid", gap: 5, color: "#66756d", fontSize: 11 }}>Phone<input aria-label="Admin phone" type="tel" value={adminForm.phone} onChange={(event) => setAdminForm((current) => ({ ...current, phone: event.target.value }))} style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 5, color: "#66756d", fontSize: 11 }}>Temporary password<input aria-label="Temporary password" required type="password" minLength={8} value={adminForm.password} onChange={(event) => setAdminForm((current) => ({ ...current, password: event.target.value }))} style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 5, color: "#66756d", fontSize: 11 }}>Temporary password<PasswordInput aria-label="Temporary password" required minLength={8} value={adminForm.password} onChange={(event) => setAdminForm((current) => ({ ...current, password: event.target.value }))} style={inputStyle} /></label>
             <button type="submit" disabled={isSaving || !isSuperadmin} style={{ ...buttonStyle, minHeight: 34, border: 0, background: isSaving ? "#9bb8a9" : "#18845d", color: "#fff", opacity: isSuperadmin ? 1 : 0.6 }}>Create admin</button>
           </form>
         </section>

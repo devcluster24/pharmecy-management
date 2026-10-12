@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import PasswordInput from "@/app/component/PasswordInput";
 import { supabase } from "@/lib/supabase/client";
 
 const fieldStyle = {
@@ -135,7 +136,7 @@ export default function StaffSignupPage({ token }: { token: string }) {
       <section style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "48px clamp(24px, 7vw, 80px)" }}>
         <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 44, color: "#1f2937", textDecoration: "none" }}>
           <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "linear-gradient(135deg, #2ad49a, #1ac490)", color: "#fff", fontSize: 14, fontWeight: 900 }}>⚡</span>
-          <strong style={{ fontSize: 18, fontWeight: 650 }}>Pharmecy Cluster</strong>
+          <strong style={{ fontSize: 18, fontWeight: 650 }}>Pharmacy Cluster</strong>
         </Link>
         <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>
           <span style={{ color: "#1d7059", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>STAFF INVITATION</span>
@@ -180,7 +181,7 @@ export default function StaffSignupPage({ token }: { token: string }) {
                 </label>
                 <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>
                   Password
-                  <input name="password" required type="password" minLength={8} autoComplete="new-password" placeholder="At least 8 characters" style={fieldStyle} />
+                  <PasswordInput name="password" required minLength={8} autoComplete="new-password" placeholder="At least 8 characters" style={fieldStyle} />
                 </label>
                 <button type="submit" disabled={isSubmitting || isCompletingGoogleSignup} style={{ border: 0, borderRadius: 10, padding: "12px 16px", background: "#2ad49a", color: "#042b22", fontSize: 13, fontWeight: 700, cursor: isSubmitting || isCompletingGoogleSignup ? "wait" : "pointer", opacity: isSubmitting || isCompletingGoogleSignup ? 0.7 : 1 }}>
                   {isSubmitting ? "Creating account..." : "Create staff account"}
@@ -196,7 +197,7 @@ export default function StaffSignupPage({ token }: { token: string }) {
       </section>
       <aside style={{ display: "grid", placeItems: "center", overflow: "hidden", borderLeft: "1px solid #e5e5e4", backgroundColor: "#f4f3f2", backgroundImage: "radial-gradient(#dfe3df 1.4px, transparent 1.4px)", backgroundSize: "18px 18px" }}>
         <div style={{ padding: 32, color: "#111827", textAlign: "center" }}>
-          <span style={{ color: "#1d7059", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>PHARMECY CLUSTER</span>
+          <span style={{ color: "#1d7059", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>PHARMACY CLUSTER</span>
           <h2 style={{ margin: "14px 0 0", fontSize: 36, lineHeight: 1.15, fontWeight: 700 }}>Welcome to your pharmacy team</h2>
         </div>
       </aside>
