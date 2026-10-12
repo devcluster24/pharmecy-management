@@ -23,7 +23,7 @@ export default function Navbar() {
           padding: "0 30px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Link href="/" aria-label="Pharmacy Cluster home" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", cursor: "pointer" }}>
           <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
           <div
             style={{
@@ -36,7 +36,7 @@ export default function Navbar() {
           >
             Pharmacy<span style={{ color: "#1ec688" }}> Cluster</span>
           </div>
-        </div>
+        </Link>
 
         <nav
           style={{

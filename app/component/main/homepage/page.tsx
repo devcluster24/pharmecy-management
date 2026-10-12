@@ -15,6 +15,7 @@ export default function HomepagePage() {
         }}
       >
         <div
+          aria-hidden="true"
           style={{
             position: "absolute",
             inset: 0,
@@ -37,7 +38,7 @@ export default function HomepagePage() {
             alignItems: "center",
             justifyContent: "center",
             textAlign: "center",
-            padding: "72px 24px 90px",
+            padding: "72px 24px 130px",
           }}
         >
           <div
@@ -96,9 +97,7 @@ export default function HomepagePage() {
               fontWeight: 400,
             }}
           >
-            The all-in-one pharmacy management system built for Bangladesh. POS,
-            inventory, expiry tracking, profit analytics — everything to grow your
-            business.
+           Simplify your pharmacy operations with Pharmacy Cluster. Manage sales, stock, purchases, expiry dates, and profits — all in one smart platform designed to help your pharmacy grow.
           </p>
 
           <div
@@ -162,8 +161,8 @@ export default function HomepagePage() {
           >
             {[
               "Lowest setup fees",
-              "From ৳1,000/mo",
-              "Works on any device",
+              "From ৳1,500/mo",
+              "Made for Modern Pharmacies",
             ].map((item) => (
               <div
                 key={item}
@@ -180,27 +179,40 @@ export default function HomepagePage() {
           </div>
         </section>
 
-        <div
+        <footer
           style={{
-            position: "fixed",
-            right: 26,
-            bottom: 26,
-            width: 58,
-            height: 58,
-            borderRadius: "50%",
-            background: "#2ad49a",
+            position: "absolute",
+            right: 0,
+            bottom: 0,
+            zIndex: 1,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#fff",
-            fontSize: 32,
-            fontWeight: 700,
-            boxShadow: "0 10px 25px rgba(42,212,154,0.35)",
-            zIndex: 10,
+            justifyContent: "flex-end",
+            boxSizing: "border-box",
+            width: "100%",
+            padding: "16px 30px 20px",
+            color: "rgba(13,44,42,0.68)",
+            fontSize: 12,
+            lineHeight: 1.5,
+            textAlign: "right",
           }}
         >
-          💬
-        </div>
+          <span>
+            © {new Date().getFullYear()} Pharmacy Cluster. All Rights Reserved. A Sister Concern of{" "}
+            <a
+              href="https://www.dev-cluster.com/"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                color: "#16845d",
+                fontWeight: 600,
+                textDecoration: "none",
+              }}
+            >
+              Dev Cluster
+            </a>
+            .
+          </span>
+        </footer>
       </main>
     </>
   );
