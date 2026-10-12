@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { confirmDelete } from "@/lib/confirmDelete";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import { retryPharmacyDataSync } from "@/lib/pharmacy-data-sync";
 import {
@@ -332,7 +333,7 @@ export default function SettingPage() {
   }
 
   async function deletePaymentMethod(methodId: string) {
-    if (!window.confirm("Delete this payment method?")) return;
+    if (!await confirmDelete("Delete this payment method?")) return;
     const nextMethods = paymentMethods.filter((method) => method.id !== methodId);
     try {
       savePaymentMethods(nextMethods, "delete");

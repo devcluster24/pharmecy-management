@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { confirmDelete } from "@/lib/confirmDelete";
 import { supabase } from "@/lib/supabase/client";
 import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
 import {
@@ -1079,6 +1080,11 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     ));
   }
 
+  async function deleteBatchAfterConfirmation(batchNumber: string, onConfirmed: () => void) {
+    if (!await confirmDelete(`Delete batch ${batchNumber}?`)) return;
+    onConfirmed();
+  }
+
   function addCompanySelection() {
     if (companySelections.some((selection) => !selection.company || selection.isAddingCompany)) return;
     const newSelectionId = nextCompanySelectionId;
@@ -1501,8 +1507,10 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                                     type="button"
                                     aria-label={`Delete batch ${batch.batchNumber}`}
                                     title="Delete batch"
-                                    onClick={() => updateBrandSelection(companySelection.id, selection.id, {
-                                      batches: selection.batches.filter((_, currentBatchIndex) => currentBatchIndex !== batchIndex),
+                                    onClick={() => void deleteBatchAfterConfirmation(batch.batchNumber, () => {
+                                      updateBrandSelection(companySelection.id, selection.id, {
+                                        batches: selection.batches.filter((_, currentBatchIndex) => currentBatchIndex !== batchIndex),
+                                      });
                                     })}
                                     style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
                                   >×</button>
@@ -1938,10 +1946,12 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                                     type="button"
                                     aria-label={`Delete batch ${batch.batchNumber}`}
                                     title="Delete batch"
-                                    onClick={() => setPendingBatchEntry((current) => current ? {
-                                      ...current,
-                                      batches: current.batches.filter((_, batchIndex) => batchIndex !== index),
-                                    } : current)}
+                                    onClick={() => void deleteBatchAfterConfirmation(batch.batchNumber, () => {
+                                      setPendingBatchEntry((current) => current ? {
+                                        ...current,
+                                        batches: current.batches.filter((_, batchIndex) => batchIndex !== index),
+                                      } : current);
+                                    })}
                                     style={{ width: 24, height: 24, border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", fontSize: 17, lineHeight: 1, cursor: "pointer" }}
                                   >×</button>
                                 </td>

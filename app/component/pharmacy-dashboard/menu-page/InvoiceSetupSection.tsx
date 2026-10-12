@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore, type DragEvent } from "react";
 import Image from "next/image";
+import { confirmDelete } from "@/lib/confirmDelete";
 import { retryPharmacyDataSync } from "@/lib/pharmacy-data-sync";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
@@ -384,7 +385,8 @@ function InvoiceSetupEditor({
     updateItem("header", itemId, (item) => ({ ...item, align }));
   }
 
-  function removeItem(section: SectionName, itemId: string) {
+  async function removeItem(section: SectionName, itemId: string) {
+    if (!await confirmDelete("Remove this item from the invoice template?")) return;
     updateSection(section, (items) => items.filter((item) => item.id !== itemId));
   }
 
@@ -523,7 +525,7 @@ function InvoiceSetupEditor({
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <button type="button" aria-label={`Move ${section} item up`} disabled={index === 0} onClick={() => moveItem(section, index, -1)} style={{ border: "1px solid #dce5df", borderRadius: 4, background: "#fff", color: "#526158", padding: "5px 7px", cursor: index === 0 ? "not-allowed" : "pointer", opacity: index === 0 ? 0.45 : 1 }}>↑</button>
                 <button type="button" aria-label={`Move ${section} item down`} disabled={index === items.length - 1} onClick={() => moveItem(section, index, 1)} style={{ border: "1px solid #dce5df", borderRadius: 4, background: "#fff", color: "#526158", padding: "5px 7px", cursor: index === items.length - 1 ? "not-allowed" : "pointer", opacity: index === items.length - 1 ? 0.45 : 1 }}>↓</button>
-                <button type="button" aria-label={`Delete ${section} item`} onClick={() => removeItem(section, item.id)} style={{ border: "1px solid #f0d3cf", borderRadius: 4, background: "#fff8f7", color: "#ad4b43", padding: "5px 7px", cursor: "pointer" }}>×</button>
+                <button type="button" aria-label={`Delete ${section} item`} onClick={() => void removeItem(section, item.id)} style={{ border: "1px solid #f0d3cf", borderRadius: 4, background: "#fff8f7", color: "#ad4b43", padding: "5px 7px", cursor: "pointer" }}>×</button>
               </div>
             </div>
           ))}

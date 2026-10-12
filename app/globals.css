@@ -1,4 +1,42 @@
 @import "tailwindcss";
+@import "sweetalert2/dist/sweetalert2.min.css";
+
+.delete-confirm-popup {
+  box-sizing: border-box;
+  padding: 0.8em !important;
+}
+
+.delete-confirm-popup .swal2-icon {
+  width: 3em !important;
+  height: 3em !important;
+  margin: 0.45em auto 0.2em !important;
+}
+
+.delete-confirm-popup .swal2-title {
+  margin: 0.35em 0 0.2em !important;
+  padding: 0 !important;
+  font-size: clamp(1rem, 2.5vw, 1.35rem) !important;
+}
+
+.delete-confirm-popup .swal2-html-container {
+  margin: 0.25em 0 !important;
+  font-size: clamp(0.8rem, 1.8vw, 1rem) !important;
+}
+
+.delete-confirm-popup .swal2-actions {
+  flex-wrap: nowrap;
+  gap: 0.25em;
+  width: 100%;
+  margin: 0.35em auto 0 !important;
+}
+
+.delete-confirm-popup .swal2-actions .swal2-styled {
+  flex: 1 1 auto;
+  margin: 0 !important;
+  padding: 0.4em 0.55em !important;
+  font-size: clamp(0.72rem, 1.5vw, 0.9rem) !important;
+  white-space: nowrap;
+}
 
 :root {
   --background: #ffffff;
@@ -188,6 +226,14 @@ body {
   display: none;
 }
 
+.overview-mobile-product-list {
+  display: none;
+}
+
+.pharmacy-product-mobile-list {
+  display: none;
+}
+
 @media (max-width: 767px) {
   .dashboard-overview {
     padding: clamp(12px, 3.5vw, 20px) clamp(8px, 2.5vw, 14px) 28px !important;
@@ -298,7 +344,16 @@ body {
   }
 
   .overview-product-table > div:nth-child(2) {
-    overflow-x: auto !important;
+    display: none;
+  }
+
+  .overview-mobile-product-list {
+    display: block;
+  }
+
+  .overview-mobile-product-header,
+  .overview-mobile-product-row {
+    overflow-x: auto;
     overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
   }
@@ -316,6 +371,12 @@ body {
     width: 100%;
     min-width: 430px !important;
     table-layout: auto;
+  }
+
+  .overview-mobile-product-empty {
+    padding: 18px 14px;
+    color: #87938c;
+    font-size: 11px;
   }
 
   .overview-product-table-grid th,
@@ -473,6 +534,418 @@ body {
   }
 }
 
+@media (max-width: 767px) {
+  .pharmacy-product-management > div > main {
+    padding: clamp(12px, 3.5vw, 20px) clamp(7px, 2vw, 12px) 28px !important;
+  }
+
+  .pharmacy-product-management > div > main > div:first-child {
+    gap: clamp(8px, 2.5vw, 12px) !important;
+    margin-bottom: clamp(12px, 3vw, 18px) !important;
+  }
+
+  .pharmacy-product-management > div > main > div:first-child h1 {
+    font-size: clamp(19px, 5.8vw, 25px) !important;
+  }
+
+  .pharmacy-product-management > div > main > div:first-child p {
+    font-size: clamp(10px, 3vw, 12px) !important;
+  }
+
+  .pharmacy-product-management input,
+  .pharmacy-product-management select {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-height: clamp(32px, 8.5vw, 38px);
+    padding: clamp(6px, 1.8vw, 8px) clamp(7px, 2vw, 10px) !important;
+    font-size: clamp(10px, 3vw, 12px) !important;
+  }
+
+  .pharmacy-product-management > div > main h2 {
+    font-size: clamp(12px, 3.7vw, 15px) !important;
+  }
+
+  .pharmacy-product-management > div > main button {
+    min-height: clamp(30px, 8vw, 36px);
+    padding: clamp(5px, 1.6vw, 7px) clamp(7px, 2vw, 10px) !important;
+    font-size: clamp(9px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-management [aria-label="Import products"] > div:first-child,
+  .pharmacy-product-management [aria-label="Import products"] > div:nth-child(2) {
+    padding: clamp(10px, 3vw, 14px) !important;
+  }
+
+  .pharmacy-product-management [aria-label="Import products"] > div:nth-child(2) > label,
+  .pharmacy-product-management [aria-label="Import products"] > div:nth-child(2) select {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .pharmacy-product-management [aria-label="Import products"] p,
+  .pharmacy-product-management [aria-label="Import products"] label {
+    font-size: clamp(9px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-name-overlay,
+  .pharmacy-product-details-overlay {
+    padding: clamp(8px, 3vw, 16px) !important;
+  }
+
+  .pharmacy-product-name-card {
+    box-sizing: border-box;
+    width: min(92vw, 700px) !important;
+    max-width: min(92vw, 700px);
+    max-height: 74vh !important;
+    overflow-y: auto !important;
+  }
+
+  .pharmacy-product-name-overlay .pharmacy-product-name-header {
+    gap: 8px !important;
+    padding: clamp(9px, 2.5vw, 13px) clamp(12px, 3.5vw, 18px) !important;
+  }
+
+  .pharmacy-product-name-header h2 {
+    font-size: clamp(14px, 4vw, 17px) !important;
+  }
+
+  .pharmacy-product-name-header p,
+  .pharmacy-product-name-help {
+    font-size: clamp(9px, 2.5vw, 10px) !important;
+    line-height: 1.3;
+  }
+
+  .pharmacy-product-name-close {
+    flex: 0 0 auto;
+    min-width: 40px !important;
+    min-height: 40px !important;
+    padding: 0 !important;
+    color: #c43d37 !important;
+    font-size: clamp(42px, 11vw, 48px) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+  }
+
+  .pharmacy-product-name-close:hover:not(:disabled) {
+    color: #9f2925 !important;
+  }
+
+  .pharmacy-product-name-form-content {
+    padding: 4px clamp(12px, 3.5vw, 18px) 8px !important;
+  }
+
+  .pharmacy-product-name-form-content h3 {
+    margin-top: 6px !important;
+    padding: 6px 0 !important;
+    font-size: clamp(10px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-name-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    column-gap: clamp(6px, 2vw, 10px) !important;
+  }
+
+  .pharmacy-product-name-field-grid label {
+    gap: 3px !important;
+    padding: 5px 3px 5px 0 !important;
+    font-size: clamp(8px, 2.4vw, 10px) !important;
+  }
+
+  .pharmacy-product-name-card input {
+    min-height: clamp(27px, 7.2vw, 32px) !important;
+    padding: 4px 6px !important;
+    font-size: clamp(9px, 2.5vw, 10px) !important;
+  }
+
+  .pharmacy-product-name-card form > p {
+    margin: 2px clamp(12px, 3.5vw, 18px) 8px !important;
+  }
+
+  .pharmacy-product-name-card form > p[role="alert"] {
+    margin-bottom: 8px !important;
+  }
+
+  .pharmacy-product-name-footer {
+    gap: 8px !important;
+    padding: 8px clamp(12px, 3.5vw, 18px) !important;
+  }
+
+  .pharmacy-product-name-footer > button {
+    flex: 1 1 0;
+    max-width: 180px;
+    min-height: clamp(32px, 8vw, 36px) !important;
+    padding: 6px 12px !important;
+    font-size: clamp(10px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-details-card {
+    width: 100% !important;
+    max-width: calc(100vw - 16px);
+  }
+
+  .pharmacy-product-name-overlay section > div,
+  .pharmacy-product-details-overlay section > div {
+    padding-right: clamp(12px, 4vw, 24px) !important;
+    padding-left: clamp(12px, 4vw, 24px) !important;
+  }
+
+  .pharmacy-product-name-overlay h2,
+  .pharmacy-product-details-overlay h2 {
+    font-size: clamp(15px, 4.5vw, 19px) !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-card {
+    width: 88vw !important;
+    max-width: calc(100vw - 28px);
+    max-height: 76vh !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-header {
+    gap: 8px !important;
+    padding-top: clamp(8px, 2.5vw, 12px) !important;
+    padding-bottom: clamp(8px, 2.5vw, 12px) !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    padding-top: 3px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-field {
+    padding: clamp(5px, 1.6vw, 8px) clamp(5px, 1.6vw, 8px) !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-field dt {
+    font-size: clamp(8px, 2.3vw, 9px) !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-value {
+    margin-top: 2px !important;
+    font-size: clamp(9px, 2.6vw, 10px) !important;
+  }
+
+  .pharmacy-product-details-overlay .pharmacy-product-details-footer {
+    padding-top: clamp(6px, 2vw, 9px) !important;
+    padding-bottom: clamp(6px, 2vw, 9px) !important;
+  }
+
+  .pharmacy-product-name-overlay p,
+  .pharmacy-product-name-overlay label,
+  .pharmacy-product-details-overlay dt {
+    font-size: clamp(9px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-name-overlay button,
+  .pharmacy-product-details-overlay button {
+    min-height: clamp(30px, 8vw, 36px);
+    padding: clamp(5px, 1.6vw, 7px) clamp(7px, 2vw, 10px) !important;
+    font-size: clamp(9px, 2.8vw, 11px) !important;
+  }
+
+  .pharmacy-product-management .pharmacy-product-list-header {
+    align-items: stretch !important;
+    gap: clamp(7px, 2vw, 10px) !important;
+    padding: clamp(10px, 3vw, 14px) !important;
+  }
+
+  .pharmacy-product-management .pharmacy-product-list-header h2 {
+    font-size: clamp(12px, 3.6vw, 14px) !important;
+  }
+
+  .pharmacy-product-management .pharmacy-product-search {
+    width: 100% !important;
+  }
+
+  .pharmacy-product-management .pharmacy-product-desktop-table {
+    display: none;
+  }
+
+  .pharmacy-product-management .pharmacy-product-mobile-list {
+    display: block;
+  }
+
+  .pharmacy-product-mobile-list > table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  .pharmacy-product-mobile-list th,
+  .pharmacy-product-mobile-list td {
+    box-sizing: border-box;
+    width: 25%;
+    padding: clamp(5px, 1.6vw, 7px) clamp(3px, 1vw, 5px);
+    border-bottom: 1px solid #edf0ed;
+    text-align: left;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .pharmacy-product-mobile-list th {
+    background: #f8faf8;
+    color: #6c7a73;
+    font-size: clamp(7px, 2.2vw, 9px);
+    line-height: 1.25;
+  }
+
+  .pharmacy-product-mobile-list td {
+    color: #526158;
+    font-size: clamp(8px, 2.4vw, 10px);
+    line-height: 1.3;
+  }
+
+  .pharmacy-product-mobile-row {
+    cursor: pointer;
+  }
+
+  .pharmacy-product-mobile-row:focus-visible {
+    outline: 2px solid #16865f;
+    outline-offset: -2px;
+  }
+
+  .pharmacy-product-expanded-row > td {
+    padding: 0 !important;
+    background: #fbfcfb;
+  }
+
+  .pharmacy-product-expanded-details {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(8px, 2.5vw, 12px);
+    padding: clamp(10px, 3vw, 14px);
+    border-bottom: 1px solid #e7ece8;
+  }
+
+  .pharmacy-product-expanded-value {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+    overflow-wrap: anywhere;
+  }
+
+  .pharmacy-product-expanded-value > span {
+    color: #78857e;
+    font-size: clamp(8px, 2.3vw, 10px);
+  }
+
+  .pharmacy-product-expanded-value > strong {
+    color: #26372f;
+    font-size: clamp(9px, 2.7vw, 11px);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .pharmacy-product-expanded-value > input {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #b9d8c8;
+    border-radius: 4px;
+    background: #fff;
+    padding: 6px 7px;
+    color: #26352f;
+    outline: none;
+    box-shadow: none;
+  }
+
+  .pharmacy-product-expanded-value > input:focus,
+  .pharmacy-product-expanded-value > input:focus-visible {
+    border: 1px solid #b9d8c8;
+    outline: none;
+    box-shadow: none;
+  }
+
+  .pharmacy-product-expanded-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(8px, 2.5vw, 14px);
+    padding-top: 3px;
+  }
+
+  .pharmacy-product-expanded-actions > button {
+    flex: 0 1 clamp(68px, 24vw, 96px);
+    border: 1px solid currentColor !important;
+    border-radius: 6px !important;
+    font-weight: 700 !important;
+  }
+
+  .pharmacy-product-expanded-actions > .pharmacy-product-action-details {
+    border-color: #24815b !important;
+    background: #eaf6ef !important;
+    color: #17643f !important;
+  }
+
+  .pharmacy-product-expanded-actions > .pharmacy-product-action-edit {
+    border-color: #b77a13 !important;
+    background: #fff6df !important;
+    color: #8a5900 !important;
+  }
+
+  .pharmacy-product-expanded-actions > .pharmacy-product-action-delete {
+    border-color: #c34e48 !important;
+    background: #fff0ef !important;
+    color: #a93631 !important;
+  }
+
+  .pharmacy-product-expanded-actions > .pharmacy-product-action-save {
+    border-color: #24815b !important;
+    background: #179c70 !important;
+    color: #fff !important;
+  }
+
+  .pharmacy-product-expanded-actions > .pharmacy-product-action-cancel {
+    border-color: #cbd5ce !important;
+    background: #f1f4f2 !important;
+    color: #526158 !important;
+  }
+
+  .pharmacy-product-mobile-empty {
+    padding: 18px 10px !important;
+    text-align: center !important;
+    color: #77857d !important;
+  }
+
+  .pharmacy-product-management .pharmacy-product-pagination {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 9px clamp(5px, 2vw, 10px) !important;
+    padding: clamp(9px, 2.5vw, 12px) !important;
+    font-size: clamp(8px, 2.5vw, 10px) !important;
+  }
+
+  .pharmacy-product-pagination-options {
+    justify-content: flex-end;
+    min-width: 0;
+    font-size: clamp(8px, 2.5vw, 10px);
+  }
+
+  .pharmacy-product-pagination-options label {
+    gap: 4px !important;
+    white-space: nowrap;
+  }
+
+  .pharmacy-product-pagination-options select {
+    min-height: clamp(28px, 7vw, 32px);
+    padding: 4px 5px !important;
+  }
+
+  .pharmacy-product-pagination-nav {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(6px, 2vw, 10px);
+  }
+
+  .pharmacy-product-pagination-page {
+    white-space: nowrap;
+  }
+}
+
 .pay-amount-input:focus {
   border-color: transparent !important;
   outline: none;
@@ -621,15 +1094,202 @@ body {
   }
 
   .new-sale-form {
-    height: calc(100vh - 155px);
+    height: calc(100dvh - 155px);
+    min-height: 360px;
   }
 
   .new-sale-content {
     grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 10px !important;
   }
 
   .new-sale-summary {
-    top: 68px;
+    position: static;
+  }
+
+  .dashboard-main-sales {
+    padding: 6px 8px 12px !important;
+  }
+
+  .new-sale-header {
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 10px !important;
+  }
+
+  .new-sale-header h2 {
+    font-size: clamp(17px, 5vw, 20px) !important;
+  }
+
+  .new-sale-header p,
+  .new-sale-header label {
+    font-size: clamp(10px, 3vw, 12px) !important;
+  }
+
+  .new-sale-customer-fields {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    gap: 8px !important;
+    margin-left: 0 !important;
+  }
+
+  .new-sale-customer-field {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .new-sale-form input {
+    min-width: 0;
+    font-size: clamp(13px, 3.6vw, 15px) !important;
+  }
+
+  .new-sale-form button {
+    font-size: clamp(10px, 2.9vw, 12px) !important;
+  }
+
+  .new-sale-search {
+    margin-bottom: 12px !important;
+    padding: 4px 0 !important;
+  }
+
+  .new-sale-line-list {
+    overflow: visible !important;
+    gap: 8px !important;
+  }
+
+  .new-sale-line-headings {
+    display: none !important;
+  }
+
+  .new-sale-line {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    gap: 8px 12px !important;
+    min-width: 0 !important;
+    padding: 10px !important;
+    border: 1px solid #e5ebe6;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .new-sale-line-product {
+    grid-column: 1 / -1;
+  }
+
+  .new-sale-line-pack,
+  .new-sale-line-box-price,
+  .new-sale-line-unit-price,
+  .new-sale-line-quantity,
+  .new-sale-line-total {
+    min-width: 0;
+    font-size: clamp(10px, 2.9vw, 12px) !important;
+    text-align: left !important;
+    white-space: normal !important;
+  }
+
+  .new-sale-line-pack::before,
+  .new-sale-line-box-price::before,
+  .new-sale-line-unit-price::before,
+  .new-sale-line-quantity::before,
+  .new-sale-line-total::before {
+    display: block;
+    margin-bottom: 3px;
+    color: #77857d;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .new-sale-line-pack::before { content: "Pack size"; }
+  .new-sale-line-box-price::before { content: "Box price"; }
+  .new-sale-line-unit-price::before { content: "Unit price"; }
+  .new-sale-line-quantity::before { content: "Quantity"; }
+  .new-sale-line-total::before { content: "Total price"; }
+
+  .new-sale-line-quantity input {
+    width: 100% !important;
+    padding: 6px !important;
+  }
+
+  .new-sale-line-delete {
+    justify-self: stretch !important;
+    align-self: end;
+    min-height: 34px;
+  }
+
+  .new-sale-summary {
+    width: 100%;
+    padding: 12px !important;
+  }
+
+  .new-sale-footer {
+    padding: 8px 10px !important;
+  }
+
+  .new-sale-footer > div {
+    width: 100%;
+  }
+
+  .new-sale-footer button {
+    min-width: 100px;
+    min-height: 38px;
+  }
+
+  .sale-batch-overlay,
+  .sale-invoice-overlay {
+    padding: 8px !important;
+  }
+
+  .sale-batch-card {
+    width: 100% !important;
+    max-height: 88dvh !important;
+  }
+
+  .sale-batch-header {
+    padding: 12px !important;
+  }
+
+  .sale-batch-card > div:nth-child(2) {
+    padding: 10px 12px !important;
+  }
+
+  .sale-batch-card > div:nth-child(3) {
+    padding: 0 12px 12px !important;
+  }
+
+  .sale-batch-card > div:nth-child(3) button {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 4px !important;
+  }
+
+  .sale-invoice-print {
+    width: 100% !important;
+    max-height: 92dvh !important;
+    padding: 16px !important;
+  }
+
+  .sale-invoice-print table {
+    min-width: 520px;
+  }
+
+  .sale-invoice-print > header,
+  .sale-invoice-print > div:nth-of-type(1),
+  .sale-invoice-print > div:nth-of-type(3),
+  .sale-invoice-print > div:nth-of-type(4) {
+    flex-wrap: wrap;
+    gap: 10px !important;
+  }
+
+  .sale-invoice-print-actions {
+    flex-wrap: wrap;
+    gap: 8px !important;
+    margin-top: 16px !important;
+  }
+
+  .sale-invoice-print-actions button {
+    flex: 1 1 auto;
+    min-height: 38px;
   }
 }
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import { dashboardNavItems } from "../navigation";
 import { supabase } from "@/lib/supabase/client";
+import { confirmDelete } from "@/lib/confirmDelete";
 import type { StaffPermissions } from "@/lib/pharmacy-staff-permissions";
 
 type StaffStatus = "pending" | "approved" | "rejected" | "suspended";
@@ -192,7 +193,7 @@ export default function StaffManagementPage() {
   }
 
   async function deleteStaff(member: StaffMember) {
-    if (!window.confirm(`Permanently delete ${member.full_name || member.email}'s staff account?`)) return;
+    if (!await confirmDelete(`Permanently delete ${member.full_name || member.email}'s staff account?`)) return;
 
     setUpdatingStaffId(member.staff_user_id);
     setStaffError("");

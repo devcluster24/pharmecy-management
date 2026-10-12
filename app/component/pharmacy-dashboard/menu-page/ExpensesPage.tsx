@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import { confirmDelete } from "@/lib/confirmDelete";
 import {
   addExpense,
   deleteExpense,
@@ -137,7 +138,8 @@ export default function ExpensesPage() {
     }
   }
 
-  function handleDelete(expense: ExpenseRecord) {
+  async function handleDelete(expense: ExpenseRecord) {
+    if (!await confirmDelete(`Delete the expense "${expense.description}"?`)) return;
     setActionError("");
     try {
       deleteExpense(expense.id);

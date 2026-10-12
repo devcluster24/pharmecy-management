@@ -164,6 +164,64 @@ function ProductTable({
   emptyMessage: string;
 }) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const renderHeader = () => (
+    <thead>
+      <tr>
+        {columns.map((column) => (
+          <th key={column} style={{ padding: "10px 14px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#78857e", fontSize: 10, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
+        ))}
+      </tr>
+    </thead>
+  );
+  const renderRow = (row: string[], rowIndex: number) => (
+    <tr
+      className={expandedRow === rowIndex ? "overview-product-row is-expanded" : "overview-product-row"}
+      tabIndex={0}
+      aria-expanded={expandedRow === rowIndex}
+      onClick={() => {
+        if (!window.matchMedia("(max-width: 767px)").matches) return;
+        setExpandedRow((current) => current === rowIndex ? null : rowIndex);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          if (!window.matchMedia("(max-width: 767px)").matches) return;
+          event.preventDefault();
+          setExpandedRow((current) => current === rowIndex ? null : rowIndex);
+        }
+      }}
+    >
+      {row.map((cell, index) => (
+        <td key={`${index}-${cell}`} style={{ padding: "12px 14px", borderBottom: "1px solid #f0f2f0", color: index === 0 ? "#26372f" : "#64736b", fontSize: 11, fontWeight: index === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
+      ))}
+    </tr>
+  );
+  const renderDetailsPanel = (row: string[]) => (
+    <div
+      className="overview-product-details-panel"
+      role="button"
+      tabIndex={0}
+      aria-label={`Collapse details for ${row[0]}`}
+      onClick={() => setExpandedRow(null)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setExpandedRow(null);
+        }
+      }}
+    >
+      <div className="overview-product-details">
+        {row.map((cell, index) => (
+          <span
+            className="overview-product-detail-value"
+            data-column={columns[index]}
+            key={`${columns[index]}-${cell}`}
+          >
+            {cell}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <section className="overview-product-table" style={{ minWidth: 0, border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
@@ -176,70 +234,33 @@ function ProductTable({
         style={{ overflowX: "auto" }}
       >
         <table className="overview-product-table-grid" style={{ width: "100%", minWidth: 430, borderCollapse: "collapse", textAlign: "left" }}>
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column} style={{ padding: "10px 14px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#78857e", fontSize: 10, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
-              ))}
-            </tr>
-          </thead>
+          {renderHeader()}
           <tbody>
             {rows.length > 0
-              ? rows.map((row, rowIndex) => (
-                <Fragment key={row[0]}>
-                  <tr
-                    className={expandedRow === rowIndex ? "overview-product-row is-expanded" : "overview-product-row"}
-                    tabIndex={0}
-                    aria-expanded={expandedRow === rowIndex}
-                    onClick={() => {
-                      if (!window.matchMedia("(max-width: 767px)").matches) return;
-                      setExpandedRow((current) => current === rowIndex ? null : rowIndex);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        if (!window.matchMedia("(max-width: 767px)").matches) return;
-                        event.preventDefault();
-                        setExpandedRow((current) => current === rowIndex ? null : rowIndex);
-                      }
-                    }}
-                  >
-                    {row.map((cell, index) => (
-                      <td key={`${index}-${cell}`} style={{ padding: "12px 14px", borderBottom: "1px solid #f0f2f0", color: index === 0 ? "#26372f" : "#64736b", fontSize: 11, fontWeight: index === 0 ? 600 : 400, whiteSpace: "nowrap" }}>{cell}</td>
-                    ))}
-                  </tr>
-                </Fragment>
-              ))
+              ? rows.map((row, rowIndex) => <Fragment key={row[0]}>{renderRow(row, rowIndex)}</Fragment>)
               : <tr><td colSpan={columns.length} style={{ padding: "18px 14px", color: "#87938c", fontSize: 11 }}>{emptyMessage}</td></tr>}
           </tbody>
         </table>
       </div>
-      {expandedRow !== null && rows[expandedRow] && (
-        <div
-          className="overview-product-details-panel"
-          role="button"
-          tabIndex={0}
-          aria-label={`Collapse details for ${rows[expandedRow][0]}`}
-          onClick={() => setExpandedRow(null)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              setExpandedRow(null);
-            }
-          }}
-        >
-          <div className="overview-product-details">
-            {rows[expandedRow].map((cell, index) => (
-              <span
-                className="overview-product-detail-value"
-                data-column={columns[index]}
-                key={`${columns[index]}-${cell}`}
-              >
-                {cell}
-              </span>
-            ))}
-          </div>
+      <div className="overview-mobile-product-list">
+        <div className="overview-mobile-product-header">
+          <table className="overview-product-table-grid" style={{ width: "100%", minWidth: 430, borderCollapse: "collapse", textAlign: "left" }}>
+            {renderHeader()}
+          </table>
         </div>
-      )}
+        {rows.length > 0
+          ? rows.map((row, rowIndex) => (
+            <Fragment key={`mobile-${row[0]}`}>
+              <div className="overview-mobile-product-row">
+                <table className="overview-product-table-grid" style={{ width: "100%", minWidth: 430, borderCollapse: "collapse", textAlign: "left" }}>
+                  <tbody>{renderRow(row, rowIndex)}</tbody>
+                </table>
+              </div>
+              {expandedRow === rowIndex && renderDetailsPanel(row)}
+            </Fragment>
+          ))
+          : <div className="overview-mobile-product-empty">{emptyMessage}</div>}
+      </div>
       <div style={{ padding: "10px 14px", color: "#87938c", fontSize: 10 }}>Showing {rows.length} products</div>
     </section>
   );

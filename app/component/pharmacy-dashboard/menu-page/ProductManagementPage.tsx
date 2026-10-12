@@ -1,11 +1,12 @@
 'use client';
 
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
 import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import { supabase } from "@/lib/supabase/client";
 import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
+import { confirmDelete } from "@/lib/confirmDelete";
 import { getProductIdentityKey, type ProductImportCandidate } from "./productImport";
 
 type Product = {
@@ -347,6 +348,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [newNameError, setNewNameError] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [savingProductId, setSavingProductId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -364,9 +366,9 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
   const initialQueryKey = useRef("");
   const productQuerySequence = useRef(0);
-  const editRowRef = useRef<HTMLTableRowElement | null>(null);
+  const editRowRef = useRef<HTMLElement | null>(null);
   const savingProductRef = useRef(false);
-  const assignEditRowRef = useCallback((node: HTMLTableRowElement | null) => {
+  const assignEditRowRef = useCallback((node: HTMLElement | null) => {
     editRowRef.current = node;
   }, []);
 
@@ -567,7 +569,8 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }, [editingProduct, saveEditedProduct]);
 
   async function deleteProduct(product: Product) {
-    if (!pharmacyUserId || !window.confirm(`Delete ${product.brand || product.genericName || product.id} from this pharmacy's product list?`)) return;
+    if (!pharmacyUserId) return;
+    if (!await confirmDelete(`Delete ${product.brand || product.genericName || product.id} from this pharmacy's product list?`)) return;
     setImportError("");
     try {
       const { error } = await supabase
@@ -842,7 +845,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   }
 
   return (
-    <div style={{ minHeight: adminMode ? "auto" : "100vh", background: adminMode ? "transparent" : "#f8f8f7", color: "#202624", fontFamily: adminMode ? "inherit" : "Inter, Arial, sans-serif" }}>
+    <div className={adminMode ? undefined : "pharmacy-product-management"} style={{ minHeight: adminMode ? "auto" : "100vh", background: adminMode ? "transparent" : "#f8f8f7", color: "#202624", fontFamily: adminMode ? "inherit" : "Inter, Arial, sans-serif" }}>
       {!adminMode && <ProductManagementHeader />}
       <div style={{ display: "flex", minHeight: adminMode ? "auto" : "calc(100vh - 62px)" }}>
         {!adminMode && <Sidebar />}
@@ -907,12 +910,12 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
             {importError && <p role="alert" style={{ margin: "0 18px 14px", color: "#ad4b43", fontSize: 11 }}>{importError}</p>}
           </section>
 
-          <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
+          <section className="pharmacy-product-list" style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div className="pharmacy-product-list-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
               <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Product list <span style={{ color: "#8a9690", fontSize: 12, fontWeight: 500 }}>({totalProductCount})</span></h2>
-              <input aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setCurrentPage(1); }} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
+              <input className="pharmacy-product-search" aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setCurrentPage(1); setExpandedProductId(null); }} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
             </div>
-            <div style={{ overflowX: "auto" }}>
+            <div className="pharmacy-product-desktop-table" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1450, textAlign: "left" }}>
                 <thead>
                   <tr>
@@ -988,18 +991,104 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 </tbody>
               </table>
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, padding: "12px 16px", borderTop: "1px solid #edf0ed", color: "#687871", fontSize: 11 }}>
-              <span>Showing {firstVisibleProduct}-{lastVisibleProduct} of {totalProductCount} products</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="pharmacy-product-mobile-list">
+              <table>
+                <thead>
+                  <tr>
+                    {["ID Number", "Brand Name", "Generic Name", "Company"].map((column) => <th key={column}>{column}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedProducts.map((product) => (
+                    <Fragment key={`mobile-${product.id}`}>
+                      <tr
+                        className="pharmacy-product-mobile-row"
+                        tabIndex={0}
+                        aria-expanded={expandedProductId === product.id}
+                        onClick={() => setExpandedProductId((current) => current === product.id ? null : product.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setExpandedProductId((current) => current === product.id ? null : product.id);
+                          }
+                        }}
+                      >
+                        {[product.sourceCatalogId ?? product.id, product.brand || "—", product.genericName || "—", product.manufacturer || "—"].map((value, index) => <td key={`${product.id}-${index}`}>{value}</td>)}
+                      </tr>
+                      {expandedProductId === product.id && (
+                        <tr className="pharmacy-product-expanded-row">
+                          <td colSpan={4}>
+                            <div className="pharmacy-product-expanded-details" ref={editingProduct?.id === product.id ? assignEditRowRef : undefined}>
+                              {([
+                                ["ID Number", "id"],
+                                ["Brand Name", "brand"],
+                                ["Generic Name", "genericName"],
+                                ["Company", "manufacturer"],
+                                ["Strength", "strength"],
+                                ["Dosage Form", "dosageForm"],
+                                ["Pack Size", "packSize"],
+                                ["Unit Price", "unitPrice"],
+                                ["Pack Price", "packPrice"],
+                              ] as const).map(([label, field]) => {
+                                const value = field === "id"
+                                  ? product.sourceCatalogId ?? product.id
+                                  : editingProduct?.id === product.id
+                                    ? editingProduct[field] ?? (field === "unitPrice" ? editingProduct.retailPrice : "")
+                                    : product[field] ?? (field === "unitPrice" ? product.retailPrice : "");
+                                return (
+                                  <div className="pharmacy-product-expanded-value" key={`${product.id}-${field}`}>
+                                    <span>{label}</span>
+                                    {editingProduct?.id === product.id && field !== "id" ? (
+                                      <input
+                                        aria-label={`Edit ${field} for ${product.id}`}
+                                        value={value}
+                                        disabled={savingProductId === product.id}
+                                        onChange={(event) => updateEditingProduct(field, event.target.value)}
+                                      />
+                                    ) : <strong>{value || "—"}</strong>}
+                                  </div>
+                                );
+                              })}
+                              <div className="pharmacy-product-expanded-actions">
+                                {editingProduct?.id === product.id ? (
+                                  <>
+                                    <button className="pharmacy-product-action-save" type="button" disabled={savingProductId === product.id} onClick={() => void saveEditedProduct()}>{savingProductId === product.id ? "Saving..." : "Save"}</button>
+                                    <button className="pharmacy-product-action-cancel" type="button" disabled={savingProductId === product.id} onClick={() => { setImportError(""); setEditingProduct(null); }}>Cancel</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button className="pharmacy-product-action-details" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => setSelectedProduct(product)}>Details</button>
+                                    <button className="pharmacy-product-action-edit" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => { setImportError(""); setEditingProduct({ ...product }); }}>Edit</button>
+                                    <button className="pharmacy-product-action-delete" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => void deleteProduct(product)}>Delete</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                  {filteredProducts.length === 0 && (
+                    <tr><td colSpan={4} className="pharmacy-product-mobile-empty">{!storageReady ? "Loading products..." : searchTerm ? "No products match your search." : "No products yet. Import products from the shared catalog to add them to your pharmacy list."}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="pharmacy-product-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, padding: "12px 16px", borderTop: "1px solid #edf0ed", color: "#687871", fontSize: 11 }}>
+              <span className="pharmacy-product-pagination-count">Showing {firstVisibleProduct}-{lastVisibleProduct} of {totalProductCount} products</span>
+              <div className="pharmacy-product-pagination-options" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   Rows per page
-                  <select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", padding: "6px 8px", color: "#34453b", fontSize: 11 }}>
+                  <select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", padding: "6px 8px", color: "#34453b", fontSize: 11 }}>
                     {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
                   </select>
                 </label>
-                <button type="button" aria-label="Previous page" disabled={safeCurrentPage <= 1} onClick={() => setCurrentPage(safeCurrentPage - 1)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer", opacity: safeCurrentPage <= 1 ? 0.5 : 1 }}>Previous</button>
-                <span>Page {safeCurrentPage} of {totalPages}</span>
-                <button type="button" aria-label="Next page" disabled={safeCurrentPage >= totalPages} onClick={() => setCurrentPage(safeCurrentPage + 1)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer", opacity: safeCurrentPage >= totalPages ? 0.5 : 1 }}>Next</button>
+              </div>
+              <div className="pharmacy-product-pagination-nav">
+                <button className="pharmacy-product-pagination-previous" type="button" aria-label="Previous page" disabled={safeCurrentPage <= 1} onClick={() => { setCurrentPage(safeCurrentPage - 1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer", opacity: safeCurrentPage <= 1 ? 0.5 : 1 }}>Previous</button>
+                <span className="pharmacy-product-pagination-page">Page {safeCurrentPage} of {totalPages}</span>
+                <button className="pharmacy-product-pagination-next" type="button" aria-label="Next page" disabled={safeCurrentPage >= totalPages} onClick={() => { setCurrentPage(safeCurrentPage + 1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer", opacity: safeCurrentPage >= totalPages ? 0.5 : 1 }}>Next</button>
               </div>
             </div>
           </section>
@@ -1007,19 +1096,19 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       </div>
 
       {isNewNameOpen && (
-        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNameModal(); }} style={{ position: "fixed", inset: 0, zIndex: 51, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="new-product-name-title" style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
+        <div className="pharmacy-product-name-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNameModal(); }} style={{ position: "fixed", inset: 0, zIndex: 51, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
+          <section className="pharmacy-product-name-card" role="dialog" aria-modal="true" aria-labelledby="new-product-name-title" style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
+            <div className="pharmacy-product-name-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
               <div>
                 <h2 id="new-product-name-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add New Product</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Add product details and pricing to your pharmacy list.</p>
               </div>
-              <button type="button" aria-label="Close" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>×</button>
+              <button className="pharmacy-product-name-close" type="button" aria-label="Close" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>×</button>
             </div>
             <form onSubmit={(event) => void saveNewName(event)} noValidate>
-              <div style={{ padding: "8px 24px 18px" }}>
+              <div className="pharmacy-product-name-form-content" style={{ padding: "8px 24px 18px" }}>
                 <h3 style={{ margin: "8px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Product details</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
+                <div className="pharmacy-product-name-field-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
                   <label style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
                     ID Number
                     <input aria-label="ID Number" value={isGeneratingNewNameId ? "Generating ID..." : newNameFields.id} readOnly style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: "#f8faf8", padding: "6px 9px", color: "#26372f", fontSize: 12, fontWeight: 600 }} />
@@ -1070,7 +1159,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                   ))}
                 </div>
                 <h3 style={{ margin: "14px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Pack &amp; pricing</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
+                <div className="pharmacy-product-name-field-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
                   {([
                     ["packSize", "Pack Size"],
                     ["unitPrice", "Unit Price"],
@@ -1095,11 +1184,11 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                   ))}
                 </div>
               </div>
-              <p style={{ margin: "-7px 24px 16px", color: "#77857d", fontSize: 11 }}>Price fields calculate the related value when you leave the input. Enter any two values to calculate the third.</p>
-              {newNameError && <p role="alert" style={{ margin: "0 24px 16px", color: "#b34b43", fontSize: 12 }}>{newNameError}</p>}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-                <button type="button" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>Cancel</button>
-                <button type="submit" disabled={isGeneratingNewNameId || isSavingNewName || !newNameFields.id} style={{ border: 0, borderRadius: 6, background: isGeneratingNewNameId || isSavingNewName || !newNameFields.id ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isSavingNewName ? "wait" : "pointer" }}>{isGeneratingNewNameId ? "Generating ID..." : isSavingNewName ? "Saving..." : "Save"}</button>
+              <p className="pharmacy-product-name-help" style={{ margin: "-7px 24px 16px", color: "#77857d", fontSize: 11 }}>Price fields calculate the related value when you leave the input. Enter any two values to calculate the third.</p>
+              {newNameError && <p className="pharmacy-product-name-error" role="alert" style={{ margin: "0 24px 16px", color: "#b34b43", fontSize: 12 }}>{newNameError}</p>}
+              <div className="pharmacy-product-name-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+                <button className="pharmacy-product-name-cancel" type="button" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>Cancel</button>
+                <button className="pharmacy-product-name-save" type="submit" disabled={isGeneratingNewNameId || isSavingNewName || !newNameFields.id} style={{ border: 0, borderRadius: 6, background: isGeneratingNewNameId || isSavingNewName || !newNameFields.id ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isSavingNewName ? "wait" : "pointer" }}>{isGeneratingNewNameId ? "Generating ID..." : isSavingNewName ? "Saving..." : "Save"}</button>
               </div>
             </form>
           </section>
@@ -1107,15 +1196,15 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       )}
 
       {selectedProduct && (
-        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="product-details-title" style={{ width: "min(600px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+        <div className="pharmacy-product-details-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
+          <section className="pharmacy-product-details-card" role="dialog" aria-modal="true" aria-labelledby="product-details-title" style={{ width: "min(600px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
+            <div className="pharmacy-product-details-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="product-details-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Product details</h2>
               </div>
               <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 0, margin: 0, padding: "8px 24px 18px" }}>
+            <dl className="pharmacy-product-details-fields" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 0, margin: 0, padding: "8px 24px 18px" }}>
               {([
                 ["ID Number", selectedProduct.sourceCatalogId ?? selectedProduct.id],
                 ["Brand Name", selectedProduct.brand || "-"],
@@ -1127,13 +1216,13 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 ["Unit Price", selectedProduct.unitPrice || selectedProduct.retailPrice || "-"],
                 ["Pack Price", selectedProduct.packPrice || "-"],
               ] as const).map(([label, value]) => (
-                <div key={label} style={{ padding: "13px 10px 13px 0", borderBottom: "1px solid #edf0ed" }}>
+                <div className="pharmacy-product-details-field" key={label} style={{ padding: "13px 10px 13px 0", borderBottom: "1px solid #edf0ed" }}>
                   <dt style={{ color: "#7a8981", fontSize: 11 }}>{label}</dt>
-                  <dd style={{ margin: "5px 0 0", color: "#26372f", fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{value}</dd>
+                  <dd className="pharmacy-product-details-value" style={{ margin: "5px 0 0", color: "#26372f", fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{value}</dd>
                 </div>
               ))}
             </dl>
-            <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+            <div className="pharmacy-product-details-footer" style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
               <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
             </div>
           </section>

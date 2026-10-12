@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { confirmDelete } from "@/lib/confirmDelete";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import { downloadSaleInvoicePdf, printSaleInvoicePdf } from "./saleInvoicePdf";
 import {
@@ -410,14 +411,15 @@ export default function SalesActions() {
     addProductsToSale(selectedGroup[1]);
   }
 
-  function removeProduct(productId: string) {
+  async function removeProduct(productId: string) {
     const removedLine = saleLines.find((line) => line.id === productId);
+    if (!removedLine) return;
+    if (!await confirmDelete(`Remove ${removedLine.product.brand || removedLine.product.genericName || "this product"} from this sale?`)) return;
     const hasAnotherLineForProduct = saleLines.some((line) =>
       line.id !== productId
-      && removedLine
       && getProductGroupKey(line.product) === getProductGroupKey(removedLine.product),
     );
-    if (!hasAnotherLineForProduct && removedLine) {
+    if (!hasAnotherLineForProduct) {
       const removedIds = new Set(removedLine.batchOptions.map((product) => product.id));
       setSelectedProductIds((current) => current.filter((id) => !removedIds.has(id)));
     }
@@ -571,13 +573,13 @@ export default function SalesActions() {
           overflow: "hidden",
         }}
       >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "10px 16px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="new-sale-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, padding: "10px 16px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="new-sale-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>New Sale</h2>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>Search the Product List and add quantities.</p>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginLeft: "auto" }}>
-                <label style={{ position: "relative", display: "grid", gap: 4, minWidth: 180, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+              <div className="new-sale-customer-fields" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginLeft: "auto" }}>
+                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, minWidth: 180, color: "#526158", fontSize: 11, fontWeight: 650 }}>
                   <span>
                     Customer Name <span aria-hidden="true" style={{ color: "#ad4b43" }}>*</span>
                   </span>
@@ -625,7 +627,7 @@ export default function SalesActions() {
                     </div>
                   )}
                 </label>
-                <label style={{ position: "relative", display: "grid", gap: 4, minWidth: 160, color: "#526158", fontSize: 11, fontWeight: 650 }}>
+                <label className="new-sale-customer-field" style={{ position: "relative", display: "grid", gap: 4, minWidth: 160, color: "#526158", fontSize: 11, fontWeight: 650 }}>
                   <span>Phone Number <span style={{ color: "#77857d", fontWeight: 400 }}>(optional)</span></span>
                   <input
                     aria-label="Phone Number"
@@ -727,8 +729,9 @@ export default function SalesActions() {
               </div>
 
               {saleLines.length > 0 && (
-                <div style={{ display: "grid", gap: 10, overflowX: "auto" }}>
+                <div className="new-sale-line-list" style={{ display: "grid", gap: 10, overflowX: "auto" }}>
                   <div
+                    className="new-sale-line-headings"
                     aria-hidden="true"
                     style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "0 0 8px", borderBottom: "1px solid #e5ebe6", color: "#77857d", fontSize: 10, fontWeight: 650 }}
                   >
@@ -748,8 +751,8 @@ export default function SalesActions() {
                     const expiredBatches = line.batchOptions.filter((batch) => batch.isExpired);
                     return (
                       <div key={line.id}>
-                      <article style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "4px 0" }}>
-                          <div style={{ minWidth: 0 }}>
+                      <article className="new-sale-line" style={{ display: "grid", gridTemplateColumns: "230px 90px 95px 95px 90px 110px 70px", alignItems: "center", gap: 12, minWidth: 850, padding: "4px 0" }}>
+                          <div className="new-sale-line-product" style={{ minWidth: 0 }}>
                           <strong style={{ display: "block", overflow: "hidden", color: "#26352f", fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {[line.product.brand, line.product.strength].filter(Boolean).join(" · ")}
                           </strong>
@@ -782,10 +785,10 @@ export default function SalesActions() {
                               </button>
                             )}
                           </div>
-                          <span style={{ overflow: "hidden", color: "#526158", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.packSize || "-"}</span>
-                          <span style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(boxPrice)}</span>
-                          <span style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(unitPrice)}</span>
-                          <label style={{ color: "#77857d", fontSize: 10 }}>
+                          <span className="new-sale-line-pack" style={{ overflow: "hidden", color: "#526158", fontSize: 11, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.product.packSize || "-"}</span>
+                          <span className="new-sale-line-box-price" style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(boxPrice)}</span>
+                          <span className="new-sale-line-unit-price" style={{ color: "#405248", fontSize: 12, textAlign: "left" }}>{formatPrice(unitPrice)}</span>
+                          <label className="new-sale-line-quantity" style={{ color: "#77857d", fontSize: 10 }}>
                             <input
                               aria-label={`${line.product.brand} quantity`}
                               type="text"
@@ -816,10 +819,10 @@ export default function SalesActions() {
                               </span>
                             )}
                           </label>
-                          <div style={{ textAlign: "left" }}>
+                          <div className="new-sale-line-total" style={{ textAlign: "left" }}>
                             <strong style={{ color: "#17704e", fontSize: 12 }}>{formatPrice(lineTotal)}</strong>
                           </div>
-                          <button type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => removeProduct(line.id)} style={{ justifySelf: "start", border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "4px 9px", fontSize: 12, cursor: "pointer" }}>Delete</button>
+                          <button className="new-sale-line-delete" type="button" aria-label={`Remove ${line.product.brand}`} onClick={() => void removeProduct(line.id)} style={{ justifySelf: "start", border: "1px solid #f1d8d5", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "4px 9px", fontSize: 12, cursor: "pointer" }}>Delete</button>
                         </article>
                       </div>
                     );
@@ -988,7 +991,7 @@ export default function SalesActions() {
               </aside>
             </div>
 
-            <footer style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, padding: "9px 14px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+            <footer className="new-sale-footer" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, padding: "9px 14px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
               {saleSaveError && <p role="alert" style={{ margin: "0 auto 0 0", color: "#ad4b43", fontSize: 12 }}>{saleSaveError}</p>}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <button
@@ -1014,13 +1017,14 @@ export default function SalesActions() {
 
         return (
           <div
+            className="sale-batch-overlay"
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) setBatchSelectionLineId(null);
             }}
             style={{ position: "fixed", inset: 0, zIndex: 75, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}
           >
-            <section role="dialog" aria-modal="true" aria-labelledby="sale-batch-title" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", width: "min(520px, 100%)", maxHeight: "min(75vh, 620px)", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)", overflow: "hidden" }}>
-              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
+            <section className="sale-batch-card" role="dialog" aria-modal="true" aria-labelledby="sale-batch-title" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", width: "min(520px, 100%)", maxHeight: "min(75vh, 620px)", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)", overflow: "hidden" }}>
+              <header className="sale-batch-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
                 <div>
                   <h2 id="sale-batch-title" style={{ margin: 0, color: "#20342a", fontSize: 17, fontWeight: 700 }}>Search Batch Number</h2>
                   <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>{line.product.brand}</p>
@@ -1091,6 +1095,7 @@ export default function SalesActions() {
 
       {saleInvoice && (
         <div
+          className="sale-invoice-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setSaleInvoice(null);
           }}
