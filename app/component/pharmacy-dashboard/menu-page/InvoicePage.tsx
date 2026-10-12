@@ -132,6 +132,7 @@ export default function InvoicePage() {
       hideAction
       content={selectedInvoice ? (
         <div
+          className="dashboard-invoice-preview-overlay"
           onClick={(event) => {
             if (event.target === event.currentTarget) setSelectedInvoice(null);
           }}
@@ -141,24 +142,25 @@ export default function InvoicePage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="invoice-preview-title"
+            className="dashboard-invoice-preview"
             style={{ width: "min(1100px, calc(100vw - 40px))", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+            <div className="dashboard-invoice-preview-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <p style={{ margin: "0 0 5px", color: "#16845f", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>{storeName || "Pharmacy Cluster"}</p>
                 <h2 id="invoice-preview-title" style={{ margin: 0, color: "#20342a", fontSize: 20 }}>Sales Invoice · {selectedInvoice.invoice}</h2>
               </div>
               <button type="button" aria-label="Close invoice" onClick={() => setSelectedInvoice(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 26, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <div style={{ padding: 24 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px 24px", marginBottom: 24, color: "#526158", fontSize: 13 }}>
+            <div className="dashboard-invoice-preview-body" style={{ padding: 24 }}>
+              <div className="dashboard-invoice-preview-meta" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px 24px", marginBottom: 24, color: "#526158", fontSize: 13 }}>
                 <div><span style={{ color: "#87928d" }}>Customer</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.customer}</div></div>
                 {selectedInvoice.phone && <div><span style={{ color: "#87928d" }}>Phone number</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.phone}</div></div>}
                 {selectedInvoice.paymentMethodName && <div><span style={{ color: "#87928d" }}>Payment method</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.paymentMethodName}</div></div>}
                 <div><span style={{ color: "#87928d" }}>Date &amp; time</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{new Date(selectedInvoice.createdAt).toLocaleString("en-BD")}</div></div>
                 <div><span style={{ color: "#87928d" }}>Payment status</span><div style={{ marginTop: 4, color: "#26352f", fontWeight: 600 }}>{selectedInvoice.payment}</div></div>
               </div>
-              <div style={{ overflowX: "auto", border: "1px solid #edf0ed", borderRadius: 7 }}>
+              <div className="dashboard-invoice-preview-table-scroll" style={{ overflowX: "auto", border: "1px solid #edf0ed", borderRadius: 7 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left" }}>
                   <thead><tr>
                     {["Product", "Details", "Batch", "Qty", "Unit price", "Total"].map((heading) => (
@@ -179,7 +181,7 @@ export default function InvoicePage() {
                   </tbody>
                 </table>
               </div>
-              <div style={{ display: "grid", justifyContent: "end", gap: 8, marginTop: 20, color: "#526158", fontSize: 13 }}>
+              <div className="dashboard-invoice-preview-totals" style={{ display: "grid", justifyContent: "end", gap: 8, marginTop: 20, color: "#526158", fontSize: 13 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 32 }}><span>Subtotal</span><strong>{formatPrice(selectedInvoice.subtotalAmount ?? selectedInvoice.amount)}</strong></div>
                 {(selectedInvoice.discountAmount ?? 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", gap: 32 }}><span>Discount</span><strong>-{formatPrice(selectedInvoice.discountAmount ?? 0)}</strong></div>}
                 {(selectedInvoice.taxAmount ?? 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", gap: 32 }}><span>VAT/TAX ({selectedInvoice.taxRate ?? 0}%)</span><strong>{formatPrice(selectedInvoice.taxAmount ?? 0)}</strong></div>}
@@ -190,7 +192,7 @@ export default function InvoicePage() {
               </div>
               {invoiceActionError && <p role="alert" style={{ margin: "14px 0 0", color: "#b34b43", fontSize: 12 }}>{invoiceActionError}</p>}
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 24px", borderTop: "1px solid #e9eeea" }}>
+            <div className="dashboard-invoice-preview-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 24px", borderTop: "1px solid #e9eeea" }}>
               <button type="button" onClick={() => setSelectedInvoice(null)} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
               <button type="button" onClick={() => {
                 try {
