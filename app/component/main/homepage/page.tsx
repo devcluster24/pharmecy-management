@@ -1,4 +1,5 @@
 import Navbar from "./Navbar";
+import Link from "next/link";
 
 export default function HomepagePage() {
   return (
@@ -129,7 +130,8 @@ export default function HomepagePage() {
               Start Free Setup <span style={{ marginLeft: 12 }}>→</span>
             </a>
 
-            <button
+            <Link
+              href="/features"
               style={{
                 border: "1px solid rgba(13,44,42,0.12)",
                 background: "rgba(255,255,255,0.45)",
@@ -138,11 +140,11 @@ export default function HomepagePage() {
                 borderRadius: 12,
                 fontSize: 14,
                 fontWeight: 700,
-                cursor: "pointer",
+                textDecoration: "none",
               }}
             >
               See Features
-            </button>
+            </Link>
           </div>
 
           <div

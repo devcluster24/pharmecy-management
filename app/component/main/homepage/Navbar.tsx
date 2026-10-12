@@ -48,24 +48,46 @@ export default function Navbar() {
             fontWeight: 500,
           }}
         >
-          {[
-            "Features",
-            "Pricing",
-            "FAQ",
-            "Contact",
-          ].map((item) => (
-            <a
-              key={item}
-              href="#"
-              style={{
-                color: "#0d2c2a",
-                textDecoration: "none",
-                opacity: 0.9,
-              }}
-            >
-              {item}
-            </a>
-          ))}
+          <Link
+            href="/features"
+            style={{
+              color: "#0d2c2a",
+              textDecoration: "none",
+              opacity: 0.9,
+            }}
+          >
+            Features
+          </Link>
+          <Link
+            href="/pricing"
+            style={{
+              color: "#0d2c2a",
+              textDecoration: "none",
+              opacity: 0.9,
+            }}
+          >
+            Pricing
+          </Link>
+          <Link
+            href="/faq"
+            style={{
+              color: "#0d2c2a",
+              textDecoration: "none",
+              opacity: 0.9,
+            }}
+          >
+            FAQ
+          </Link>
+          <Link
+            href="/contact"
+            style={{
+              color: "#0d2c2a",
+              textDecoration: "none",
+              opacity: 0.9,
+            }}
+          >
+            Contact
+          </Link>
         </nav>
 
         <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
