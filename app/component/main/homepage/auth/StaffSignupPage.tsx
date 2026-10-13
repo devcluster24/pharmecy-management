@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import PasswordInput from "@/app/component/PasswordInput";
 import { supabase } from "@/lib/supabase/client";
@@ -135,7 +136,7 @@ export default function StaffSignupPage({ token }: { token: string }) {
     <main className="public-auth-page public-auth-layout" style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", background: "#f6f5f4", color: "#1f2937", fontFamily: "Inter, Arial, sans-serif" }}>
       <section className="public-auth-panel" style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "48px clamp(24px, 7vw, 80px)" }}>
         <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 44, color: "#1f2937", textDecoration: "none" }}>
-          <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "linear-gradient(135deg, #2ad49a, #1ac490)", color: "#fff", fontSize: 14, fontWeight: 900 }}>⚡</span>
+          <Image src="/pharmacy-icon.png" alt="" width={36} height={36} aria-hidden="true" />
           <strong style={{ fontSize: 18, fontWeight: 650 }}>Pharmacy Cluster</strong>
         </Link>
         <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>

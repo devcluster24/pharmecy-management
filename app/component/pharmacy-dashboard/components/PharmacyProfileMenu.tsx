@@ -135,6 +135,7 @@ export default function PharmacyProfileMenu() {
         >
           <button
             type="button"
+            className="dashboard-profile-action-button"
             role="menuitem"
             onClick={() => {
               setIsOpen(false);
@@ -153,10 +154,15 @@ export default function PharmacyProfileMenu() {
               cursor: "pointer",
             }}
           >
+            <svg className="dashboard-profile-action-icon" aria-hidden="true" viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="6.25" r="3.25" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M3.75 17c.35-3.05 2.85-5 6.25-5s5.9 1.95 6.25 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
             Profile
           </button>
           <button
             type="button"
+            className="dashboard-profile-action-button dashboard-profile-logout-button"
             role="menuitem"
             onClick={handleSignOut}
             disabled={isSigningOut}
@@ -173,7 +179,10 @@ export default function PharmacyProfileMenu() {
               cursor: isSigningOut ? "wait" : "pointer",
             }}
           >
-            {isSigningOut ? "Signing out..." : "Sign out"}
+            <svg className="dashboard-profile-action-icon" aria-hidden="true" viewBox="0 0 20 20" fill="none">
+              <path d="M8.25 3.5H4.5v13h3.75M11 6.25 14.75 10 11 13.75M14.5 10H7.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {isSigningOut ? "Logging out..." : "Logout"}
           </button>
           {errorMessage && (
             <p role="alert" style={{ margin: "4px 8px 6px", color: "#a33d35", fontSize: 11 }}>

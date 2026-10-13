@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useState, useSyncExternalStore, type ReactNode } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
@@ -351,31 +351,31 @@ function getReturnSummary(records: ReturnRecord[]): ReturnSummary[] {
 
 function Metrics({ items }: { items: ReportMetric[] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+    <div className="report-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
       {items.map((item) => {
         const style = { minHeight: 84, width: "100%", boxSizing: "border-box" as const, border: "1px solid #e4e9e5", borderRadius: 7, background: "#fff", padding: "13px 15px", textAlign: "left" as const };
         const content = (
           <>
-          <div style={{ color: "#687871", fontSize: 11 }}>{item.label}</div>
-          <div style={{ marginTop: 7, color: "#172622", fontSize: 20, fontWeight: 700 }}>{item.value}</div>
-          <div style={{ marginTop: 4, color: "#85918c", fontSize: 10 }}>{item.detail}</div>
+          <div className="report-metric-label" style={{ color: "#687871", fontSize: 11 }}>{item.label}</div>
+          <div className="report-metric-value" style={{ marginTop: 7, color: "#172622", fontSize: 20, fontWeight: 700 }}>{item.value}</div>
+          <div className="report-metric-detail" style={{ marginTop: 4, color: "#85918c", fontSize: 10 }}>{item.detail}</div>
           {item.onClick && <div style={{ marginTop: 7, color: "#16845f", fontSize: 10, fontWeight: 700 }}>Click to see details</div>}
           </>
         );
         return item.onClick ? (
-          <button key={item.label} type="button" onClick={item.onClick} style={{ ...style, cursor: "pointer" }}>{content}</button>
+          <button className="report-metric-card" key={item.label} type="button" onClick={item.onClick} style={{ ...style, cursor: "pointer" }}>{content}</button>
         ) : (
-          <article key={item.label} style={style}>{content}</article>
+          <article className="report-metric-card" key={item.label} style={style}>{content}</article>
         );
       })}
     </div>
   );
 }
 
-function ReportPanel({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+function ReportPanel({ title, description, className, children }: { title: string; description?: string; className?: string; children: ReactNode }) {
   return (
-    <section style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
-      <header style={{ padding: "14px 16px", borderBottom: "1px solid #edf0ed" }}>
+    <section className={`report-panel${className ? ` ${className}` : ""}`} style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
+      <header className="report-panel-header" style={{ padding: "14px 16px", borderBottom: "1px solid #edf0ed" }}>
         <h2 style={{ margin: 0, color: "#26352f", fontSize: 14 }}>{title}</h2>
         {description && <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 11, lineHeight: 1.5 }}>{description}</p>}
       </header>
@@ -391,6 +391,7 @@ function ReportTable({
   onRowClick,
   showPagination = true,
   fitContainer = false,
+  mobileExpandable = false,
 }: {
   columns: string[];
   rows: ReactNode[][];
@@ -398,8 +399,10 @@ function ReportTable({
   onRowClick?: (rowIndex: number) => void;
   showPagination?: boolean;
   fitContainer?: boolean;
+  mobileExpandable?: boolean;
 }) {
   const [page, setPage] = useState(1);
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const totalPages = Math.max(1, Math.ceil(rows.length / reportsPerPage));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = showPagination
@@ -407,34 +410,66 @@ function ReportTable({
     : rows;
   return (
     <>
-      <div style={{ overflowX: fitContainer ? "hidden" : "auto", width: "100%" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: fitContainer ? 0 : 680, tableLayout: fitContainer ? "fixed" : "auto", textAlign: "left" }}>
+      <div className={`report-table-scroll${fitContainer ? " is-fit-container" : ""}${mobileExpandable ? " is-mobile-expandable" : ""}`} style={{ overflowX: fitContainer ? "hidden" : "auto", width: "100%" }}>
+        <table className={`report-table${fitContainer ? " is-fit-container" : ""}${mobileExpandable ? " is-mobile-expandable" : ""}`} style={{ width: "100%", borderCollapse: "collapse", minWidth: fitContainer ? 0 : 680, tableLayout: fitContainer ? "fixed" : "auto", textAlign: "left" }}>
           <thead>
             <tr>{columns.map((column) => <th key={column} style={{ padding: fitContainer ? "9px 7px" : "10px 12px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 10, fontWeight: 650, whiteSpace: fitContainer ? "normal" : "nowrap", overflowWrap: fitContainer ? "anywhere" : undefined }}>{column}</th>)}</tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, rowIndex) => (
-              <tr
-                key={`${currentPage}-${rowIndex}`}
-                onClick={onRowClick ? () => onRowClick((currentPage - 1) * reportsPerPage + rowIndex) : undefined}
-                onKeyDown={onRowClick ? (event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onRowClick((currentPage - 1) * reportsPerPage + rowIndex);
-                  }
-                } : undefined}
-                tabIndex={onRowClick ? 0 : undefined}
-                style={onRowClick ? { cursor: "pointer" } : undefined}
-              >
-                {row.map((cell, columnIndex) => <td key={`${rowIndex}-${columnIndex}`} style={{ padding: fitContainer ? "9px 7px" : "10px 12px", borderBottom: rowIndex === visibleRows.length - 1 ? 0 : "1px solid #f0f2f0", color: "#42524b", fontSize: 11, verticalAlign: "top", overflowWrap: fitContainer ? "anywhere" : undefined }}>{cell}</td>)}
-              </tr>
-            ))}
+            {visibleRows.map((row, rowIndex) => {
+              const absoluteRowIndex = (currentPage - 1) * reportsPerPage + rowIndex;
+              const isExpanded = expandedRow === absoluteRowIndex;
+              return (
+                <Fragment key={`${currentPage}-${rowIndex}`}>
+                  <tr
+                    className={mobileExpandable ? "report-table-expandable-row" : undefined}
+                    aria-expanded={mobileExpandable ? isExpanded : undefined}
+                    onClick={(event) => {
+                      if (event.target instanceof Element && event.target.closest("button")) return;
+                      if (mobileExpandable && window.matchMedia("(max-width: 760px)").matches) {
+                        setExpandedRow((current) => current === absoluteRowIndex ? null : absoluteRowIndex);
+                      } else if (onRowClick) {
+                        onRowClick(absoluteRowIndex);
+                      }
+                    }}
+                    onKeyDown={mobileExpandable || onRowClick ? (event) => {
+                      if (event.target instanceof Element && event.target.closest("button")) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      if (mobileExpandable && window.matchMedia("(max-width: 760px)").matches) {
+                        setExpandedRow((current) => current === absoluteRowIndex ? null : absoluteRowIndex);
+                      } else if (onRowClick) {
+                        onRowClick(absoluteRowIndex);
+                      }
+                    } : undefined}
+                    tabIndex={mobileExpandable || onRowClick ? 0 : undefined}
+                    style={mobileExpandable || onRowClick ? { cursor: "pointer" } : undefined}
+                  >
+                    {row.map((cell, columnIndex) => <td key={`${rowIndex}-${columnIndex}`} style={{ padding: fitContainer ? "9px 7px" : "10px 12px", borderBottom: rowIndex === visibleRows.length - 1 ? 0 : "1px solid #f0f2f0", color: "#42524b", fontSize: 11, verticalAlign: "top", overflowWrap: fitContainer ? "anywhere" : undefined }}>{cell}</td>)}
+                  </tr>
+                  {mobileExpandable && isExpanded && (
+                    <tr className="report-table-expanded-row">
+                      <td colSpan={columns.length}>
+                        <div className="report-table-expanded-details">
+                          {row.map((cell, columnIndex) => (
+                            <div className="report-table-expanded-value" key={`${absoluteRowIndex}-${columnIndex}`}>
+                              <span>{columns[columnIndex]}</span>
+                              <strong>{cell}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {rows.length === 0 && <tr><td colSpan={columns.length} style={{ padding: 22, color: "#87928d", fontSize: 12, textAlign: "center" }}>{emptyMessage}</td></tr>}
           </tbody>
         </table>
       </div>
       {showPagination && (
-        <footer style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", color: "#87928d", fontSize: 10 }}>
+        <footer className="report-table-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", color: "#87928d", fontSize: 10 }}>
           <span>{rows.length === 0 ? "Showing 0 records" : `Showing ${(currentPage - 1) * reportsPerPage + 1}-${Math.min(currentPage * reportsPerPage, rows.length)} of ${rows.length} records`}</span>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <button type="button" aria-label="Previous page" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "5px 8px", fontSize: 10, cursor: currentPage <= 1 ? "not-allowed" : "pointer", opacity: currentPage <= 1 ? 0.5 : 1 }}>Previous</button>
@@ -985,8 +1020,8 @@ export default function ReportsPage() {
             <CompanySalesBarChart entries={companySalesEntries} />
           </div>
         </ReportPanel>
-        <ReportPanel title="Invoice details" description="Click an invoice number to view its items and amounts.">
-          <ReportTable columns={["Invoice", "Customer", "Date", "Items", "Total", "Discount", "VAT / TAX", "Rounding", "Paid", "Due", "Status"]} rows={invoiceRows} emptyMessage="No invoices in this date range." />
+        <ReportPanel className="report-invoice-details-panel" title="Invoice details" description="Click an invoice number to view its items and amounts.">
+          <ReportTable columns={["Invoice", "Customer", "Date", "Items", "Total", "Discount", "VAT / TAX", "Rounding", "Paid", "Due", "Status"]} rows={invoiceRows} emptyMessage="No invoices in this date range." mobileExpandable />
         </ReportPanel>
       </div>
     );
@@ -1201,32 +1236,32 @@ export default function ReportsPage() {
         data={pageData}
         hideAction
         content={(
-          <div style={{ display: "grid", gap: 16 }}>
-            <section aria-label="Report date range" style={{ display: "grid", gap: 12, padding: 15, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7 }}>
+          <div className="report-page-content" style={{ display: "grid", gap: 16 }}>
+            <section className="report-date-range" aria-label="Report date range" style={{ display: "grid", gap: 12, padding: 15, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
+              <div className="report-period-controls" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7 }}>
                 {periodOptions.map((option) => (
-                  <button key={option.value} type="button" aria-pressed={period === option.value} onClick={() => setPeriod(option.value)} style={{ border: `1px solid ${period === option.value ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: period === option.value ? "#eef8f2" : "#fff", color: period === option.value ? "#17704e" : "#526158", padding: "7px 9px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}>{option.label}</button>
+                    <button className="report-period-button" key={option.value} type="button" aria-pressed={period === option.value} onClick={() => setPeriod(option.value)} style={{ border: `1px solid ${period === option.value ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: period === option.value ? "#eef8f2" : "#fff", color: period === option.value ? "#17704e" : "#526158", padding: "7px 9px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}>{option.label}</button>
                 ))}
-                <button type="button" aria-pressed={period === "custom"} onClick={() => setPeriod("custom")} style={{ border: `1px solid ${period === "custom" ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: period === "custom" ? "#eef8f2" : "#fff", color: period === "custom" ? "#17704e" : "#526158", padding: "7px 9px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}>Custom range</button>
+                  <button className="report-period-button" type="button" aria-pressed={period === "custom"} onClick={() => setPeriod("custom")} style={{ border: `1px solid ${period === "custom" ? "#179c70" : "#dce5df"}`, borderRadius: 5, background: period === "custom" ? "#eef8f2" : "#fff", color: period === "custom" ? "#17704e" : "#526158", padding: "7px 9px", fontSize: 11, fontWeight: 650, cursor: "pointer" }}>Custom range</button>
                 {period === "custom" && (
                   <>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#526158", fontSize: 10 }}>From <input aria-label="Report start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.currentTarget.value)} style={{ border: "1px solid #dce5df", borderRadius: 5, padding: "6px 7px", color: "#26352f", fontSize: 11 }} /></label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#526158", fontSize: 10 }}>To <input aria-label="Report end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.currentTarget.value)} style={{ border: "1px solid #dce5df", borderRadius: 5, padding: "6px 7px", color: "#26352f", fontSize: 11 }} /></label>
+                      <label className="report-custom-date" style={{ display: "flex", alignItems: "center", gap: 6, color: "#526158", fontSize: 10 }}>From <input aria-label="Report start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.currentTarget.value)} style={{ border: "1px solid #dce5df", borderRadius: 5, padding: "6px 7px", color: "#26352f", fontSize: 11 }} /></label>
+                      <label className="report-custom-date" style={{ display: "flex", alignItems: "center", gap: 6, color: "#526158", fontSize: 10 }}>To <input aria-label="Report end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.currentTarget.value)} style={{ border: "1px solid #dce5df", borderRadius: 5, padding: "6px 7px", color: "#26352f", fontSize: 11 }} /></label>
                   </>
                 )}
-                <div style={{ display: "flex", gap: 7, marginLeft: "auto" }}>
-                  <button type="button" disabled={!dateRange} onClick={exportCurrentReport} style={{ border: "1px solid #b9dfd0", borderRadius: 5, background: "#fff", color: "#17704e", padding: "8px 10px", fontSize: 11, fontWeight: 650, cursor: dateRange ? "pointer" : "not-allowed", opacity: dateRange ? 1 : 0.5 }}>Download CSV</button>
+                  <div className="report-export-actions" style={{ display: "flex", gap: 7, marginLeft: "auto" }}>
+                    <button className="report-export-button" type="button" disabled={!dateRange} onClick={exportCurrentReport} style={{ border: "1px solid #b9dfd0", borderRadius: 5, background: "#fff", color: "#17704e", padding: "8px 10px", fontSize: 11, fontWeight: 650, cursor: dateRange ? "pointer" : "not-allowed", opacity: dateRange ? 1 : 0.5 }}>Download CSV</button>
                 </div>
               </div>
               <div aria-live="polite" style={{ color: dateRange ? "#687871" : "#ad4b43", fontSize: 11 }}>{dateRange ? `Selected period: ${formatDate(dateRange.start)} – ${formatDate(dateRange.end)}` : "Choose a valid date range. The start date must not be after the end date."}</div>
             </section>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 14 }}>
-              <nav aria-label="Report sections" style={{ display: "flex", flex: "0 0 190px", flexDirection: "column", gap: 5, padding: 6, border: "1px solid #e4e9e5", borderRadius: 7, background: "#fff" }}>
+            <div className="report-workspace" style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 14 }}>
+              <nav className="report-section-menu" aria-label="Report sections" style={{ display: "flex", flex: "0 0 190px", flexDirection: "column", gap: 5, padding: 6, border: "1px solid #e4e9e5", borderRadius: 7, background: "#fff" }}>
                 {reportTabs.map((tab) => (
-                  <button key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)} style={{ width: "100%", border: 0, borderRadius: 5, background: activeTab === tab.value ? "#eaf6f0" : "transparent", color: activeTab === tab.value ? "#17704e" : "#687871", padding: "10px 11px", fontSize: 11, fontWeight: 700, textAlign: "left", cursor: "pointer" }}>{tab.label}</button>
+                  <button className="report-section-menu-button" key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)} style={{ width: "100%", border: 0, borderRadius: 5, background: activeTab === tab.value ? "#eaf6f0" : "transparent", color: activeTab === tab.value ? "#17704e" : "#687871", padding: "10px 11px", fontSize: 11, fontWeight: 700, textAlign: "left", cursor: "pointer" }}>{tab.label}</button>
                 ))}
               </nav>
-              <div style={{ display: "grid", flex: "1 1 520px", minWidth: 0, gap: 12 }}>
+              <div className="report-active-content" style={{ display: "grid", flex: "1 1 520px", minWidth: 0, gap: 12 }}>
                 {exportError && <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>{exportError}</p>}
                 {activeReport}
               </div>
@@ -1235,9 +1270,9 @@ export default function ReportsPage() {
         )}
       />
       {selectedInvoice && (
-        <div onClick={(event) => { if (event.target === event.currentTarget) setSelectedInvoice(null); }} style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 18, background: "rgba(18, 35, 27, 0.48)" }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="report-invoice-title" style={{ width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto", borderRadius: 9, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}>
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "16px 18px", borderBottom: "1px solid #e9eeea" }}>
+        <div className="report-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setSelectedInvoice(null); }} style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 18, background: "rgba(18, 35, 27, 0.48)" }}>
+          <section className="report-modal-dialog report-invoice-dialog" role="dialog" aria-modal="true" aria-labelledby="report-invoice-title" style={{ width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto", borderRadius: 9, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}>
+            <header className="report-modal-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "16px 18px", borderBottom: "1px solid #e9eeea" }}>
               <div><h2 id="report-invoice-title" style={{ margin: 0, color: "#20342a", fontSize: 16 }}>Invoice {selectedInvoice.invoice}</h2><p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 11 }}>{selectedInvoice.customer} · {formatDateValue(selectedInvoice.createdAt)}</p></div>
               <button type="button" onClick={() => setSelectedInvoice(null)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#526158", padding: "6px 9px", fontSize: 11, cursor: "pointer" }}>Close</button>
             </header>
@@ -1255,9 +1290,9 @@ export default function ReportsPage() {
         </div>
       )}
       {reportDetails && (
-        <div onClick={(event) => { if (event.target === event.currentTarget) setReportDetails(null); }} style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 18, background: "rgba(18, 35, 27, 0.48)" }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="report-details-title" style={{ width: "min(900px, 100%)", maxHeight: "88vh", overflowY: "auto", borderRadius: 9, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}>
-            <header style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "15px 18px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
+        <div className="report-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setReportDetails(null); }} style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 18, background: "rgba(18, 35, 27, 0.48)" }}>
+          <section className="report-modal-dialog report-details-dialog" role="dialog" aria-modal="true" aria-labelledby="report-details-title" style={{ width: "min(900px, 100%)", maxHeight: "88vh", overflowY: "auto", borderRadius: 9, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}>
+            <header className="report-modal-header" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "15px 18px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
               <h2 id="report-details-title" style={{ margin: 0, color: "#20342a", fontSize: 15 }}>{reportDetails.title}</h2>
               <button type="button" onClick={() => setReportDetails(null)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#526158", padding: "6px 9px", fontSize: 11, cursor: "pointer" }}>Close</button>
             </header>

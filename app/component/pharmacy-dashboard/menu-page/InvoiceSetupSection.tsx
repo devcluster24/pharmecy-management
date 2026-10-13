@@ -441,7 +441,7 @@ function InvoiceSetupEditor({
     const title = section === "header" ? "Header information" : "Footer information";
 
     return (
-      <section aria-label={title} style={panelStyle}>
+      <section className="dashboard-settings-invoice-editor" aria-label={title} style={panelStyle}>
         <h3 style={{ margin: "0 0 5px", color: "#203128", fontSize: 14 }}>{title}</h3>
         <p style={{ margin: "0 0 14px", color: "#718078", fontSize: 11, lineHeight: 1.5 }}>
           Add, edit, remove, or drag items to change their order. Header and footer items stay in their own section.
@@ -536,7 +536,7 @@ function InvoiceSetupEditor({
   }
 
   return (
-    <section aria-labelledby="invoice-setup-title" style={{ width: "100%", maxWidth: 1100, color: "#26352f" }}>
+    <section className="dashboard-settings-invoice-setup" aria-labelledby="invoice-setup-title" style={{ width: "100%", maxWidth: 1100, color: "#26352f" }}>
       <header style={{ marginBottom: 18 }}>
         <h2 id="invoice-setup-title" style={{ margin: 0, color: "#203128", fontSize: 19, fontWeight: 750 }}>Invoice Setup</h2>
         <p style={{ margin: "6px 0 0", color: "#718078", fontSize: 12, lineHeight: 1.6 }}>
@@ -548,7 +548,7 @@ function InvoiceSetupEditor({
       {message && <p role="status" style={{ margin: "0 0 12px", border: "1px solid #cce9d8", borderRadius: 6, background: "#f3fbf6", padding: 10, color: "#16845f", fontSize: 12 }}>{message}</p>}
 
       <fieldset disabled={isSaving} style={{ display: "contents", border: 0, margin: 0, padding: 0 }}>
-      <section aria-label="Invoice page size" style={{ ...panelStyle, display: "grid", gridTemplateColumns: "minmax(180px, 0.8fr) repeat(2, minmax(110px, 0.5fr))", alignItems: "end", gap: 10, marginBottom: 14 }}>
+      <section className="dashboard-settings-invoice-page-size" aria-label="Invoice page size" style={{ ...panelStyle, display: "grid", gridTemplateColumns: "minmax(180px, 0.8fr) repeat(2, minmax(110px, 0.5fr))", alignItems: "end", gap: 10, marginBottom: 14 }}>
         <label style={{ display: "grid", gap: 6, color: "#34453b", fontSize: 11, fontWeight: 650 }}>
           Invoice page size
           <select
@@ -631,7 +631,7 @@ function InvoiceSetupEditor({
       </div>
 
       <fieldset disabled={isSaving} style={{ display: "contents", border: 0, margin: 0, padding: 0 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 205px), 1fr))", gap: 12, marginBottom: 18 }}>
+      <div className="dashboard-settings-invoice-templates" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 205px), 1fr))", gap: 12, marginBottom: 18 }}>
         {draft.templates.map((template) => {
           const active = draft.activeTemplateId === template.id;
           const selected = selectedTemplateId === template.id;
@@ -660,7 +660,7 @@ function InvoiceSetupEditor({
         })}
       </div>
 
-      <section style={{ ...panelStyle, marginBottom: 14 }}>
+      <section className="dashboard-settings-invoice-template-name" style={{ ...panelStyle, marginBottom: 14 }}>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(180px, 0.6fr)", alignItems: "end", gap: 12 }}>
           <label style={{ display: "grid", gap: 6, color: "#34453b", fontSize: 11, fontWeight: 650 }}>
             Template name
@@ -678,7 +678,7 @@ function InvoiceSetupEditor({
         </div>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 380px), 1fr))", alignItems: "start", gap: 14 }}>
+      <div className="dashboard-settings-invoice-editors" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 380px), 1fr))", alignItems: "start", gap: 14 }}>
         {renderSectionEditor("header")}
         {renderSectionEditor("footer")}
       </div>

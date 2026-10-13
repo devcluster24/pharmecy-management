@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { downloadSubscriptionInvoicePdf, type SubscriptionInvoice } from "@/lib/subscriptionInvoicePdf";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
+import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { usePharmacySubscriptionExpiry } from "../../auth/PharmacySubscriptionExpiry";
 
 type BillingProfile = {
@@ -166,6 +167,35 @@ export default function SubscriptionBillingSection() {
     (safePaymentHistoryPage - 1) * PAYMENT_HISTORY_PER_PAGE,
     safePaymentHistoryPage * PAYMENT_HISTORY_PER_PAGE,
   );
+  const mobilePaymentHistoryRows = visiblePaymentHistory.map((entry) => {
+    const expiryTime = entry.expires_at ? Date.parse(entry.expires_at) : null;
+    const hasValidExpiry = expiryTime !== null && Number.isFinite(expiryTime);
+    const isExpired = hasValidExpiry && expiryTime <= now;
+    const statusStyle = entry.status === "Active"
+      ? { background: "#e8f6ee", color: "#18794e" }
+      : entry.status === "Past Due"
+        ? { background: "#fff2dd", color: "#9b6412" }
+        : { background: "#f0f3f1", color: "#65746b" };
+
+    return [
+      formatDate(entry.occurred_at),
+      <button
+        key={`payment-invoice-${entry.id}`}
+        type="button"
+        onClick={() => { setSelectedInvoice(entry); setInvoiceActionError(""); }}
+        style={{ border: 0, padding: 0, background: "transparent", color: "#16845d", fontSize: 9, fontWeight: 700, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}
+      >
+        {entry.invoice_number}
+      </button>,
+      entry.plan_name,
+      formatAmount(entry.amount),
+      entry.payment_method || "—",
+      <span key={`payment-status-${entry.id}`} style={{ display: "inline-block", borderRadius: 999, padding: "3px 5px", ...statusStyle, fontSize: 8, fontWeight: 700 }}>
+        {entry.status}
+      </span>,
+      !hasValidExpiry ? "—" : isExpired ? "Expired" : `Expires in ${formatRemaining(expiryTime - now)}`,
+    ];
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -290,7 +320,7 @@ export default function SubscriptionBillingSection() {
   } as const;
 
   return (
-    <section aria-labelledby="billing-title" style={{ color: "#26352f" }}>
+    <section className="dashboard-settings-billing" aria-labelledby="billing-title" style={{ color: "#26352f" }}>
       <header style={{ marginBottom: 20 }}>
         <h2 id="billing-title" style={{ margin: 0, color: "#203128", fontSize: 23, lineHeight: 1.25, fontWeight: 750, letterSpacing: "-0.03em" }}>
           Subscription &amp; Billing
@@ -430,7 +460,7 @@ export default function SubscriptionBillingSection() {
         ))}
       </div>
 
-      <section aria-labelledby="payment-history-title" style={{ ...cardStyle, overflow: "hidden" }}>
+      <section className="dashboard-settings-payment-history" aria-labelledby="payment-history-title" style={{ ...cardStyle, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf1ee" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span aria-hidden="true" style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: 8, background: "#e8f5ed", color: "#16845f", fontSize: 15 }}>▤</span>
@@ -447,7 +477,7 @@ export default function SubscriptionBillingSection() {
           </p>
         )}
 
-        <div style={{ overflowX: "auto" }}>
+        <div className="dashboard-settings-payment-history-desktop" style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse", textAlign: "left" }}>
             <thead>
               <tr>
@@ -501,7 +531,22 @@ export default function SubscriptionBillingSection() {
             </tbody>
           </table>
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid #edf1ee", padding: "12px 16px", color: "#87938c", fontSize: 10 }}>
+        <div className="dashboard-settings-payment-history-mobile">
+          {visiblePaymentHistory.length > 0 ? (
+            <DashboardSectionInvoiceTable
+              columns={["Date", "Invoice No.", "Plan", "Amount", "Payment", "Status", "Expiry"]}
+              rows={mobilePaymentHistoryRows}
+              rowKeys={visiblePaymentHistory.map((entry) => entry.id)}
+              mobileOnly
+              syncMobileScroll
+            />
+          ) : (
+            <div className="dashboard-settings-payment-history-empty">
+              {isHistoryLoading ? "Loading payment history..." : "No payment history is available."}
+            </div>
+          )}
+        </div>
+        <div className="dashboard-settings-payment-history-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid #edf1ee", padding: "12px 16px", color: "#87938c", fontSize: 10 }}>
           <span>
             {isHistoryLoading
               ? "Showing — payment history entries"
@@ -536,6 +581,7 @@ export default function SubscriptionBillingSection() {
       {selectedInvoice && (
         <div
           role="presentation"
+          className="dashboard-payment-invoice-overlay"
           onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedInvoice(null); }}
           style={{ position: "fixed", inset: 0, zIndex: 100, display: "grid", placeItems: "center", overflowY: "auto", padding: 16, background: "rgba(20, 35, 27, 0.48)" }}
         >
@@ -543,24 +589,34 @@ export default function SubscriptionBillingSection() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="payment-invoice-title"
+            className="dashboard-payment-invoice-dialog"
             style={{ width: "min(100%, 520px)", maxHeight: "calc(100vh - 32px)", overflowY: "auto", border: "1px solid #e3e9e4", borderRadius: 12, background: "#fff", boxShadow: "0 20px 60px rgba(20,35,27,0.22)" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "18px 20px", borderBottom: "1px solid #edf0ed" }}>
+            <div className="dashboard-payment-invoice-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "18px 20px", borderBottom: "1px solid #edf0ed" }}>
               <div>
                 <p style={{ margin: "0 0 5px", color: "#16845d", fontSize: 10, fontWeight: 750, letterSpacing: 0.8 }}>Pharmacy Cluster</p>
                 <h2 id="payment-invoice-title" style={{ margin: 0, color: "#203128", fontSize: 17, fontWeight: 750 }}>Payment Invoice · {selectedInvoice.invoice_number}</h2>
               </div>
               <button type="button" aria-label="Close invoice" onClick={() => setSelectedInvoice(null)} style={{ alignSelf: "flex-start", border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px", padding: 20, color: "#526158", fontSize: 11 }}>
+            <div className="dashboard-payment-invoice-summary">
+              <span>Amount paid</span>
+              <strong>{formatAmount(selectedInvoice.amount)}</strong>
+              <span>{formatDate(selectedInvoice.occurred_at)}</span>
+            </div>
+            <div className="dashboard-payment-invoice-details" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px", padding: 20, color: "#526158", fontSize: 11 }}>
               <div><span style={{ color: "#87928d" }}>Pharmacy</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{profile?.storeName || "Pharmacy account"}</div></div>
               <div><span style={{ color: "#87928d" }}>Plan</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{selectedInvoice.plan_name}</div></div>
               <div><span style={{ color: "#87928d" }}>Account holder</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{profile?.fullName || "Pharmacy Owner"}</div></div>
               <div><span style={{ color: "#87928d" }}>Email</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650, overflowWrap: "anywhere" }}>{profile?.email || "—"}</div></div>
               <div><span style={{ color: "#87928d" }}>Phone number</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{profile?.phone || "—"}</div></div>
+              <div className="dashboard-payment-invoice-mobile-extra"><span style={{ color: "#87928d" }}>Payment method</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{selectedInvoice.payment_method || "—"}</div></div>
+              <div className="dashboard-payment-invoice-mobile-extra"><span style={{ color: "#87928d" }}>Account number</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650, overflowWrap: "anywhere" }}>{selectedInvoice.account_number || "—"}</div></div>
+              <div className="dashboard-payment-invoice-mobile-extra"><span style={{ color: "#87928d" }}>Billing period</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{formatBillingPeriod(selectedInvoice)}</div></div>
+              <div className="dashboard-payment-invoice-mobile-extra"><span style={{ color: "#87928d" }}>Status</span><div style={{ marginTop: 4, color: "#26372f", fontWeight: 650 }}>{selectedInvoice.status}</div></div>
             </div>
-            {invoiceActionError && <p role="alert" style={{ margin: "0 20px 14px", color: "#ad4b43", fontSize: 11 }}>{invoiceActionError}</p>}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 20px 18px" }}>
+            {invoiceActionError && <p className="dashboard-payment-invoice-error" role="alert" style={{ margin: "0 20px 14px", color: "#ad4b43", fontSize: 11 }}>{invoiceActionError}</p>}
+            <div className="dashboard-payment-invoice-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 20px 18px" }}>
               <button type="button" onClick={() => setSelectedInvoice(null)} style={{ border: "1px solid #dce8e0", borderRadius: 7, background: "#f8fbf9", color: "#66756d", padding: "8px 13px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Close</button>
               <button type="button" onClick={() => {
                 try {

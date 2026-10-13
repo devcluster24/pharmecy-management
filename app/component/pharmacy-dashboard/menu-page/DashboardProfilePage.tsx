@@ -244,11 +244,12 @@ export default function DashboardProfilePage() {
       hideAction
       data={pageData}
       content={
-        <section style={{ maxWidth: 820, overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 12, background: "#fff", boxShadow: "0 5px 20px rgba(26, 54, 39, 0.04)" }}>
-          <div style={{ height: 112, background: "linear-gradient(120deg, #e4f5eb 0%, #d9f0e4 50%, #eff7f1 100%)" }} />
-          <div style={{ padding: "0 26px 26px" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 16, marginTop: -44, marginBottom: 22, flexWrap: "wrap" }}>
+        <section className="dashboard-profile-card" style={{ maxWidth: 820, overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 12, background: "#fff", boxShadow: "0 5px 20px rgba(26, 54, 39, 0.04)" }}>
+          <div className="dashboard-profile-cover" style={{ height: 112, background: "linear-gradient(120deg, #e4f5eb 0%, #d9f0e4 50%, #eff7f1 100%)" }} />
+          <div className="dashboard-profile-content" style={{ padding: "0 26px 26px" }}>
+            <div className="dashboard-profile-identity" style={{ display: "flex", alignItems: "flex-end", gap: 16, marginTop: -44, marginBottom: 22, flexWrap: "wrap" }}>
               <div
+                className="dashboard-profile-avatar"
                 role={displayedPhoto ? "img" : undefined}
                 aria-label={displayedPhoto ? `${profile?.fullName || "User"} profile photo` : undefined}
                 style={{
@@ -270,19 +271,19 @@ export default function DashboardProfilePage() {
               >
                 {!displayedPhoto && initials}
               </div>
-              <div style={{ paddingBottom: 5 }}>
+              <div className="dashboard-profile-name" style={{ paddingBottom: 5 }}>
                 <h2 style={{ margin: 0, color: "#203128", fontSize: 21, letterSpacing: "-0.02em" }}>
                   {isLoading ? "Loading profile..." : isEditing ? fullNameDraft || "Your profile" : profile?.fullName || "Your profile"}
                 </h2>
                 {profile?.email && <p style={{ margin: "5px 0 0", color: "#718078", fontSize: 13 }}>{profile.email}</p>}
               </div>
               {profile && (
-                <span style={{ marginLeft: "auto", marginBottom: 7, borderRadius: 20, background: profile.status === "Active" ? "#e8f6ee" : "#fff4e5", color: profile.status === "Active" ? "#18794e" : "#946200", padding: "6px 11px", fontSize: 11, fontWeight: 700 }}>
+                <span className="dashboard-profile-status" style={{ marginLeft: "auto", marginBottom: 7, borderRadius: 20, background: profile.status === "Active" ? "#e8f6ee" : "#fff4e5", color: profile.status === "Active" ? "#18794e" : "#946200", padding: "6px 11px", fontSize: 11, fontWeight: 700 }}>
                   {profile.status}
                 </span>
               )}
               {profile && !isLoading && (
-                <div style={{ display: "flex", gap: 8, width: "100%", flexWrap: "wrap" }}>
+                <div className="dashboard-profile-controls" style={{ display: "flex", gap: 8, width: "100%", flexWrap: "wrap" }}>
                   {isEditing ? (
                     <>
                       <button type="button" disabled={isSaving} onClick={() => photoInput.current?.click()} style={{ border: "1px solid #cddfd3", borderRadius: 7, background: "#fff", color: "#246548", padding: "8px 11px", fontSize: 12, fontWeight: 650, cursor: isSaving ? "wait" : "pointer" }}>
@@ -306,7 +307,7 @@ export default function DashboardProfilePage() {
               <p role="status" style={{ color: "#718078", fontSize: 13 }}>Loading account information...</p>
             ) : profile && (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                <div className="dashboard-profile-details" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
                   {[
                     ["Full name", "fullName", profile.fullName || "Not provided"],
                     ["Email address", "email", profile.email || "Not provided"],
@@ -315,7 +316,7 @@ export default function DashboardProfilePage() {
                     ["Pharmacy", "store", profile.storeName || "Not assigned"],
                     ["Account status", "status", profile.status],
                   ].map(([label, key, value]) => (
-                    <div key={key} style={{ minWidth: 0, padding: "15px 16px", border: "1px solid #edf0ed", borderRadius: 9, background: "#fbfcfb" }}>
+                    <div key={key} className="dashboard-profile-detail" style={{ minWidth: 0, padding: "15px 16px", border: "1px solid #edf0ed", borderRadius: 9, background: "#fbfcfb" }}>
                       <div style={{ marginBottom: 7, color: "#849189", fontSize: 11, fontWeight: 600 }}>{label}</div>
                       {isEditing && key === "fullName" ? (
                         <input aria-label="Full name" autoComplete="name" maxLength={120} value={fullNameDraft} onChange={(event) => setFullNameDraft(event.currentTarget.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #dce5df", borderRadius: 6, padding: "8px 9px", color: "#26352f", fontSize: 13 }} />
@@ -328,7 +329,7 @@ export default function DashboardProfilePage() {
                   ))}
                 </div>
                 {isEditing && (
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                  <div className="dashboard-profile-edit-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
                     <button type="button" disabled={isSaving} onClick={cancelEditing} style={{ border: "1px solid #dce5df", borderRadius: 7, background: "#fff", color: "#52625a", padding: "9px 13px", fontSize: 12, fontWeight: 600, cursor: isSaving ? "wait" : "pointer" }}>Cancel</button>
                     <button type="button" disabled={isSaving || !fullNameDraft.trim()} onClick={() => void saveProfile()} style={{ border: 0, borderRadius: 7, background: "#16845d", color: "#fff", padding: "9px 15px", fontSize: 12, fontWeight: 700, cursor: isSaving ? "wait" : "pointer", opacity: isSaving || !fullNameDraft.trim() ? 0.7 : 1 }}>
                       {isSaving ? "Saving..." : "Save changes"}

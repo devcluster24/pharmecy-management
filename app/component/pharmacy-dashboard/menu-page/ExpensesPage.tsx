@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { confirmDelete } from "@/lib/confirmDelete";
 import {
   addExpense,
@@ -154,13 +155,13 @@ export default function ExpensesPage() {
       data={pageData}
       hideAction
       content={(
-        <div style={{ display: "grid", gap: 18 }}>
+        <div className="dashboard-expenses-content" style={{ display: "grid", gap: 18 }}>
           {(expenses.error || paymentMethodsSnapshot.error) && (
             <p role="alert" style={{ margin: 0, color: "#ad4b43", fontSize: 12 }}>
               {[expenses.error, paymentMethodsSnapshot.error].filter(Boolean).join(" ")}
             </p>
           )}
-          <section aria-label="Expense totals" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <section className="dashboard-expenses-metrics" aria-label="Expense totals" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
             {[
               { label: "This month", value: formatCurrency(monthlyTotal), detail: "Expenses recorded in the current month" },
               { label: "All expenses", value: String(expenses.rows.length), detail: "Total saved expense records" },
@@ -173,9 +174,9 @@ export default function ExpensesPage() {
             ))}
           </section>
 
-          <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", padding: 16 }}>
+          <section className="dashboard-expenses-form-panel" style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", padding: 16 }}>
             <h2 style={{ margin: "0 0 14px", color: "#26352f", fontSize: 15 }}>Add expense</h2>
-            <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", alignItems: "end", gap: 12 }}>
+            <form className="dashboard-expenses-form" onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", alignItems: "end", gap: 12 }}>
               <label style={{ display: "grid", gap: 6, color: "#526158", fontSize: 11 }}>
                 Date
                 <input aria-label="Expense date" type="date" required value={date} onChange={(event) => setDate(event.currentTarget.value)} style={inputStyle} />
@@ -205,17 +206,17 @@ export default function ExpensesPage() {
             {formError && <p role="alert" style={{ margin: "11px 0 0", color: "#ad4b43", fontSize: 11 }}>{formError}</p>}
           </section>
 
-          <section style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
-            <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px", borderBottom: "1px solid #edf0ed" }}>
+          <section className="dashboard-expenses-list" style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
+            <header className="dashboard-expenses-list-header" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px", borderBottom: "1px solid #edf0ed" }}>
               <div>
                 <h2 style={{ margin: 0, color: "#26352f", fontSize: 15 }}>Expense list</h2>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 10 }}>Search by date, category, description, payment method, or amount.</p>
               </div>
-              <input aria-label="Search expenses" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setCurrentPage(1); }} placeholder="Search expenses..." style={{ ...inputStyle, width: 240, maxWidth: "100%" }} />
+              <input className="dashboard-expenses-search" aria-label="Search expenses" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setCurrentPage(1); }} placeholder="Search expenses..." style={{ ...inputStyle, width: 240, maxWidth: "100%" }} />
             </header>
             {actionError && <p role="alert" style={{ margin: 0, padding: "10px 16px", color: "#ad4b43", fontSize: 11 }}>{actionError}</p>}
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", textAlign: "left" }}>
+            <div className="dashboard-expenses-table-scroll dashboard-invoice-desktop-table" style={{ overflowX: "auto" }}>
+              <table className="dashboard-expenses-table" style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", textAlign: "left" }}>
                 <thead>
                   <tr>{["Date", "Category", "Description", "Payment method", "Amount", "Action"].map((column) => <th key={column} style={{ padding: "11px 13px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 10, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>)}</tr>
                 </thead>
@@ -236,7 +237,23 @@ export default function ExpensesPage() {
                 </tbody>
               </table>
             </div>
-            <footer style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 13px", color: "#87928d", fontSize: 10 }}>
+            <div className="dashboard-expenses-mobile-table">
+              <DashboardSectionInvoiceTable
+                columns={["Date", "Category", "Description", "Payment method", "Amount", "Action"]}
+                rowKeys={visibleExpenses.map((expense) => expense.id)}
+                rows={visibleExpenses.map((expense) => [
+                  formatExpenseDate(expense.date),
+                  expense.category,
+                  expense.description,
+                  expense.paymentMethod,
+                  formatCurrency(expense.amount),
+                  <button key={`delete-${expense.id}`} type="button" onClick={() => handleDelete(expense)} aria-label={`Delete expense ${expense.description}`} style={{ border: "1px solid #f0d5d3", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "6px 8px", fontSize: 10, cursor: "pointer" }}>Delete</button>,
+                ])}
+                mobileOnly
+                syncMobileScroll
+              />
+            </div>
+            <footer className="dashboard-expenses-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 13px", color: "#87928d", fontSize: 10 }}>
               <span>{filteredExpenses.length === 0 ? "Showing 0 expenses" : `Showing ${(safePage - 1) * EXPENSES_PER_PAGE + 1}-${Math.min(safePage * EXPENSES_PER_PAGE, filteredExpenses.length)} of ${filteredExpenses.length} expenses`}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage(safePage - 1)} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "5px 8px", fontSize: 10, cursor: safePage <= 1 ? "not-allowed" : "pointer", opacity: safePage <= 1 ? 0.5 : 1 }}>Previous</button>

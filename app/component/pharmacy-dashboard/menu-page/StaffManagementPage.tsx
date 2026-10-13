@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { dashboardNavItems } from "../navigation";
 import { supabase } from "@/lib/supabase/client";
 import { confirmDelete } from "@/lib/confirmDelete";
@@ -113,6 +114,7 @@ export default function StaffManagementPage() {
   const [roleDraft, setRoleDraft] = useState<StaffRole>("Staff");
   const [permissionsDraft, setPermissionsDraft] = useState<StaffPermissions>({});
   const [statusDraft, setStatusDraft] = useState<"approved" | "suspended">("suspended");
+  const [staffSearch, setStaffSearch] = useState("");
 
   const loadStaffMembers = useCallback(async () => {
     setStaffError("");
@@ -261,6 +263,67 @@ export default function StaffManagementPage() {
 
   const isSelectedStaffSaving = selectedStaff?.staff_user_id === updatingStaffId;
   const selectedPageCount = staffPages.filter((page) => hasPageAccess(permissionsDraft, page.key)).length;
+  const filteredStaffMembers = staffMembers.filter((member) => {
+    const query = staffSearch.trim().toLocaleLowerCase();
+    return !query || [
+      member.full_name,
+      member.email,
+      member.staff_role,
+      member.approval_status,
+    ].some((value) => value.toLocaleLowerCase().includes(query));
+  });
+
+  function renderStaffPhoto(member: StaffMember) {
+    return member.photo_url ? (
+      <span role="img" aria-label={`${member.full_name || "Staff"} profile photo`} style={{ display: "block", width: 38, height: 38, borderRadius: "50%", backgroundColor: "#edf2ee", backgroundSize: "cover", backgroundPosition: "center", ...getPhotoBackground(member.photo_url) }} />
+    ) : (
+      <span aria-label="No profile photo" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: "50%", background: "#edf2ee", color: "#52625a", fontSize: 14, fontWeight: 650 }}>
+        {(member.full_name || member.email || "?").trim().charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+
+  function renderStaffStatus(member: StaffMember) {
+    const isActive = member.approval_status === "approved";
+    const isSaving = updatingStaffId === member.staff_user_id;
+    return (
+      <button
+        type="button"
+        className="dashboard-staff-status-toggle"
+        role="switch"
+        aria-checked={isActive}
+        aria-label={`${isActive ? "Deactivate" : "Activate"} ${member.full_name || member.email}`}
+        disabled={isSaving}
+        onClick={() => void toggleStaffStatus(member)}
+        style={{ display: "inline-flex", alignItems: "center", gap: 8, border: 0, background: "transparent", color: isActive ? "#276749" : "#8a655f", padding: 0, fontSize: 12, fontWeight: 650, cursor: isSaving ? "wait" : "pointer", whiteSpace: "nowrap" }}
+      >
+        <span className="dashboard-staff-status-track" style={{ display: "inline-flex", alignItems: "center", width: 34, height: 19, borderRadius: 10, padding: 2, background: isActive ? "#179c70" : "#c8ceca", boxSizing: "border-box" }}>
+          <span style={{ width: 15, height: 15, borderRadius: "50%", background: "#fff", transform: isActive ? "translateX(15px)" : "translateX(0)", transition: "transform 0.15s ease" }} />
+        </span>
+        {isActive ? "Active" : "Inactive"}
+      </button>
+    );
+  }
+
+  function renderStaffActions(member: StaffMember) {
+    const isSaving = updatingStaffId === member.staff_user_id;
+    return (
+      <div className="dashboard-staff-row-actions" style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+        <button className="dashboard-staff-row-action" type="button" disabled={isSaving} onClick={() => openStaffDialog(member, "permissions")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#26352f", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Permission</button>
+        <button className="dashboard-staff-row-action" type="button" disabled={isSaving} onClick={() => openStaffDialog(member, "edit")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#26352f", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Edit</button>
+        <button className="dashboard-staff-row-action" type="button" disabled={isSaving} onClick={() => void deleteStaff(member)} style={{ border: "1px solid #ead3d0", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Delete</button>
+      </div>
+    );
+  }
+
+  const mobileStaffRows: React.ReactNode[][] = filteredStaffMembers.map((member) => [
+    renderStaffPhoto(member),
+    member.full_name || "—",
+    member.email,
+    renderStaffStatus(member),
+    member.staff_role,
+    renderStaffActions(member),
+  ]);
 
   return (
     <DashboardSectionPage
@@ -268,15 +331,15 @@ export default function StaffManagementPage() {
       data={pageData}
       actionContent={actionContent}
       content={
-        <div style={{ display: "grid", gap: 22, marginTop: 24 }}>
-          <section aria-live="polite" style={{ maxWidth: 760, padding: 22, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
+        <div className="dashboard-staff-content" style={{ display: "grid", gap: 22, marginTop: 24 }}>
+          <section className="dashboard-staff-invite" aria-live="polite" style={{ maxWidth: 760, padding: 22, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
             <h2 style={{ margin: 0, color: "#26352f", fontSize: 16 }}>Create staff signup link</h2>
             <p style={{ margin: "9px 0 16px", color: "#687871", fontSize: 12, lineHeight: 1.6 }}>
               Staff can use this link to apply with email and password or Google. Set their role, menu access, and account status before allowing dashboard access.
             </p>
             {message && <p role="status" style={{ margin: "0 0 12px", color: inviteUrl ? "#276749" : "#ad4b43", fontSize: 12, lineHeight: 1.5 }}>{message}</p>}
             {inviteUrl && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="dashboard-staff-invite-link" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
                   aria-label="Staff signup URL"
                   readOnly
@@ -295,18 +358,26 @@ export default function StaffManagementPage() {
             )}
           </section>
 
-          <section style={{ padding: 22, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
-            <h2 style={{ margin: 0, color: "#26352f", fontSize: 16 }}>Staff applications and access</h2>
-            <p style={{ margin: "8px 0 18px", color: "#687871", fontSize: 12, lineHeight: 1.6 }}>
-              Assign a role and menu access for each staff member. Active staff can sign in; suspended staff are blocked.
-            </p>
+          <section className="dashboard-staff-list" style={{ padding: 22, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff" }}>
+            <header className="dashboard-staff-list-header">
+              <div>
+                <h2 style={{ margin: 0, color: "#26352f", fontSize: 16 }}>Staff applications and access</h2>
+                <p style={{ margin: "8px 0 18px", color: "#687871", fontSize: 12, lineHeight: 1.6 }}>
+                  Assign a role and menu access for each staff member. Active staff can sign in; suspended staff are blocked.
+                </p>
+              </div>
+              {!isLoadingStaff && staffMembers.length > 0 && (
+                <input className="dashboard-staff-search" aria-label="Search staff" value={staffSearch} onChange={(event) => setStaffSearch(event.currentTarget.value)} placeholder="Search staff..." />
+              )}
+            </header>
             {staffError && <p role="alert" style={{ color: "#ad4b43", fontSize: 12 }}>{staffError}</p>}
             {isLoadingStaff ? (
               <p role="status" style={{ color: "#687871", fontSize: 13 }}>Loading staff applications...</p>
             ) : staffMembers.length === 0 ? (
               <p style={{ color: "#687871", fontSize: 13 }}>No staff applications yet. Staff who sign up with your link will appear here.</p>
             ) : (
-              <div style={{ overflowX: "auto" }}>
+              <>
+              <div className="dashboard-staff-desktop-table" style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", textAlign: "left" }}>
                   <thead>
                     <tr>
@@ -316,51 +387,39 @@ export default function StaffManagementPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {staffMembers.map((member) => {
-                      const isActive = member.approval_status === "approved";
-                      const isSaving = updatingStaffId === member.staff_user_id;
+                    {filteredStaffMembers.map((member) => {
                       return (
                         <tr key={member.staff_user_id}>
                           <td style={{ padding: "12px 10px", borderBottom: "1px solid #eef1ee" }}>
-                            {member.photo_url ? (
-                              <span role="img" aria-label={`${member.full_name || "Staff"} profile photo`} style={{ display: "block", width: 38, height: 38, borderRadius: "50%", backgroundColor: "#edf2ee", backgroundSize: "cover", backgroundPosition: "center", ...getPhotoBackground(member.photo_url) }} />
-                            ) : (
-                              <span aria-label="No profile photo" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: "50%", background: "#edf2ee", color: "#52625a", fontSize: 14, fontWeight: 650 }}>
-                                {(member.full_name || member.email || "?").trim().charAt(0).toUpperCase()}
-                              </span>
-                            )}
+                            {renderStaffPhoto(member)}
                           </td>
                           <td style={{ padding: "12px 10px", borderBottom: "1px solid #eef1ee", color: "#26352f", fontSize: 13, fontWeight: 600 }}>{member.full_name || "—"}</td>
                           <td style={{ padding: "12px 10px", borderBottom: "1px solid #eef1ee", color: "#687871", fontSize: 12 }}>{member.email}</td>
                           <td style={{ padding: "12px 10px", borderBottom: "1px solid #eef1ee" }}>
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={isActive}
-                              aria-label={`${isActive ? "Deactivate" : "Activate"} ${member.full_name || member.email}`}
-                              disabled={isSaving}
-                              onClick={() => void toggleStaffStatus(member)}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 8, border: 0, background: "transparent", color: isActive ? "#276749" : "#8a655f", padding: 0, fontSize: 12, fontWeight: 650, cursor: isSaving ? "wait" : "pointer" }}
-                            >
-                              <span style={{ display: "inline-flex", alignItems: "center", width: 34, height: 19, borderRadius: 10, padding: 2, background: isActive ? "#179c70" : "#c8ceca", boxSizing: "border-box" }}>
-                                <span style={{ width: 15, height: 15, borderRadius: "50%", background: "#fff", transform: isActive ? "translateX(15px)" : "translateX(0)", transition: "transform 0.15s ease" }} />
-                              </span>
-                              {isActive ? "Active" : "Inactive"}
-                            </button>
+                            {renderStaffStatus(member)}
                           </td>
                           <td style={{ padding: "12px 10px", borderBottom: "1px solid #eef1ee" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                              <button type="button" disabled={isSaving} onClick={() => openStaffDialog(member, "permissions")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#26352f", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Permission</button>
-                              <button type="button" disabled={isSaving} onClick={() => openStaffDialog(member, "edit")} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#26352f", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Edit</button>
-                              <button type="button" disabled={isSaving} onClick={() => void deleteStaff(member)} style={{ border: "1px solid #ead3d0", borderRadius: 5, background: "#fff", color: "#ad4b43", padding: "7px 9px", fontSize: 11, cursor: isSaving ? "wait" : "pointer" }}>Delete</button>
-                            </div>
+                            {renderStaffActions(member)}
                           </td>
                         </tr>
                       );
                     })}
+                    {filteredStaffMembers.length === 0 && (
+                      <tr><td colSpan={5} style={{ padding: 20, color: "#687871", fontSize: 12, textAlign: "center" }}>No staff members match this search.</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
+              <div className="dashboard-staff-mobile-table">
+                <DashboardSectionInvoiceTable
+                columns={["Profile", "Full name", "Email", "Status", "Role", "Actions"]}
+                rows={mobileStaffRows}
+                rowKeys={filteredStaffMembers.map((member) => member.staff_user_id)}
+                mobileOnly
+                syncMobileScroll
+                />
+              </div>
+              </>
             )}
           </section>
 
@@ -369,9 +428,10 @@ export default function StaffManagementPage() {
               onMouseDown={(event) => {
                 if (event.target === event.currentTarget && !isSelectedStaffSaving) closeStaffDialog();
               }}
+              className="dashboard-staff-dialog-backdrop"
               style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", background: "rgba(21, 33, 27, 0.56)", backdropFilter: "blur(5px)", padding: 16 }}
             >
-              <section role="dialog" aria-modal="true" aria-labelledby="staff-dialog-title" style={{ display: "flex", flexDirection: "column", width: "min(760px, 100%)", maxHeight: "92vh", overflow: "hidden", border: "1px solid #e7ece8", borderRadius: 16, background: "#f7f9f7", boxShadow: "0 28px 90px rgba(0,0,0,0.28)" }}>
+              <section className="dashboard-staff-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-dialog-title" style={{ display: "flex", flexDirection: "column", width: "min(760px, 100%)", maxHeight: "92vh", overflow: "hidden", border: "1px solid #e7ece8", borderRadius: 16, background: "#f7f9f7", boxShadow: "0 28px 90px rgba(0,0,0,0.28)" }}>
                 <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e7ece8", background: "#fff" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
                     {selectedStaff.photo_url ? (

@@ -116,6 +116,7 @@ export default function ShopSetupPage() {
 
   return (
     <div
+      className="shop-setup-page"
       style={{
         minHeight: "100vh",
         background: "#f4f8f5",
@@ -128,6 +129,7 @@ export default function ShopSetupPage() {
       }}
     >
       <div
+        className="shop-setup-card"
         style={{
           width: "100%",
           maxWidth: 1100,
@@ -139,6 +141,7 @@ export default function ShopSetupPage() {
         }}
       >
         <div
+          className="shop-setup-header"
           style={{
             background: "linear-gradient(135deg, #eafaf4 0%, #f3fbf8 100%)",
             borderBottom: "1px solid rgba(18,43,42,0.06)",
@@ -150,8 +153,8 @@ export default function ShopSetupPage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
+          <div
+            style={{
                 width: 26,
                 height: 26,
                 borderRadius: 8,
@@ -188,13 +191,15 @@ export default function ShopSetupPage() {
         </div>
 
         <div
+          className="shop-setup-layout"
           style={{
             display: "grid",
             gridTemplateColumns: "1.2fr 0.8fr",
           }}
         >
-          <div style={{ padding: "32px" }}>
+          <div className="shop-setup-form-panel" style={{ padding: "32px" }}>
             <h1
+              className="shop-setup-title"
               style={{
                 margin: 0,
                 fontSize: "24px",
@@ -206,6 +211,7 @@ export default function ShopSetupPage() {
               Set up your store
             </h1>
             <p
+              className="shop-setup-description"
               style={{
                 margin: "10px 0 26px",
                 color: "#59706d",
@@ -216,11 +222,12 @@ export default function ShopSetupPage() {
               Add your pharmacy details and continue to your dashboard.
             </p>
 
-            <form onSubmit={saveStore} style={{ display: "grid", gap: 18 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+            <form className="shop-setup-form" onSubmit={saveStore} style={{ display: "grid", gap: 18 }}>
+              <div className="shop-setup-field-pair" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
                 <div>
-                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Store Name</label>
+                <label className="shop-setup-label" style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Store Name</label>
                 <input
+                  className="shop-setup-input"
                   type="text"
                   name="store_name"
                   required
@@ -239,8 +246,9 @@ export default function ShopSetupPage() {
               </div>
 
                 <div>
-                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Company Name</label>
+                <label className="shop-setup-label" style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Company Name</label>
                 <input
+                  className="shop-setup-input"
                   type="text"
                   name="company_name"
                   placeholder="Valley Health Ltd."
@@ -259,8 +267,9 @@ export default function ShopSetupPage() {
               </div>
 
               <div>
-                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Physical Store Address</label>
+                <label className="shop-setup-label" style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Physical Store Address</label>
                 <textarea
+                  className="shop-setup-textarea"
                   name="address"
                   required
                   placeholder="123 Main Road, Dhanmondi, Dhaka"
@@ -279,10 +288,11 @@ export default function ShopSetupPage() {
                 />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+              <div className="shop-setup-field-pair" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
                 <div>
-                  <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>City</label>
+                  <label className="shop-setup-label" style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>City</label>
                   <input
+                    className="shop-setup-input"
                     type="text"
                     name="city"
                     required
@@ -301,8 +311,9 @@ export default function ShopSetupPage() {
                 </div>
 
                 <div>
-                  <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Country</label>
+                  <label className="shop-setup-label" style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600, color: "#1f2a2a" }}>Country</label>
                   <input
+                    className="shop-setup-input"
                     type="text"
                     name="country"
                     required
@@ -325,6 +336,7 @@ export default function ShopSetupPage() {
               <button
                 type="submit"
                 disabled={!isReady || isSubmitting}
+                className="shop-setup-submit"
                 style={{
                   display: "block",
                   width: "100%",
@@ -349,6 +361,7 @@ export default function ShopSetupPage() {
           </div>
 
           <aside
+            className="shop-setup-promo"
             style={{
               background: "linear-gradient(180deg, #0d2f2a 0%, #163d38 100%)",
               color: "#ffffff",

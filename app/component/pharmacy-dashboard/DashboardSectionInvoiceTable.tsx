@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, useState, type ReactNode } from "react";
+import { isValidElement, useState, type ReactNode, type UIEvent } from "react";
 
 function getRowIdentity(row: ReactNode[], rowIndex: number) {
   if (isValidElement<{ children?: ReactNode }>(row[0])) {
@@ -15,11 +15,13 @@ export default function DashboardSectionInvoiceTable({
   rows,
   rowKeys,
   mobileOnly = false,
+  syncMobileScroll = false,
 }: {
   columns: string[];
   rows: ReactNode[][];
   rowKeys?: string[];
   mobileOnly?: boolean;
+  syncMobileScroll?: boolean;
 }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
@@ -39,6 +41,16 @@ export default function DashboardSectionInvoiceTable({
     if (!window.matchMedia("(max-width: 767px)").matches
       || (event.target instanceof Element && event.target.closest("button"))) return;
     toggleRow(rowIdentity);
+  }
+
+  function syncHorizontalScroll(event: UIEvent<HTMLDivElement>) {
+    const scrollLeft = event.currentTarget.scrollLeft;
+    const container = event.currentTarget.closest(".dashboard-invoice-table-container");
+    container?.querySelectorAll<HTMLDivElement>(".dashboard-invoice-table-scroll").forEach((scrollArea) => {
+      if (scrollArea !== event.currentTarget && scrollArea.scrollLeft !== scrollLeft) {
+        scrollArea.scrollLeft = scrollLeft;
+      }
+    });
   }
 
   return (
@@ -79,7 +91,7 @@ export default function DashboardSectionInvoiceTable({
           "--dashboard-invoice-mobile-table-width": `calc(100vw - 50px + ${Math.max(0, columns.length - 4) * 80}px)`,
         } as React.CSSProperties}
       >
-        <div className="dashboard-invoice-table-scroll" style={{ overflowX: "auto" }}>
+        <div className="dashboard-invoice-table-scroll" onScroll={syncMobileScroll ? syncHorizontalScroll : undefined} style={{ overflowX: "auto" }}>
           <table className="dashboard-invoice-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
             <thead>
               <tr>
@@ -98,7 +110,7 @@ export default function DashboardSectionInvoiceTable({
 
           return (
             <div className="dashboard-invoice-mobile-record" key={`mobile-invoice-${rowIdentity}`}>
-              <div className="dashboard-invoice-table-scroll" style={{ overflowX: "auto" }}>
+              <div className="dashboard-invoice-table-scroll" onScroll={syncMobileScroll ? syncHorizontalScroll : undefined} style={{ overflowX: "auto" }}>
                 <table className="dashboard-invoice-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, textAlign: "left" }}>
                   <tbody>
                     <tr

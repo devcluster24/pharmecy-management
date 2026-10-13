@@ -324,6 +324,18 @@ export default function CustomerManagementPage() {
   const data: SectionData = {
     ...pageData,
     errorMessage: sales.error || undefined,
+    rowKeys: activeList === "customers"
+      ? sales.rows
+        .filter((invoice) =>
+          !normalizedSearch
+          || [invoice.invoice, invoice.customer, invoice.phone ?? "", invoice.payment]
+            .some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+        )
+        .slice((safeCurrentPage - 1) * CUSTOMERS_PER_PAGE, safeCurrentPage * CUSTOMERS_PER_PAGE)
+        .map((invoice) => invoice.id)
+      : dueCustomerGroups
+        .slice((safeCurrentPage - 1) * CUSTOMERS_PER_PAGE, safeCurrentPage * CUSTOMERS_PER_PAGE)
+        .map((group) => `${group.customer}\u0000${group.phone}`),
     columns: activeList === "customers"
       ? pageData.columns
       : ["Customer Name & Phone Number", "Last Invoice Date", "View Invoices", "Total Visit Time", "Total Bill Amount", "Total Paid", "Total Due"],
@@ -362,7 +374,7 @@ export default function CustomerManagementPage() {
       </div>
     ),
     listNavigation: (
-      <div role="group" aria-label="Customer list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+      <div className="customer-list-tabs" role="group" aria-label="Customer list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
         {([
           ["customers", "Customer Management List"],
           ["due", "Due Customer List"],
@@ -400,25 +412,27 @@ export default function CustomerManagementPage() {
       }}
       content={selectedInvoice ? (
         <div
+          className="customer-modal-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setSelectedInvoice(null);
           }}
           style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 20, background: "rgba(18, 35, 27, 0.45)" }}
         >
           <section
+            className="customer-modal-dialog customer-adjust-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="adjust-invoice-amount-title"
             style={{ width: "min(460px, 100%)", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
           >
-            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
+            <header className="customer-modal-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="adjust-invoice-amount-title" style={{ margin: 0, color: "#20342a", fontSize: 17, fontWeight: 700 }}>Adjust Amount</h2>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>{selectedInvoice.invoice} · {selectedInvoice.customer}</p>
               </div>
               <button type="button" aria-label="Close amount adjustment" onClick={() => setSelectedInvoice(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </header>
-            <form onSubmit={saveAdjustedAmount} style={{ display: "grid", gap: 14, padding: 22 }}>
+            <form className="customer-modal-form" onSubmit={saveAdjustedAmount} style={{ display: "grid", gap: 14, padding: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", color: "#526158", fontSize: 13 }}>
                 <span>Outstanding Due</span>
                 <strong style={{ color: "#ad4b43" }}>{formatPrice(getDueAmount(selectedInvoice))}</strong>
@@ -474,18 +488,20 @@ export default function CustomerManagementPage() {
         </div>
       ) : detailModal ? (
         <div
+          className="customer-modal-overlay"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setDetailModal(null);
           }}
           style={{ position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", overflowY: "auto", padding: 20, background: "rgba(18, 35, 27, 0.45)" }}
         >
           <section
+            className="customer-modal-dialog customer-detail-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="customer-detail-title"
             style={{ width: "min(760px, 100%)", maxHeight: "min(680px, 90vh)", display: "flex", flexDirection: "column", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.28)" }}
           >
-            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
+            <header className="customer-modal-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="customer-detail-title" style={{ margin: 0, color: "#20342a", fontSize: 17, fontWeight: 700 }}>
                   {detailModal.type === "invoices"
@@ -498,9 +514,9 @@ export default function CustomerManagementPage() {
               </div>
               <button type="button" aria-label="Close customer details" onClick={() => setDetailModal(null)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </header>
-            <div style={{ overflow: "auto", padding: 18 }}>
+            <div className="customer-modal-body" style={{ overflow: "auto", padding: 18 }}>
               {detailModal.type === "collect-due" ? (
-                <form onSubmit={saveCustomerDuePayment} style={{ display: "grid", gap: 14 }}>
+                <form className="customer-modal-form" onSubmit={saveCustomerDuePayment} style={{ display: "grid", gap: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", color: "#526158", fontSize: 13 }}>
                     <span>Total Outstanding Due</span>
                     <strong style={{ color: "#ad4b43" }}>{formatPrice(detailModal.customer.totalDue)}</strong>

@@ -363,8 +363,8 @@ export default function SettingPage() {
       data={emptyPageData}
       hideAction
       content={
-        <>
-          <div role="group" aria-label="Settings menu" style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 20 }}>
+        <div className="dashboard-settings-root">
+          <div className="dashboard-settings-tabs" role="group" aria-label="Settings menu" style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 20 }}>
             {settingsMenus.map((menu) => (
               <button
                 key={menu.id}
@@ -380,8 +380,8 @@ export default function SettingPage() {
           {activeMenu === "subscription-bill" && <SubscriptionBillingSection />}
           {activeMenu === "documents-invoice" && <InvoiceSetupSection />}
           {activeMenu === "pharmacy-store" && (
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 40, margin: "-6px 0 20px", paddingLeft: 16 }}>
-              <nav aria-label="Pharmacy Store menu" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+            <div className="dashboard-settings-store-layout" style={{ display: "flex", alignItems: "flex-start", gap: 40, margin: "-6px 0 20px", paddingLeft: 16 }}>
+              <nav className="dashboard-settings-store-menu" aria-label="Pharmacy Store menu" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
                 {pharmacyStoreSubmenus.map((submenu) => (
                   <button
                     key={submenu}
@@ -399,7 +399,7 @@ export default function SettingPage() {
                 {activeStoreSubmenu === "Add Payment Method" && (
                   <section aria-labelledby="payment-method-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
                     <h2 id="payment-method-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>{editingPaymentMethodId ? "Edit Payment Method" : "Add Payment Method"}</h2>
-                    <form onSubmit={savePaymentMethod} style={{ display: "grid", gap: 14, padding: 16, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                    <form className="dashboard-settings-payment-form" onSubmit={savePaymentMethod} style={{ display: "grid", gap: 14, padding: 16, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
                       <label style={{ display: "grid", gap: 7, color: "#34453b", fontSize: 12, fontWeight: 600 }}>
                         Payment type
                         <select
@@ -541,10 +541,10 @@ export default function SettingPage() {
                     <h2 id="account-info-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>Account Info</h2>
                     {paymentMethodMessage && <p role="status" style={{ margin: "0 0 10px", color: "#16845f", fontSize: 12 }}>{paymentMethodMessage}</p>}
                     {paymentMethodError && <p role="alert" style={{ margin: "0 0 10px", color: "#b34b43", fontSize: 12 }}>{paymentMethodError}</p>}
-                    <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
+                    <div className="dashboard-settings-payment-methods" style={{ display: "grid", gap: 10, marginTop: 18 }}>
                       {paymentMethods.length === 0 && <p style={{ margin: 0, color: "#687871", fontSize: 13 }}>No payment methods added yet.</p>}
                       {paymentMethods.map((method) => (
-                        <article key={method.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: 12, border: "1px solid #e5ebe7", borderRadius: 7, background: "#fff", color: "#526158", fontSize: 12 }}>
+                        <article className="dashboard-settings-payment-method" key={method.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: 12, border: "1px solid #e5ebe7", borderRadius: 7, background: "#fff", color: "#526158", fontSize: 12 }}>
                           <div>
                             {method.type === "mobile" ? (
                               <>
@@ -588,7 +588,7 @@ export default function SettingPage() {
                 {activeStoreSubmenu === "Return System" && (
                   <section aria-labelledby="return-system-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
                     <h2 id="return-system-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>Return System</h2>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" }}>
+                    <div className="dashboard-settings-pair-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 24, alignItems: "start" }}>
                       <div>
                         <label htmlFor="return-deduction-default-rate" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, color: "#34453b", fontSize: 12, fontWeight: 600 }}>
                           Return Deduction %
@@ -634,7 +634,7 @@ export default function SettingPage() {
                     <p style={{ margin: "0 0 16px", color: "#687871", fontSize: 12, fontWeight: 400, lineHeight: 1.6 }}>
                       The default is 0% until you set it. Applicable VAT and supplementary-duty rates depend on product classification and current NBR rules; confirm the correct rate for your products before applying it. You can change the rate on each sale.
                     </p>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 24, alignItems: "center" }}>
+                    <div className="dashboard-settings-pair-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 24, alignItems: "center" }}>
                       <div>
                         <label htmlFor="vat-tax-default-rate" style={{ display: "grid", gap: 7, color: "#34453b", fontSize: 12, fontWeight: 600 }}>
                           Default VAT/TAX rate (%)
@@ -679,7 +679,7 @@ export default function SettingPage() {
                     <p style={{ margin: "0 0 16px", color: "#687871", fontSize: 12, fontWeight: 400 }}>
                       Set the quantity at which an item should be considered low in stock.
                     </p>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 24, alignItems: "center" }}>
+                    <div className="dashboard-settings-pair-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 24, alignItems: "center" }}>
                       <div>
                         <label htmlFor="low-stock-threshold" style={{ display: "grid", gap: 7, color: "#34453b", fontSize: 12, fontWeight: 600 }}>
                           Low stock threshold (units)
@@ -726,7 +726,7 @@ export default function SettingPage() {
               </fieldset>
             </div>
           )}
-        </>
+        </div>
       }
       listTitle=""
     />

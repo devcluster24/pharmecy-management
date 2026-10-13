@@ -253,9 +253,9 @@ export default function SubscriptionSetupPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 20px", background: "#f4f8f5", color: "#122b2a", fontFamily: "Inter, Arial, sans-serif" }}>
-      <section style={{ width: "100%", maxWidth: 1100, overflow: "hidden", border: "1px solid rgba(18,43,42,0.08)", borderRadius: 24, background: "#fff", boxShadow: "0 20px 60px rgba(17, 24, 39, 0.08)" }}>
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "24px 32px", borderBottom: "1px solid rgba(18,43,42,0.06)", background: "linear-gradient(135deg, #eafaf4 0%, #f3fbf8 100%)" }}>
+    <main className="subscription-setup-page" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 20px", background: "#f4f8f5", color: "#122b2a", fontFamily: "Inter, Arial, sans-serif" }}>
+      <section className="subscription-setup-card" style={{ width: "100%", maxWidth: 1100, overflow: "hidden", border: "1px solid rgba(18,43,42,0.08)", borderRadius: 24, background: "#fff", boxShadow: "0 20px 60px rgba(17, 24, 39, 0.08)" }}>
+        <header className="subscription-setup-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "24px 32px", borderBottom: "1px solid rgba(18,43,42,0.06)", background: "linear-gradient(135deg, #eafaf4 0%, #f3fbf8 100%)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span aria-hidden="true" style={{ display: "grid", placeItems: "center", width: 26, height: 26, borderRadius: 8, background: "linear-gradient(135deg, #2ad49a, #1ac490)", color: "#fff", fontSize: 14, fontWeight: 800 }}>⚡</span>
             <div>
@@ -266,10 +266,10 @@ export default function SubscriptionSetupPage() {
           <span style={{ border: "1px solid rgba(42,212,154,0.25)", borderRadius: 999, padding: "6px 12px", background: "rgba(42,212,154,0.11)", color: "#1d7059", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>3 of 3</span>
         </header>
 
-        <div style={{ display: "flex", flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 600px", minWidth: 0, padding: "32px clamp(20px, 4vw, 38px)" }}>
-            <h1 style={{ margin: 0, color: "#102d2a", fontSize: 24, fontWeight: 800, letterSpacing: "-0.05em" }}>Choose a subscription plan</h1>
-            <p style={{ margin: "10px 0 24px", color: "#59706d", fontSize: 12, lineHeight: 1.6 }}>
+        <div className="subscription-setup-content" style={{ display: "flex", flexWrap: "wrap" }}>
+          <div className="subscription-setup-plans" style={{ flex: "1 1 600px", minWidth: 0, padding: "32px clamp(20px, 4vw, 38px)" }}>
+            <h1 className="subscription-setup-title" style={{ margin: 0, color: "#102d2a", fontSize: 24, fontWeight: 800, letterSpacing: "-0.05em" }}>Choose a subscription plan</h1>
+            <p className="subscription-setup-description" style={{ margin: "10px 0 24px", color: "#59706d", fontSize: 12, lineHeight: 1.6 }}>
               Select a plan to continue. Free plans open the dashboard directly; paid plans continue to the demo payment page.
             </p>
 
@@ -282,7 +282,7 @@ export default function SubscriptionSetupPage() {
             {isLoading ? (
               <p role="status" style={{ margin: 0, padding: "25px 0", color: "#718078", fontSize: 13, textAlign: "center" }}>Loading subscription plans...</p>
             ) : displayedPlans.length > 0 ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", alignItems: "stretch", gap: 14 }}>
+              <div className="subscription-setup-plan-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", alignItems: "stretch", gap: 14 }}>
                 {displayedPlans.map((item) => {
                   const isSelected = item.id === selectedPlanId;
                   const itemName = item.name.trim().toLowerCase();
@@ -309,6 +309,7 @@ export default function SubscriptionSetupPage() {
                   return (
                     <article
                       key={item.id}
+                      className="subscription-setup-plan-card"
                       style={{ position: "relative", display: "flex", width: "100%", minWidth: 0, minHeight: 246, flexDirection: "column", overflow: "hidden", padding: 0, border: isSelected ? "2px solid #16845d" : "1px solid #dce8e0", borderRadius: 16, background: isSelected ? "linear-gradient(145deg, #f1fbf6, #fff 75%)" : "#fff", textAlign: "left", boxShadow: isSelected ? "0 10px 26px rgba(22,132,93,0.12)" : "0 5px 16px rgba(18,43,42,0.04)", transition: "border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease" }}
                     >
                       <button
@@ -403,7 +404,7 @@ export default function SubscriptionSetupPage() {
             )}
           </div>
 
-          <aside style={{ flex: "1 1 270px", boxSizing: "border-box", background: "linear-gradient(180deg, #0d2f2a 0%, #163d38 100%)", color: "#fff", padding: "32px clamp(22px, 4vw, 30px)", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 28 }}>
+          <aside className="subscription-setup-summary" style={{ flex: "1 1 270px", boxSizing: "border-box", background: "linear-gradient(180deg, #0d2f2a 0%, #163d38 100%)", color: "#fff", padding: "32px clamp(22px, 4vw, 30px)", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 28 }}>
             <div>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 9, marginBottom: 20, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "6px 12px", background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 700 }}>
                 <span style={{ color: "#2ad49a" }}>✓</span> Ready to launch
@@ -435,6 +436,7 @@ export default function SubscriptionSetupPage() {
                 type="button"
                 disabled={!selectedPlan || !canCalculateTotal || isLoading || isSubmitting}
                 onClick={() => void continueWithPlan()}
+                className="subscription-setup-continue"
                 style={{ width: "100%", border: 0, borderRadius: 12, padding: "12px 14px", background: !selectedPlan || !canCalculateTotal || isSubmitting ? "#7fb9a0" : "#2ad49a", color: "#072f2a", fontSize: 12, fontWeight: 750, cursor: !selectedPlan || !canCalculateTotal || isSubmitting ? "wait" : "pointer", opacity: !selectedPlan || !canCalculateTotal || isLoading || isSubmitting ? 0.7 : 1 }}
               >
                 {isSubmitting ? "Continuing..." : amountDue === 0 ? "Confirm free plan and continue" : "Continue to payment"}

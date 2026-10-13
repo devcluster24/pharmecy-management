@@ -427,6 +427,7 @@ export default function SupplierManagementPage() {
       { label: "Due Amount", value: formatCurrency(totalDueAmount), detail: "Outstanding supplier due" },
     ],
     columns: ["Supplier Name & Phone Number", "All Order Number", "Total Purchase Amount", "Total Due Amount", "Current Status"],
+    rowKeys: pageSuppliers.map((supplier) => supplier.key),
     rows: pageSuppliers.map((supplier) => {
       const status = supplierStatuses[supplier.key] ?? "Active";
       const dueText = formatCurrency(supplier.dueAmount);
@@ -466,7 +467,7 @@ export default function SupplierManagementPage() {
       ];
     }),
     listFooter: (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
+      <div className="dashboard-suppliers-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", color: "#87928d", fontSize: 11 }}>
         <span>
           {filteredSuppliers.length === 0
             ? "Showing 0 suppliers"
@@ -509,17 +510,19 @@ export default function SupplierManagementPage() {
         <>
           {selectedSupplier && (
             <div
+              className="supplier-modal-overlay"
               onClick={() => setSelectedSupplierKey(null)}
               style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", background: "rgba(16, 28, 23, 0.46)", padding: 18 }}
             >
               <section
+                className="supplier-modal-dialog supplier-order-history-dialog"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="supplier-order-history-title"
                 onClick={(event) => event.stopPropagation()}
                 style={{ width: "min(900px, 100%)", maxHeight: "85vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,.2)" }}
               >
-                <header style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", borderBottom: "1px solid #e8eeea", background: "#fff", padding: "18px 22px" }}>
+                <header className="supplier-modal-header" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", borderBottom: "1px solid #e8eeea", background: "#fff", padding: "18px 22px" }}>
                   <div>
                     <h2 id="supplier-order-history-title" style={{ margin: 0, color: "#172622", fontSize: 18 }}>Supplier order history</h2>
                     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px 16px", marginTop: 6, color: "#687871", fontSize: 12 }}>
@@ -530,13 +533,13 @@ export default function SupplierManagementPage() {
                   </div>
                   <button type="button" onClick={() => setSelectedSupplierKey(null)} aria-label="Close order history" style={{ border: "1px solid #dfe7e2", borderRadius: 6, background: "#fff", color: "#42524b", padding: "7px 10px", cursor: "pointer" }}>Close</button>
                 </header>
-                <div style={{ display: "grid", gap: 14, padding: 20 }}>
+                <div className="supplier-order-history-body" style={{ display: "grid", gap: 14, padding: 20 }}>
                   {selectedSupplier.orders.map((order) => {
                     const firstRow = order.rows[0];
                     const companies = [...new Set(order.rows.map((row) => row.supplier).filter(Boolean))];
                     return (
-                      <article key={order.order} style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12, background: "#f8faf8", padding: "13px 15px" }}>
+                      <article className="supplier-order-card" key={order.order} style={{ overflow: "hidden", border: "1px solid #e4e9e5", borderRadius: 8 }}>
+                        <div className="supplier-order-summary" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12, background: "#f8faf8", padding: "13px 15px" }}>
                           <div>
                             <strong style={{ color: "#26352f", fontSize: 13 }}>{order.order}</strong>
                             <div style={{ marginTop: 4, color: "#77857d", fontSize: 11 }}>
@@ -549,8 +552,8 @@ export default function SupplierManagementPage() {
                             <span>Due: <strong>{formatCurrency(order.dueAmount)}</strong></span>
                           </div>
                         </div>
-                        <div style={{ overflowX: "auto" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560, textAlign: "left" }}>
+                        <div className="supplier-order-table-scroll" style={{ overflowX: "auto" }}>
+                          <table className="supplier-order-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 560, textAlign: "left" }}>
                             <thead>
                               <tr>
                                 {["Company", "Brand / Product", "Batch Number", "Box Quantity", "Total Purchase Price"].map((column) => (
@@ -583,25 +586,27 @@ export default function SupplierManagementPage() {
           )}
           {selectedDueSupplier && (
             <div
+              className="supplier-modal-overlay"
               onClick={() => setSelectedDueSupplierKey(null)}
               style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", background: "rgba(16, 28, 23, 0.46)", padding: 18 }}
             >
               <section
+                className="supplier-modal-dialog supplier-due-dialog"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="supplier-due-adjustment-title"
                 onClick={(event) => event.stopPropagation()}
                 style={{ width: "min(460px, 100%)", maxHeight: "85vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,.2)" }}
               >
-                <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", borderBottom: "1px solid #e8eeea", padding: "18px 22px" }}>
+                <header className="supplier-modal-header" style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", borderBottom: "1px solid #e8eeea", padding: "18px 22px" }}>
                   <div>
                     <h2 id="supplier-due-adjustment-title" style={{ margin: 0, color: "#172622", fontSize: 18 }}>Adjust Supplier Due</h2>
                     <p style={{ margin: "6px 0 0", color: "#687871", fontSize: 12 }}>{selectedDueSupplier.name} · {selectedDueSupplier.phone || "No phone number"}</p>
                   </div>
                   <button type="button" onClick={() => setSelectedDueSupplierKey(null)} aria-label="Close due adjustment" style={{ border: "1px solid #dfe7e2", borderRadius: 6, background: "#fff", color: "#42524b", padding: "7px 10px", cursor: "pointer" }}>Close</button>
                 </header>
-                <form onSubmit={saveDueAdjustment} style={{ display: "grid", gap: 16, padding: 22 }}>
-                  <div style={{ display: "grid", gap: 9, color: "#42524b", fontSize: 12 }}>
+                <form className="supplier-due-form" onSubmit={saveDueAdjustment} style={{ display: "grid", gap: 16, padding: 22 }}>
+                  <div className="supplier-due-summary" style={{ display: "grid", gap: 9, color: "#42524b", fontSize: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                       <span>Current Total Due</span>
                       <strong>{formatCurrency(selectedDueSupplier.dueAmount - duePaymentPreviewAmount)}</strong>
@@ -632,7 +637,7 @@ export default function SupplierManagementPage() {
                     />
                   </label>
                   {dueAdjustmentAmount.trim() && (
-                    <div role="group" aria-label="Choose payment method" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <div className="supplier-payment-methods" role="group" aria-label="Choose payment method" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {duePaymentMethodOptions.map((option) => (
                         <button
                           key={option.value}
@@ -662,7 +667,7 @@ export default function SupplierManagementPage() {
                     This payment will increase Paid Amount and reduce Total Due Amount.
                   </p>
                   {selectedDueSupplier.duePayments.length > 0 && (
-                    <div style={{ display: "grid", gap: 7, borderTop: "1px solid #edf0ed", paddingTop: 12 }}>
+                    <div className="supplier-due-history" style={{ display: "grid", gap: 7, borderTop: "1px solid #edf0ed", paddingTop: 12 }}>
                       <strong style={{ color: "#42524b", fontSize: 11 }}>Previous payments</strong>
                       {selectedDueSupplier.duePayments.slice().reverse().map((payment, index) => (
                         <div key={`${payment.createdAt}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "#77857d", fontSize: 11 }}>
@@ -673,7 +678,7 @@ export default function SupplierManagementPage() {
                     </div>
                   )}
                   {selectedDueSupplier.dueAdjustments.length > 0 && (
-                    <div style={{ display: "grid", gap: 7, borderTop: "1px solid #edf0ed", paddingTop: 12 }}>
+                    <div className="supplier-due-history" style={{ display: "grid", gap: 7, borderTop: "1px solid #edf0ed", paddingTop: 12 }}>
                       <strong style={{ color: "#42524b", fontSize: 11 }}>Previous due adjustments</strong>
                       {selectedDueSupplier.dueAdjustments.slice().reverse().map((adjustment, index) => (
                         <div key={`${adjustment.createdAt}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, color: "#77857d", fontSize: 11 }}>
