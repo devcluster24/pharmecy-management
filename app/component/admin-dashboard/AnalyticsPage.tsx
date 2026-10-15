@@ -182,6 +182,27 @@ function toProductText(value: unknown): string {
   return text || "-";
 }
 
+function calculatePackPrice(packSize: string, unitPrice: string): string {
+  const getNumber = (value: string) => {
+    const match = value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+    if (!match) {
+      return null;
+    }
+
+    const number = Number(match[0]);
+    return Number.isFinite(number) ? number : null;
+  };
+
+  const size = getNumber(packSize);
+  const price = getNumber(unitPrice);
+
+  if (size === null || price === null) {
+    return "-";
+  }
+
+  return String(Number((size * price).toFixed(2)));
+}
+
 function splitGenericAndStrength(value: string) {
   const text = value.trim();
 
@@ -318,7 +339,7 @@ function mapProductToCatalogRow(product: Product) {
     retail_price: unitPrice,
     pack_size: product.packSize,
     unit_price: unitPrice,
-    pack_price: product.packPrice,
+    pack_price: calculatePackPrice(product.packSize, unitPrice),
     usage_type: product.usageType,
     dar_code: product.darCode,
     medicine_type_category: product.medicineTypeCategory,
@@ -327,6 +348,9 @@ function mapProductToCatalogRow(product: Product) {
 }
 
 function mapCatalogRowToProduct(row: Record<string, unknown>): Product {
+  const packSize = String(row.pack_size ?? "-");
+  const unitPrice = String(row.unit_price ?? row.retail_price ?? "-");
+
   return {
     id: String(row.id),
     serialNumber: String(row.serial_number ?? "-"),
@@ -336,9 +360,9 @@ function mapCatalogRowToProduct(row: Record<string, unknown>): Product {
     strength: String(row.strength ?? "-"),
     dosageFormDescription: String(row.dosage_form_description ?? "-"),
     retailPrice: String(row.retail_price ?? "-"),
-    packSize: String(row.pack_size ?? "-"),
-    unitPrice: String(row.unit_price ?? row.retail_price ?? "-"),
-    packPrice: String(row.pack_price ?? "-"),
+    packSize,
+    unitPrice,
+    packPrice: calculatePackPrice(packSize, unitPrice),
     usageType: String(row.usage_type ?? "-"),
     darCode: String(row.dar_code ?? "-"),
     medicineTypeCategory: String(row.medicine_type_category ?? "-"),
@@ -469,7 +493,10 @@ function createProductFromSourceRow(
 
     packSize: toProductText(findValue("packSize")),
     unitPrice: toProductText(findValue("unitPrice") ?? findValue("retailPrice")),
-    packPrice: toProductText(findValue("packPrice")),
+    packPrice: calculatePackPrice(
+      toProductText(findValue("packSize")),
+      toProductText(findValue("unitPrice") ?? findValue("retailPrice")),
+    ),
 
     usageType: toProductText(
       findValue("usageType")
@@ -1510,7 +1537,28 @@ export default function ProductDataImportPage() {
               {editableProductFields.map(({ key, label }) => (
                 <label key={key} className="grid gap-1.5 text-xs font-medium text-gray-600">
                   {label}
-                  <input value={editingProduct[key]} onChange={(event) => setEditingProduct((current) => current ? { ...current, [key]: event.target.value } : current)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal text-gray-800 outline-none focus:border-emerald-600" />
+                  <input
+                    value={editingProduct[key]}
+                    readOnly={key === "packPrice"}
+                    onChange={(event) =>
+                      setEditingProduct((current) => {
+                        if (!current) {
+                          return current;
+                        }
+
+                        const value = event.target.value;
+                        const updated = { ...current, [key]: value };
+                        if (key === "packSize" || key === "unitPrice") {
+                          updated.packPrice = calculatePackPrice(
+                            key === "packSize" ? value : current.packSize,
+                            key === "unitPrice" ? value : current.unitPrice,
+                          );
+                        }
+                        return updated;
+                      })
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-normal text-gray-800 outline-none focus:border-emerald-600 read-only:bg-gray-50"
+                  />
                 </label>
               ))}
             </div>
