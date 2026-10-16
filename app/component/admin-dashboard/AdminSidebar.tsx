@@ -2,18 +2,42 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
 
 const adminNavItems = [
   { label: "Overview", icon: "◫", href: "/admin-dashboard/overview" },
   { label: "Analytics", icon: "▥", href: "/admin-dashboard/analytics" },
   { label: "Subscription", icon: "▤", href: "/admin-dashboard/subscription" },
-  { label: "User Management", icon: "♙", href: "/admin-dashboard/user-management" },
+  { label: "Expense", icon: "৳", href: "/admin-dashboard/expense" },
+  { label: "Admin Management", icon: "♙", href: "/admin-dashboard/admin-management" },
 ] as const;
 
 export default function AdminSidebar() {
   const [expanded, setExpanded] = useState(false);
+  const [hasAdminAccess, setHasAdminAccess] = useState(false);
   const pathname = usePathname();
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getUser().then(async ({ data, error }) => {
+      if (error || !data.user) return;
+      const { data: profile, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("role, approval_status")
+        .eq("id", data.user.id)
+        .maybeSingle();
+      if (active && !profileError) {
+        setHasAdminAccess(
+          (profile?.role === "admin" || profile?.role === "superadmin")
+          && profile.approval_status === "approved",
+        );
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <aside
@@ -33,7 +57,7 @@ export default function AdminSidebar() {
       }}
     >
       <nav aria-label="Admin sections" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {adminNavItems.map((item) => {
+        {adminNavItems.filter((item) => item.label !== "Admin Management" || hasAdminAccess).map((item) => {
           const isActive = pathname === item.href || (pathname === "/admin-dashboard" && item.label === "Overview");
 
           return (

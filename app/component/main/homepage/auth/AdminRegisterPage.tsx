@@ -3,14 +3,12 @@
 import Image from "next/image";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import PasswordInput from "@/app/component/PasswordInput";
 import { supabase } from "@/lib/supabase/client";
 
 const fieldStyle = { width: "100%", boxSizing: "border-box" as const, border: "1px solid #dfe4e2", borderRadius: 10, padding: "11px 13px", background: "#fff", color: "#111827", fontSize: 14, outline: "none" };
 
 export default function AdminRegisterPage() {
-  const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [hasError, setHasError] = useState(false);
@@ -44,12 +42,19 @@ export default function AdminRegisterPage() {
     }
 
     if (data.session) {
-      router.replace("/admin-dashboard");
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        setMessage(`Your admin request was submitted, but sign out failed: ${signOutError.message}`);
+        setHasError(true);
+        return;
+      }
+      formElement.reset();
+      setMessage("Admin request submitted. You can sign in after a superadmin approves your account.");
       return;
     }
 
     formElement.reset();
-    setMessage("Account created. Confirm your email, then sign in to open the admin dashboard.");
+    setMessage("Admin request submitted. Confirm your email, then wait for a superadmin to approve your account.");
   }
 
   return (
@@ -62,14 +67,14 @@ export default function AdminRegisterPage() {
         <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>
           <span style={{ color: "#1d7059", fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>ADMIN ACCESS</span>
           <h1 style={{ margin: "10px 0 8px", color: "#111827", fontSize: 30, lineHeight: 1.1, fontWeight: 750 }}>Create admin account</h1>
-          <p style={{ margin: "0 0 26px", color: "#525a63", fontSize: 14, lineHeight: 1.6 }}>Create your account and continue directly to the admin dashboard. Store setup is not required.</p>
+          <p style={{ margin: "0 0 26px", color: "#525a63", fontSize: 14, lineHeight: 1.6 }}>Submit an admin account request. A superadmin must approve it before you can access the dashboard.</p>
           <form onSubmit={registerAdmin} style={{ display: "grid", gap: 13 }}>
             <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>Full name<input name="full_name" required autoComplete="name" placeholder="Your full name" style={fieldStyle} /></label>
             <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>Username<input name="username" required minLength={3} autoComplete="username" placeholder="yourname" style={fieldStyle} /></label>
             <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>Email<input name="email" required type="email" autoComplete="email" placeholder="admin@example.com" style={fieldStyle} /></label>
             <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>Phone<input name="phone" type="tel" autoComplete="tel" placeholder="+880 1XXX-XXXXXX" style={fieldStyle} /></label>
             <label style={{ display: "grid", gap: 6, color: "#26342f", fontSize: 12, fontWeight: 600 }}>Password<PasswordInput name="password" required minLength={8} autoComplete="new-password" placeholder="At least 8 characters" style={fieldStyle} /></label>
-            <button type="submit" disabled={isSubmitting} style={{ border: 0, borderRadius: 10, padding: "12px 16px", background: "#2ad49a", color: "#042b22", fontSize: 13, fontWeight: 700, cursor: isSubmitting ? "wait" : "pointer", opacity: isSubmitting ? 0.7 : 1 }}>{isSubmitting ? "Creating account..." : "Create admin account"}</button>
+            <button type="submit" disabled={isSubmitting} style={{ border: 0, borderRadius: 10, padding: "12px 16px", background: "#2ad49a", color: "#042b22", fontSize: 13, fontWeight: 700, cursor: isSubmitting ? "wait" : "pointer", opacity: isSubmitting ? 0.7 : 1 }}>{isSubmitting ? "Submitting request..." : "Request admin account"}</button>
             {message && <p role={hasError ? "alert" : "status"} style={{ margin: 0, color: hasError ? "#ad4b43" : "#276749", fontSize: 12, lineHeight: 1.5 }}>{message}</p>}
           </form>
           <p style={{ margin: "20px 0 0", color: "#525a63", fontSize: 12 }}>Already registered? <Link href="/login" style={{ color: "#111827", fontWeight: 650, textDecoration: "none" }}>Sign in</Link></p>

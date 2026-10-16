@@ -74,7 +74,7 @@ export default function DashboardAccessGate({
         } else {
           const { data, error } = await supabase
             .from("user_profiles")
-            .select("role")
+            .select("role, approval_status")
             .eq("id", user.id)
             .maybeSingle();
           if (error) {
@@ -85,7 +85,9 @@ export default function DashboardAccessGate({
             }
             return;
           }
-          profile = data;
+          profile = data
+            ? { role: data.role, approvalStatus: data.approval_status }
+            : null;
         }
 
         if (!profile) {
@@ -170,13 +172,22 @@ export default function DashboardAccessGate({
           && profile.approvalStatus === "approved"
           && Boolean(profile.ownerUserId);
         const permitted = requiredRole === "admin"
-          ? profile.role === "admin" || profile.role === "superadmin"
+          ? (profile.role === "admin" || profile.role === "superadmin")
+            && profile.approvalStatus === "approved"
           : profile.role === "pharmacy_user" || isStaff;
 
         if (!permitted) {
           if (active) {
             setPreviouslyAllowedPath(null);
-            setMessage("This account does not have access to this dashboard.");
+            setMessage(
+              requiredRole === "admin"
+                && (profile.role === "admin" || profile.role === "superadmin")
+                && profile.approvalStatus !== "approved"
+                ? profile.approvalStatus === "pending"
+                  ? "Your admin account is waiting for approval."
+                  : "Your admin account is inactive. Contact a superadmin for assistance."
+                : "This account does not have access to this dashboard.",
+            );
             setAccessState("blocked");
           }
           return;

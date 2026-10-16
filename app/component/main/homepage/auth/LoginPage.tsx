@@ -66,8 +66,12 @@ export default function LoginPage() {
     if (profile.approval_status !== "approved") {
       const { error: signOutError } = await supabase.auth.signOut();
       setMessage(signOutError
-        ? `Your account is awaiting approval. Sign out failed: ${signOutError.message}`
-        : "Your account is awaiting approval.");
+        ? `Your account is not active. Sign out failed: ${signOutError.message}`
+        : profile.role === "admin" && profile.approval_status === "inactive"
+          ? "Your admin account is inactive. Contact a superadmin for assistance."
+          : profile.role === "admin" && profile.approval_status === "rejected"
+            ? "Your admin request was not approved."
+            : "Your account is awaiting approval.");
       setIsSubmitting(false);
       return;
     }
