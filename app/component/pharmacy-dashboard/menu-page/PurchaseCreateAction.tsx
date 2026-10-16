@@ -200,10 +200,10 @@ function getReceivedBatchKey(row: PurchaseListRow) {
 function mergeReceivedRows(
   existingRows: PurchaseListRow[],
   incomingRows: PurchaseListRow[],
+  receivedAt: string,
 ) {
   const rows = [...existingRows];
   const rowIndexesByBatch = new Map<string, number>();
-  const updatedAt = new Date().toISOString();
 
   rows.forEach((row, index) => {
     const key = `${row.order}\u0000${getReceivedBatchKey(row)}`;
@@ -215,7 +215,7 @@ function mergeReceivedRows(
     const existingIndex = rowIndexesByBatch.get(key);
     if (existingIndex === undefined) {
       rowIndexesByBatch.set(key, rows.length);
-      rows.push({ ...incomingRow, updatedAt });
+      rows.push({ ...incomingRow, updatedAt: receivedAt, receivedAt });
       continue;
     }
 
@@ -240,7 +240,8 @@ function mergeReceivedRows(
       quantity: formatOrderPrice(quantity),
       ...(availableQuantity !== undefined ? { availableQuantity: String(availableQuantity) } : {}),
       totalPrice: formatOrderPrice(totalPrice),
-      updatedAt,
+      updatedAt: receivedAt,
+      receivedAt,
       unitPurchasePrice: calculateUnitPurchasePrice(
         existingRow.packSize,
         formatOrderPrice(totalPrice),
@@ -533,7 +534,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         return match ? Math.max(maxNumber, Number(match[1])) : maxNumber;
       }, 0) + 1;
       const order = `PO-RC-${String(nextOrderNumber).padStart(4, "0")}`;
-      const orderDate = new Date().toLocaleDateString("en-US", {
+      const receivedAt = new Date().toISOString();
+      const orderDate = new Date(receivedAt).toLocaleDateString("en-US", {
         month: "short",
         day: "2-digit",
         year: "numeric",
@@ -542,6 +544,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         selection.batches.map((batch, index): PurchaseListRow => ({
           id: `${order}-${companySelection.id}-${selection.id}-${index}`,
           order,
+          receivedAt,
           supplier: companySelection.company,
           supplierContactName: companySelection.supplierContactName.trim(),
           supplierPhone: companySelection.supplierPhone.trim(),
@@ -570,13 +573,18 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
       const stagedOrderRows = pendingOrderReceiptRows.map((row) => ({
         ...row,
         order,
+        receivedAt,
         orderDate,
         supplierContactName: companySelections.find((selection) => selection.company === row.supplier)?.supplierContactName.trim() ?? "",
         supplierPhone: companySelections.find((selection) => selection.company === row.supplier)?.supplierPhone.trim() ?? "",
         orderPaidAmount: formatOrderPrice(receivePaidAmount),
         orderDueAmount: formatOrderPrice(receiveDueAmount),
       }));
-      const updatedRows = mergeReceivedRows(receiveRows, [...newRows, ...stagedOrderRows]);
+      const updatedRows = mergeReceivedRows(
+        receiveRows,
+        [...newRows, ...stagedOrderRows],
+        receivedAt,
+      );
       persistPurchaseListRows(updatedRows, "create");
       if (pendingOrderReceipts.length > 0) {
         const receivedPlaceOrders = new Map(pendingOrderReceipts.map((receipt) => {
@@ -672,6 +680,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         return {
           id: `${order}-${line.id}`,
           order,
+          placedAt: now.toISOString(),
           updatedAt: now.toISOString(),
           supplier: placeOrderCompany,
           orderDate,

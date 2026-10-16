@@ -30,7 +30,9 @@ export type PurchaseListRow = {
   productPackPrice?: string;
   orderPaidAmount?: string;
   orderDueAmount?: string;
+  placedAt?: string;
   updatedAt?: string;
+  receivedAt?: string;
 };
 
 export type PurchaseListSnapshot = {
@@ -56,7 +58,10 @@ export function getOrderTotal(rows: PurchaseListRow[]) {
   }, 0);
 }
 
-export function groupPurchaseOrders(rows: PurchaseListRow[]): GroupedPurchaseOrder[] {
+export function groupPurchaseOrders(
+  rows: PurchaseListRow[],
+  useReceivedAt = false,
+): GroupedPurchaseOrder[] {
   const groupedOrders = new Map<string, PurchaseListRow[]>();
   for (const row of rows) {
     const orderRows = groupedOrders.get(row.order) ?? [];
@@ -68,7 +73,11 @@ export function groupPurchaseOrders(rows: PurchaseListRow[]): GroupedPurchaseOrd
       order,
       rows: orderRows,
       updatedAt: orderRows.reduce((latest, row) => {
-        const timestamp = Date.parse(row.updatedAt ?? "");
+        const timestamp = Date.parse(
+          useReceivedAt
+            ? row.receivedAt ?? row.orderDate
+            : row.updatedAt ?? row.orderDate,
+        );
         return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
       }, 0),
     }))
@@ -110,7 +119,9 @@ function isPurchaseListRow(value: unknown): value is PurchaseListRow {
     && (!("productPackPrice" in value) || typeof value.productPackPrice === "string")
     && (!("orderPaidAmount" in value) || typeof value.orderPaidAmount === "string")
     && (!("orderDueAmount" in value) || typeof value.orderDueAmount === "string")
-    && (!("updatedAt" in value) || typeof value.updatedAt === "string");
+    && (!("placedAt" in value) || typeof value.placedAt === "string")
+    && (!("updatedAt" in value) || typeof value.updatedAt === "string")
+    && (!("receivedAt" in value) || typeof value.receivedAt === "string");
 }
 
 export function calculateUnitPurchasePrice(packSize: string, totalPrice: string, quantity: string) {

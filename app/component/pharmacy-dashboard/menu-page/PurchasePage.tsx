@@ -60,7 +60,10 @@ export default function PurchasePage() {
   const [selectedPriceOrder, setSelectedPriceOrder] = useState<string | null>(null);
   const [paginationState, setPaginationState] = useState({ key: "", page: 1 });
   const placeOrders = useMemo(() => groupPurchaseOrders(placeOrderList.rows), [placeOrderList.rows]);
-  const receiveOrders = useMemo(() => groupPurchaseOrders(purchaseList.rows), [purchaseList.rows]);
+  const receiveOrders = useMemo(
+    () => groupPurchaseOrders(purchaseList.rows, true),
+    [purchaseList.rows],
+  );
   const orders = activeList === "place" ? placeOrders : receiveOrders;
   const paginationKey = `${activeList}:${orders.map(({ order, updatedAt }) => `${order}:${updatedAt}`).join("|")}`;
   const totalPages = Math.max(1, Math.ceil(orders.length / ORDERS_PER_PAGE));

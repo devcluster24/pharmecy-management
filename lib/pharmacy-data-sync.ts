@@ -56,11 +56,11 @@ let initializedOwnerId: string | null = null;
 let initialization: Promise<void> | null = null;
 let initializationOwnerId: string | null = null;
 let ownerGeneration = 0;
-let refreshTimer: number | null = null;
 let activeEventCleanups: (() => void)[] = [];
 let dirtyKeys = new Set<PharmacyDataKey>();
 let knownDataKeys = new Set<PharmacyDataKey>();
 let refreshInProgress = false;
+let refreshRequestedWhileBusy = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
 const dataKeySet = new Set<string>(pharmacyDataKeys);
@@ -233,7 +233,11 @@ async function readCloudRows(ownerId: string) {
 }
 
 async function refreshFromCloud() {
-  if (!initializedOwnerId || refreshInProgress) return;
+  if (!initializedOwnerId) return;
+  if (refreshInProgress) {
+    refreshRequestedWhileBusy = true;
+    return;
+  }
   refreshInProgress = true;
   const ownerId = initializedOwnerId;
   try {
@@ -262,6 +266,10 @@ async function refreshFromCloud() {
     throw error;
   } finally {
     refreshInProgress = false;
+    if (refreshRequestedWhileBusy) {
+      refreshRequestedWhileBusy = false;
+      void refreshFromCloud().catch(() => undefined);
+    }
   }
 }
 
@@ -269,11 +277,10 @@ function stopOwnerListeners() {
   ownerGeneration += 1;
   activeEventCleanups.forEach((cleanup) => cleanup());
   activeEventCleanups = [];
-  if (refreshTimer !== null) window.clearInterval(refreshTimer);
-  refreshTimer = null;
   initializedOwnerId = null;
   dirtyKeys = new Set();
   knownDataKeys = new Set();
+  refreshRequestedWhileBusy = false;
   pharmacyData.clear();
   writeQueue = Promise.resolve();
 }
@@ -289,11 +296,34 @@ function listenForRefresh() {
     window.removeEventListener("focus", refreshListener);
     window.removeEventListener("online", refreshListener);
   });
-  refreshTimer = window.setInterval(() => {
-    if (document.visibilityState === "visible") {
-      void retryPharmacyDataSync().catch(() => undefined);
-    }
-  }, 30_000);
+
+  const channel = supabase
+    .channel(`pharmacy-data-sync-${initializedOwnerId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "pharmacy_app_data",
+        filter: `owner_user_id=eq.${initializedOwnerId}`,
+      },
+      (change) => {
+        const row = change.eventType === "DELETE" ? change.old : change.new;
+        if (typeof row.data_key === "string" && dataKeySet.has(row.data_key)) {
+          void refreshFromCloud().catch(() => undefined);
+        }
+      },
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        void refreshFromCloud().catch(() => undefined);
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        reportSyncError(new Error("Real-time pharmacy data sync is unavailable."));
+      }
+    });
+  activeEventCleanups.push(() => {
+    void supabase.removeChannel(channel);
+  });
 }
 
 async function initializeOwner(ownerId: string) {

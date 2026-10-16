@@ -1,0 +1,189 @@
+import { Redirect, useRouter } from 'expo-router';
+import { useState } from 'react';
+import { Keyboard, Pressable, Text, View } from 'react-native';
+
+import {
+  AuthField,
+  AuthScreen,
+  AuthSubmitButton,
+  authStyles,
+} from '@/components/auth/AuthScreen';
+import { supabase, supabaseConfigError } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
+
+export default function SignupScreen() {
+  const router = useRouter();
+  const { session, isLoading, authError } = useAuth();
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [hasError, setHasError] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (isLoading) return null;
+  if (session) return <Redirect href="/dashboard" />;
+
+  async function handleSignup() {
+    Keyboard.dismiss();
+    setMessage('');
+    setHasError(false);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const trimmedName = fullName.trim();
+    const trimmedUsername = username.trim();
+    if (!trimmedName || !trimmedUsername || !normalizedEmail || !password) {
+      setMessage('Complete your name, username, email, and password.');
+      setHasError(true);
+      return;
+    }
+    if (trimmedUsername.length < 3) {
+      setMessage('Username must be at least 3 characters.');
+      setHasError(true);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setMessage('Enter a valid email address.');
+      setHasError(true);
+      return;
+    }
+    if (password.length < 8) {
+      setMessage('Password must be at least 8 characters.');
+      setHasError(true);
+      return;
+    }
+    if (!supabase) {
+      setMessage(supabaseConfigError);
+      setHasError(true);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            username: trimmedUsername,
+            full_name: trimmedName,
+            phone: phone.trim(),
+            registration_type: 'pharmacy_user',
+          },
+        },
+      });
+      if (error) throw error;
+
+      if (data.session && data.user) {
+        router.replace('/dashboard');
+        return;
+      }
+
+      setMessage('Check your email to confirm your account, then sign in to continue.');
+      setHasError(false);
+      setFullName('');
+      setUsername('');
+      setEmail('');
+      setPhone('');
+      setPassword('');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not create your account.');
+      setHasError(true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <AuthScreen
+      eyebrow="CREATE YOUR ACCOUNT"
+      title="Start with your details"
+      subtitle="Create an account for your pharmacy workspace."
+      footer={
+        <View style={authStyles.linkRow}>
+          <Text style={authStyles.linkText}>Already have an account?</Text>
+          <Pressable onPress={() => router.replace('/Auth/login')} accessibilityRole="link">
+            <Text style={authStyles.linkAction}>Sign in</Text>
+          </Pressable>
+        </View>
+      }>
+      <View style={authStyles.form}>
+        {(authError || supabaseConfigError) && (
+          <Text style={[authStyles.feedback, authStyles.errorFeedback]}>
+            {authError || supabaseConfigError}
+          </Text>
+        )}
+        <AuthField
+          label="Full name"
+          value={fullName}
+          onChangeText={setFullName}
+          placeholder="Your full name"
+          autoComplete="name"
+          textContentType="name"
+          returnKeyType="next"
+          editable={!isSubmitting}
+        />
+        <AuthField
+          label="Username"
+          value={username}
+          onChangeText={setUsername}
+          placeholder="yourname"
+          autoCapitalize="none"
+          autoComplete="username"
+          textContentType="username"
+          returnKeyType="next"
+          editable={!isSubmitting}
+        />
+        <AuthField
+          label="Email address"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="you@example.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          textContentType="emailAddress"
+          returnKeyType="next"
+          editable={!isSubmitting}
+        />
+        <AuthField
+          label="Phone (optional)"
+          value={phone}
+          onChangeText={setPhone}
+          placeholder="+880 1XXX-XXXXXX"
+          keyboardType="phone-pad"
+          autoComplete="tel"
+          textContentType="telephoneNumber"
+          returnKeyType="next"
+          editable={!isSubmitting}
+        />
+        <AuthField
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="At least 8 characters"
+          secure
+          autoCapitalize="none"
+          autoComplete="new-password"
+          textContentType="newPassword"
+          returnKeyType="go"
+          onSubmitEditing={() => void handleSignup()}
+          editable={!isSubmitting}
+        />
+        {message ? (
+          <Text style={[authStyles.feedback, hasError ? authStyles.errorFeedback : authStyles.successFeedback]}>
+            {message}
+          </Text>
+        ) : null}
+        <AuthSubmitButton
+          title="Create account"
+          loadingTitle="Creating account…"
+          isLoading={isSubmitting}
+          onPress={() => void handleSignup()}
+        />
+      </View>
+    </AuthScreen>
+  );
+}
