@@ -175,7 +175,7 @@ export default function UserManagementPage() {
 
         <section style={{ border: "1px solid #e3e9e4", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
           <div style={{ padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
-            <h2 style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>User accounts</h2>
+            <h2 style={{ margin: 0, color: "#20312a", fontSize: 15, fontWeight: 700 }}>Admin accounts</h2>
             <p style={{ margin: "5px 0 0", color: "#7a8981", fontSize: 11 }}>Pharmacy users and admins can sign in immediately after registration.</p>
           </div>
           <div style={{ overflowX: "auto" }}>
