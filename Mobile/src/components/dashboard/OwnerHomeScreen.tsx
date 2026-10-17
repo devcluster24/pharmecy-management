@@ -3,11 +3,13 @@ import { SymbolView } from 'expo-symbols';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   AppState,
   ActivityIndicator,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,6 +45,92 @@ type PharmacyActivity = {
   actor_photo_url: string | null;
 };
 
+type ExpiredBatch = {
+  id: string;
+  brand: string;
+  supplier: string;
+  batchNumber: string;
+  totalQuantity: string;
+  price: string;
+  updatedAt: string;
+  order: string;
+};
+
+type CurrentPlan = {
+  id: string;
+  name: string;
+  setup_fee_label: string;
+  setup_fee: number;
+  recurring_fee: number;
+  billing_period: 'minutes' | 'days' | 'month' | 'year' | 'one-time';
+  billing_interval: number;
+  description: string;
+};
+
+type CurrentSubscription = {
+  plan: CurrentPlan | null;
+  is_assigned: boolean;
+  status: 'Active' | 'Inactive' | 'Past Due' | null;
+  expires_at: string | null;
+};
+
+function ExpiredBatchCard({
+  batch,
+  isDestroying,
+  onSwipeDestroy,
+}: {
+  batch: ExpiredBatch;
+  isDestroying: boolean;
+  onSwipeDestroy: (batchId: string) => void;
+}) {
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onMoveShouldSetPanResponder: (_event, gestureState) =>
+        gestureState.dx > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
+      onPanResponderRelease: (_event, gestureState) => {
+        if (!isDestroying && gestureState.dx >= 90) onSwipeDestroy(batch.id);
+      },
+    }),
+    [batch.id, isDestroying, onSwipeDestroy],
+  );
+
+  return (
+    <View {...panResponder.panHandlers} style={styles.expiredBatchCard}>
+      {([
+        ['Brand Name', batch.brand],
+        ['Supplier', batch.supplier],
+        ['Batch', batch.batchNumber],
+        ['Quantity', batch.totalQuantity],
+        ['Price', batch.price],
+      ] as const).map(([label, value]) => (
+        <View
+          key={label}
+          style={[
+            styles.expiredBatchField,
+            label === 'Brand Name' || label === 'Supplier'
+              ? styles.expiredBatchFirstRowField
+              : styles.expiredBatchSecondRowField,
+          ]}>
+          <View style={styles.expiredBatchInlineField}>
+            <Text style={styles.expiredBatchLabel}>{label} -</Text>
+            <Text
+              style={[
+                styles.expiredBatchValue,
+                (label === 'Batch' || label === 'Quantity' || label === 'Price')
+                  && styles.expiredBatchValueAlert,
+              ]}>
+              {value || '-'}
+            </Text>
+          </View>
+        </View>
+      ))}
+      {isDestroying ? (
+        <Text style={styles.expiredBatchSwipeHint}>Destroying…</Text>
+      ) : null}
+    </View>
+  );
+}
+
 const quickAccessItems = [
   { id: 'overview', label: 'Overview', icon: 'chart.bar.fill' },
   { id: 'inventory', label: 'Inventory', icon: 'shippingbox.fill' },
@@ -63,6 +151,8 @@ type QuickAccessCounts = Partial<Record<QuickAccessId, number>>;
 type HomeMenu = 'quick-access' | 'favourites';
 type ActivityMenu = 'latest-update' | 'expired' | 'subscription';
 
+let realtimeChannelInstance = 0;
+
 function isQuickAccessId(value: unknown): value is QuickAccessId {
   return typeof value === 'string' && quickAccessItems.some((item) => item.id === value);
 }
@@ -78,13 +168,83 @@ function getLocalDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function getInitials(value: string) {
-  return value
+function getPackSizeMultiplier(packSize: string) {
+  const normalizedPackSize = packSize
     .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toLocaleUpperCase() ?? '')
-    .join('') || '?';
+    .replace(/['’]s\s+pack$/i, '')
+    .replace(/['’]s$/i, '')
+    .replace(/\s+pack$/i, '');
+  if (!normalizedPackSize) return null;
+
+  const factors = normalizedPackSize.split(/\s*[xX×]\s*/);
+  if (factors.some((factor) => !/^\d+(?:\.\d+)?$/.test(factor))) return null;
+
+  const multiplier = factors.reduce((total, factor) => total * Number(factor), 1);
+  return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : null;
+}
+
+function isExpiredDate(value: string, currentMonthKey: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  const currentMonthMatch = /^(\d{4})-(\d{2})$/.exec(currentMonthKey);
+  if (!match || !currentMonthMatch) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const currentYear = Number(currentMonthMatch[1]);
+  const currentMonth = Number(currentMonthMatch[2]);
+  if (month < 1 || month > 12 || currentMonth < 1 || currentMonth > 12) return false;
+
+  return year * 12 + month < currentYear * 12 + currentMonth;
+}
+
+function getAvailableQuantity(row: Record<string, unknown>, packSize: string) {
+  if (typeof row.availableQuantity === 'string') {
+    const quantity = Number(row.availableQuantity);
+    return Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+  }
+  if (typeof row.quantity !== 'string' || !row.quantity.trim() || !packSize.trim()) return null;
+
+  const quantity = Number(row.quantity);
+  const packMultiplier = getPackSizeMultiplier(packSize);
+  if (!Number.isFinite(quantity) || quantity < 0 || packMultiplier === null) return null;
+  const totalQuantity = quantity * packMultiplier;
+  return Number.isFinite(totalQuantity)
+    ? Number(totalQuantity.toFixed(4))
+    : null;
+}
+
+function formatQuantity(value: number | null) {
+  return value === null ? '-' : value.toLocaleString('en-BD', { maximumFractionDigits: 4 });
+}
+
+function getExpiredStockPrice(row: Record<string, unknown>, totalQuantity: number | null) {
+  if (totalQuantity === null) return '-';
+
+  const savedUnitPrice = typeof row.unitPurchasePrice === 'string'
+    && row.unitPurchasePrice.trim()
+    && row.unitPurchasePrice.trim() !== '-'
+    ? Number(row.unitPurchasePrice)
+    : Number.NaN;
+  let unitPrice = savedUnitPrice;
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+    const packSize = typeof row.packSize === 'string' ? row.packSize : '';
+    const packMultiplier = getPackSizeMultiplier(packSize);
+    const boxQuantity = typeof row.quantity === 'string' ? Number(row.quantity) : Number.NaN;
+    const totalPrice = typeof row.totalPrice === 'string' ? Number(row.totalPrice) : Number.NaN;
+    if (
+      packMultiplier === null
+      || !Number.isFinite(boxQuantity)
+      || boxQuantity <= 0
+      || !Number.isFinite(totalPrice)
+      || totalPrice < 0
+    ) return '-';
+    unitPrice = totalPrice / boxQuantity / packMultiplier;
+  }
+
+  const stockPrice = totalQuantity * unitPrice;
+  return Number.isFinite(stockPrice)
+    ? `৳${stockPrice.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : '-';
 }
 
 function formatCurrency(amount: number) {
@@ -92,6 +252,48 @@ function formatCurrency(amount: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function isCurrentPlan(value: unknown): value is CurrentPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const plan = value as Record<string, unknown>;
+  return typeof plan.id === 'string'
+    && typeof plan.name === 'string'
+    && typeof plan.setup_fee_label === 'string'
+    && typeof plan.setup_fee === 'number'
+    && typeof plan.recurring_fee === 'number'
+    && ['minutes', 'days', 'month', 'year', 'one-time'].includes(String(plan.billing_period))
+    && typeof plan.billing_interval === 'number'
+    && typeof plan.description === 'string';
+}
+
+function isCurrentSubscription(value: unknown): value is CurrentSubscription {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const subscription = value as Record<string, unknown>;
+  return typeof subscription.is_assigned === 'boolean'
+    && (subscription.status === null
+      || ['Active', 'Inactive', 'Past Due'].includes(String(subscription.status)))
+    && (subscription.expires_at === null || typeof subscription.expires_at === 'string')
+    && (subscription.plan === null || isCurrentPlan(subscription.plan));
+}
+
+function formatPlanPeriod(plan: CurrentPlan) {
+  if (plan.billing_period === 'one-time') return 'one-time';
+  const unit = plan.billing_period === 'minutes'
+    ? 'minute'
+    : plan.billing_period === 'days'
+      ? 'day'
+      : plan.billing_period === 'year'
+        ? 'year'
+        : 'month';
+  return `${plan.billing_interval} ${unit}${plan.billing_interval === 1 ? '' : 's'}`;
+}
+
+function formatPlanExpiry(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? 'Not available'
+    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function formatNotificationTime(value: string) {
@@ -108,8 +310,9 @@ function formatNotificationTime(value: string) {
 }
 
 export default function OwnerHomeScreen() {
-  const { ownerName, storeName, session } = useAuth();
+  const { dashboardRole, ownerName, storeName, session } = useAuth();
   const router = useRouter();
+  const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
   const [currentHour, setCurrentHour] = useState(() => new Date().getHours());
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey(new Date()));
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -125,6 +328,14 @@ export default function OwnerHomeScreen() {
   const [activitiesError, setActivitiesError] = useState('');
   const [activitiesRealtimeError, setActivitiesRealtimeError] = useState('');
   const [isActivitiesRealtimeConnected, setIsActivitiesRealtimeConnected] = useState(false);
+  const [expiredBatches, setExpiredBatches] = useState<ExpiredBatch[]>([]);
+  const [isLoadingExpiredBatches, setIsLoadingExpiredBatches] = useState(true);
+  const [expiredBatchesError, setExpiredBatchesError] = useState('');
+  const [destroyingExpiredBatchId, setDestroyingExpiredBatchId] = useState<string | null>(null);
+  const [currentSubscription, setCurrentSubscription] = useState<CurrentSubscription | null>(null);
+  const [isLoadingCurrentSubscription, setIsLoadingCurrentSubscription] = useState(true);
+  const [currentSubscriptionError, setCurrentSubscriptionError] = useState('');
+  const [isClaimingExtendedAccess, setIsClaimingExtendedAccess] = useState(false);
   const [selectedHomeMenu, setSelectedHomeMenu] = useState<HomeMenu>('quick-access');
   const [selectedActivityMenu, setSelectedActivityMenu] = useState<ActivityMenu>('latest-update');
   const [isQuickAccessExpanded, setIsQuickAccessExpanded] = useState(false);
@@ -139,6 +350,7 @@ export default function OwnerHomeScreen() {
     const interval = setInterval(() => {
       const now = new Date();
       setCurrentHour(now.getHours());
+      setCurrentTimestamp(now.getTime());
       setCurrentDateKey(getLocalDateKey(now));
     }, 60_000);
     return () => clearInterval(interval);
@@ -300,6 +512,171 @@ export default function OwnerHomeScreen() {
     }
   }, [currentDateKey, session]);
 
+  const loadExpiredBatches = useCallback(async () => {
+    const client = supabase;
+    if (!client || !session) {
+      setExpiredBatchesError('Expired inventory is unavailable. Check your Supabase connection.');
+      setIsLoadingExpiredBatches(false);
+      return;
+    }
+    setIsLoadingExpiredBatches(true);
+    setExpiredBatchesError('');
+    const currentMonthKey = currentDateKey.slice(0, 7);
+
+    try {
+      const { data, error } = await client
+        .from('pharmacy_app_data')
+        .select('payload')
+        .eq('owner_user_id', session.user.id)
+        .eq('data_key', 'pharmacy-purchase-list-v1')
+        .maybeSingle();
+      if (error) throw error;
+
+      const payload: unknown = data?.payload ?? [];
+      if (!Array.isArray(payload)) {
+        throw new Error('Saved inventory data has an invalid format.');
+      }
+
+      const rows = payload.map((value: unknown): ExpiredBatch | null => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          throw new Error('Saved inventory contains an invalid batch.');
+        }
+
+        const row = value as Record<string, unknown>;
+        if (
+          typeof row.id !== 'string'
+          || typeof row.batchNumber !== 'string'
+          || typeof row.supplier !== 'string'
+          || typeof row.expDate !== 'string'
+          || typeof row.packSize !== 'string'
+          || (row.brand !== undefined && typeof row.brand !== 'string')
+          || (row.medicine_name !== undefined && typeof row.medicine_name !== 'string')
+          || (row.quantity !== undefined && typeof row.quantity !== 'string')
+          || (row.availableQuantity !== undefined && typeof row.availableQuantity !== 'string')
+        ) {
+          throw new Error('Saved inventory contains an invalid batch.');
+        }
+        if (!isExpiredDate(row.expDate, currentMonthKey)) return null;
+
+        const totalQuantity = getAvailableQuantity(row, row.packSize);
+        return {
+          id: row.id,
+          brand: typeof row.brand === 'string' && row.brand.trim()
+            ? row.brand
+            : typeof row.medicine_name === 'string' ? row.medicine_name : '-',
+          supplier: row.supplier,
+          batchNumber: row.batchNumber,
+          totalQuantity: formatQuantity(totalQuantity),
+          price: getExpiredStockPrice(row, totalQuantity),
+          updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '',
+          order: typeof row.order === 'string' ? row.order : '',
+        };
+      });
+
+      setExpiredBatches(
+        rows
+          .filter((row): row is ExpiredBatch => row !== null)
+          .sort((first, second) => {
+            const timeDifference = Date.parse(second.updatedAt) - Date.parse(first.updatedAt);
+            return Number.isFinite(timeDifference) && timeDifference !== 0
+              ? timeDifference
+              : second.order.localeCompare(first.order);
+          }),
+      );
+    } catch (error) {
+      setExpiredBatchesError(
+        error instanceof Error ? error.message : 'Could not load expired inventory.',
+      );
+    } finally {
+      setIsLoadingExpiredBatches(false);
+    }
+  }, [currentDateKey, session]);
+
+  const loadCurrentSubscription = useCallback(async () => {
+    const client = supabase;
+    if (!client || !session) {
+      setCurrentSubscriptionError('Current plan is unavailable. Check your Supabase connection.');
+      setIsLoadingCurrentSubscription(false);
+      return;
+    }
+    setIsLoadingCurrentSubscription(true);
+    setCurrentSubscriptionError('');
+
+    try {
+      const { data, error } = await client.rpc('get_pharmacy_home_current_plan');
+      if (error) throw error;
+      if (!isCurrentSubscription(data)) {
+        throw new Error('The current plan returned by Supabase is invalid.');
+      }
+      setCurrentSubscription(data);
+    } catch (error) {
+      setCurrentSubscriptionError(
+        error instanceof Error ? error.message : 'Could not load the current plan.',
+      );
+    } finally {
+      setIsLoadingCurrentSubscription(false);
+    }
+  }, [session]);
+
+  const handleClaimExtendedAccess = useCallback(async () => {
+    if (!supabase) {
+      Alert.alert('Could not activate Extended Access', 'Supabase is not configured.');
+      return;
+    }
+    setIsClaimingExtendedAccess(true);
+    try {
+      const { error } = await supabase.rpc('claim_my_pharmacy_extended_access');
+      if (error) throw error;
+      await loadCurrentSubscription();
+    } catch (error) {
+      Alert.alert(
+        'Could not activate Extended Access',
+        error instanceof Error ? error.message : 'Could not activate Extended Access.',
+      );
+    } finally {
+      setIsClaimingExtendedAccess(false);
+    }
+  }, [loadCurrentSubscription]);
+
+  const handleSwipeDestroyExpiredBatch = useCallback((batchId: string) => {
+    const batch = expiredBatches.find((item) => item.id === batchId);
+    if (!batch || destroyingExpiredBatchId) return;
+    const client = supabase;
+    if (!client || !session) {
+      Alert.alert('Could not destroy batch', 'Sign in and check your Supabase connection, then try again.');
+      return;
+    }
+
+    Alert.alert(
+      'Destroy expired batch?',
+      `Destroy ${batch.brand}, batch ${batch.batchNumber} and record its value as a Destroy expense?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Destroy',
+          style: 'destructive',
+          onPress: () => {
+            setDestroyingExpiredBatchId(batchId);
+            void (async () => {
+              const { error } = await client.rpc('destroy_pharmacy_expired_inventory_batch', {
+                requested_batch_id: batchId,
+              });
+              if (error) throw error;
+              await loadExpiredBatches();
+            })()
+              .catch((error: unknown) => {
+                Alert.alert(
+                  'Could not destroy batch',
+                  error instanceof Error ? error.message : 'Could not destroy this expired batch.',
+                );
+              })
+              .finally(() => setDestroyingExpiredBatchId(null));
+          },
+        },
+      ],
+    );
+  }, [destroyingExpiredBatchId, expiredBatches, loadExpiredBatches, session]);
+
   useEffect(() => {
     void loadNotifications();
   }, [loadNotifications]);
@@ -311,7 +688,7 @@ export default function OwnerHomeScreen() {
     if (!client || !session) return;
 
     const channel = client
-      .channel(`owner-home-updates-${session.user.id}`)
+      .channel(`owner-home-updates-${session.user.id}-${++realtimeChannelInstance}`)
       .on(
         'postgres_changes',
         {
@@ -325,6 +702,9 @@ export default function OwnerHomeScreen() {
           if (row.data_key === 'pharmacy-sales-list-v1') {
             void loadTodaySales();
           }
+          if (row.data_key === 'pharmacy-purchase-list-v1') {
+            void loadExpiredBatches();
+          }
         },
       )
       .subscribe((status) => {
@@ -336,16 +716,17 @@ export default function OwnerHomeScreen() {
     return () => {
       void client.removeChannel(channel);
     };
-  }, [loadTodaySales, session]);
+  }, [loadExpiredBatches, loadTodaySales, session]);
 
   useEffect(() => {
     void Promise.resolve().then(loadTodayActivities);
+    void Promise.resolve().then(loadExpiredBatches);
 
     const client = supabase;
     if (!client || !session) return;
 
     const channel = client
-      .channel(`owner-home-activity-${session.user.id}`)
+      .channel(`owner-home-activity-${session.user.id}-${++realtimeChannelInstance}`)
       .on(
         'postgres_changes',
         {
@@ -376,7 +757,7 @@ export default function OwnerHomeScreen() {
     return () => {
       void client.removeChannel(channel);
     };
-  }, [loadTodayActivities, session]);
+  }, [loadExpiredBatches, loadTodayActivities, loadTodaySales, session]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -544,93 +925,100 @@ export default function OwnerHomeScreen() {
       <ScrollView
         style={styles.dashboardScroll}
         contentContainerStyle={styles.content}
+        stickyHeaderIndices={[0]}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.ownerHero}>
-          <View style={styles.topBar}>
-            <View style={styles.storeIdentity}>
-              <Image
-                source={require('../../../../public/pharmacy-icon.png')}
-                contentFit="contain"
-                style={styles.storeIcon}
-                accessibilityLabel="Pharmacy Cluster icon"
-              />
-              <Text numberOfLines={1} style={styles.storeName}>
-                {storeName || 'My Pharmacy'}
-              </Text>
-            </View>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                unreadCount > 0
-                  ? `Notifications, ${unreadCount} unread`
-                  : 'Notifications'
-              }
-              onPress={openNotifications}
-              style={({ pressed }) => [
-                styles.notificationButton,
-                pressed && styles.notificationButtonPressed,
-              ]}>
-              <SymbolView
-                name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
-                size={18}
-                tintColor="#245744"
-              />
-              {unreadCount > 0 ? (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadBadgeText}>
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          </View>
-
-          <View style={styles.greetingDecoration} />
-          <Text style={styles.greeting}>{getGreeting(currentHour)}</Text>
-          <Text numberOfLines={2} style={styles.ownerName}>
-            {ownerName || 'Owner'}
-          </Text>
-        </View>
-
-        <View style={styles.todaySalesCard}>
-          <View style={styles.todaySalesHeadingRow}>
-            <Text style={styles.todaySalesTitle}>Today&apos;s Sale</Text>
-            <View style={styles.todaySalesIcon}>
-              <SymbolView
-                name={{ ios: 'chart.bar.fill', android: 'bar_chart', web: 'bar_chart' }}
-                size={17}
-                tintColor="#17664f"
-              />
-            </View>
-          </View>
-          {todaySalesError ? (
-            <View style={styles.todaySalesErrorRow}>
-              <Text style={styles.todaySalesError}>{todaySalesError}</Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void loadTodaySales()}>
-                <Text style={styles.todaySalesRetry}>Retry</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <>
-              <View style={styles.todaySalesTotalRow}>
-                <Text style={styles.todaySalesLabel}>Total</Text>
-                <Text style={styles.todaySalesLabel}>-</Text>
-                <Text style={styles.todaySalesAmount}>
-                  {isLoadingTodaySales ? 'Loading…' : formatCurrency(todaySales.amount)}
+        <View style={styles.stickyDashboardHeader}>
+          <View style={styles.ownerHero}>
+            <View style={styles.topBar}>
+              <View style={styles.storeIdentity}>
+                <Image
+                  source={require('../../../../public/pharmacy-icon.png')}
+                  contentFit="contain"
+                  style={styles.storeIcon}
+                  accessibilityLabel="Pharmacy Cluster icon"
+                />
+                <Text numberOfLines={1} style={styles.storeName}>
+                  {storeName || 'My Pharmacy'}
                 </Text>
               </View>
-              <Text style={styles.todaySalesInvoiceCount}>
-                {isLoadingTodaySales
-                  ? 'Loading invoices…'
-                  : `${todaySales.invoiceCount.toLocaleString('en-BD')} ${
-                    todaySales.invoiceCount === 1 ? 'invoice' : 'invoices'
-                  }`}
-              </Text>
-            </>
-          )}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  unreadCount > 0
+                    ? `Notifications, ${unreadCount} unread`
+                    : 'Notifications'
+                }
+                onPress={openNotifications}
+                style={({ pressed }) => [
+                  styles.notificationButton,
+                  pressed && styles.notificationButtonPressed,
+                ]}>
+                <SymbolView
+                  name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
+                  size={18}
+                  tintColor="#245744"
+                />
+                {unreadCount > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            </View>
+
+            <View style={styles.greetingDecoration} />
+            <Text style={styles.greeting}>{getGreeting(currentHour)}</Text>
+            <Text numberOfLines={2} style={styles.ownerName}>
+              {ownerName || 'Owner'}
+            </Text>
+          </View>
+
+          <View style={styles.todaySalesCard}>
+            <View style={styles.todaySalesHeadingRow}>
+              <Text style={styles.todaySalesTitle}>Today&apos;s Sale</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open recorded payments"
+                onPress={() => router.push('/recorded-payments')}
+                style={styles.todaySalesIcon}>
+                <SymbolView
+                  name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
+                  size={18}
+                  tintColor="#17664f"
+                />
+              </Pressable>
+            </View>
+            {todaySalesError ? (
+              <View style={styles.todaySalesErrorRow}>
+                <Text style={styles.todaySalesError}>{todaySalesError}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void loadTodaySales()}>
+                  <Text style={styles.todaySalesRetry}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <View style={styles.todaySalesTotalRow}>
+                  <Text style={styles.todaySalesLabel}>Total</Text>
+                  <Text style={styles.todaySalesLabel}>-</Text>
+                  <Text style={styles.todaySalesAmount}>
+                    {isLoadingTodaySales ? 'Loading…' : formatCurrency(todaySales.amount)}
+                  </Text>
+                </View>
+                <Text style={styles.todaySalesInvoiceCount}>
+                  {isLoadingTodaySales
+                    ? 'Loading invoices…'
+                    : `${todaySales.invoiceCount.toLocaleString('en-BD')} ${
+                      todaySales.invoiceCount === 1 ? 'invoice' : 'invoices'
+                    }`}
+                </Text>
+              </>
+            )}
+          </View>
         </View>
 
         <View style={styles.homeMenus}>
@@ -786,7 +1174,10 @@ export default function OwnerHomeScreen() {
                   key={item.id}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: selectedActivityMenu === item.id }}
-                  onPress={() => setSelectedActivityMenu(item.id)}
+                  onPress={() => {
+                    setSelectedActivityMenu(item.id);
+                    if (item.id === 'subscription') void loadCurrentSubscription();
+                  }}
                   style={styles.activityTab}>
                   <Text
                     numberOfLines={1}
@@ -832,35 +1223,42 @@ export default function OwnerHomeScreen() {
                 <ActivityIndicator size="small" color="#17664f" />
               ) : activities.length > 0 ? (
                 <View style={styles.activityList}>
-                  {activities.map((activity) => (
-                    <View key={activity.id} style={styles.activityRow}>
-                      {activity.actor_photo_url ? (
-                        <Image
-                          source={{ uri: activity.actor_photo_url }}
-                          contentFit="cover"
-                          style={styles.activityAvatar}
-                          alt={`${activity.actor_username} profile photo`}
-                          accessibilityLabel={`${activity.actor_username} profile photo`}
-                        />
-                      ) : (
-                        <View style={[styles.activityAvatar, styles.activityAvatarFallback]}>
-                          <Text style={styles.activityAvatarInitials}>
-                            {getInitials(activity.actor_username)}
-                          </Text>
+                  {[...activities]
+                    .sort(
+                      (first, second) =>
+                        Date.parse(second.created_at) - Date.parse(first.created_at),
+                    )
+                    .slice(0, 5)
+                    .map((activity) => (
+                      <View key={activity.id} style={styles.activityRow}>
+                        {activity.actor_photo_url ? (
+                          <Image
+                            source={{ uri: activity.actor_photo_url }}
+                            contentFit="cover"
+                            style={styles.activityAvatar}
+                            alt="Profile photo"
+                            accessibilityLabel="Profile photo"
+                          />
+                        ) : (
+                          <View style={[styles.activityAvatar, styles.activityAvatarFallback]}>
+                            <SymbolView
+                              name={{ ios: 'person.fill', android: 'person', web: 'person.fill' }}
+                              size={18}
+                              tintColor="#17664f"
+                            />
+                          </View>
+                        )}
+                        <View style={styles.activityDetails}>
+                          <View style={styles.activityHeading}>
+                            <Text style={styles.activityTitle}>{activity.title}</Text>
+                            <Text style={styles.activityTime}>
+                              {formatNotificationTime(activity.created_at)}
+                            </Text>
+                          </View>
+                          <Text style={styles.activityDescription}>{activity.description}</Text>
                         </View>
-                      )}
-                      <View style={styles.activityDetails}>
-                        <View style={styles.activityHeading}>
-                          <Text style={styles.activityTitle}>{activity.title}</Text>
-                          <Text style={styles.activityTime}>
-                            {formatNotificationTime(activity.created_at)}
-                          </Text>
-                        </View>
-                        <Text style={styles.activityDescription}>{activity.description}</Text>
-                        <Text style={styles.activityActor}>{activity.actor_username}</Text>
                       </View>
-                    </View>
-                  ))}
+                    ))}
                 </View>
               ) : (
                 <Text style={styles.activityEmptyText}>No data</Text>
@@ -869,9 +1267,139 @@ export default function OwnerHomeScreen() {
                 <Text style={styles.activityRealtimeError}>{activitiesRealtimeError}</Text>
               ) : null}
             </View>
+          ) : selectedActivityMenu === 'expired' ? (
+            <View style={styles.activityContent}>
+              {expiredBatchesError ? (
+                <View style={styles.activityErrorBox}>
+                  <Text style={styles.activityErrorText}>{expiredBatchesError}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadExpiredBatches()}>
+                    <Text style={styles.activityRetryText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : isLoadingExpiredBatches ? (
+                <ActivityIndicator size="small" color="#17664f" />
+              ) : expiredBatches.length > 0 ? (
+                <View style={styles.expiredBatchList}>
+                  {expiredBatches.map((batch) => (
+                    <ExpiredBatchCard
+                      key={batch.id}
+                      batch={batch}
+                      isDestroying={destroyingExpiredBatchId === batch.id}
+                      onSwipeDestroy={handleSwipeDestroyExpiredBatch}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.activityEmptyText}>No data</Text>
+              )}
+            </View>
           ) : (
             <View style={styles.activityContent}>
-              <Text style={styles.activityEmptyText}>No data</Text>
+              {currentSubscriptionError ? (
+                <View style={styles.activityErrorBox}>
+                  <Text style={styles.activityErrorText}>{currentSubscriptionError}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadCurrentSubscription()}>
+                    <Text style={styles.activityRetryText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : isLoadingCurrentSubscription ? (
+                <ActivityIndicator size="small" color="#17664f" />
+              ) : currentSubscription?.plan ? (
+                <View style={styles.currentPlanCard}>
+                  <View style={styles.currentPlanHeading}>
+                    <View style={styles.currentPlanTitleGroup}>
+                      <Text style={styles.currentPlanEyebrow}>Current Plan</Text>
+                      <Text style={styles.currentPlanName}>{currentSubscription.plan.name}</Text>
+                      {storeName ? (
+                        <Text style={styles.currentPlanStoreName}>{storeName}</Text>
+                      ) : null}
+                    </View>
+                    <Text
+                      style={[
+                        styles.currentPlanStatus,
+                        currentSubscription.expires_at
+                          && Date.parse(currentSubscription.expires_at) <= currentTimestamp
+                          ? styles.currentPlanStatusExpired
+                          : currentSubscription.is_assigned
+                            ? styles.currentPlanStatusAssigned
+                            : styles.currentPlanStatusAvailable,
+                      ]}>
+                      {currentSubscription.expires_at
+                        && Date.parse(currentSubscription.expires_at) <= currentTimestamp
+                        ? 'Expired'
+                        : currentSubscription.is_assigned
+                          ? currentSubscription.status ?? 'Assigned'
+                          : 'Available'}
+                    </Text>
+                  </View>
+                  {currentSubscription.plan.description ? (
+                    <Text style={styles.currentPlanDescription}>
+                      {currentSubscription.plan.description}
+                    </Text>
+                  ) : null}
+                  <View style={styles.currentPlanFees}>
+                    <Text style={styles.currentPlanFeeText}>
+                      {currentSubscription.plan.setup_fee_label}:{' '}
+                      <Text style={styles.currentPlanFeeValue}>
+                        {formatCurrency(currentSubscription.plan.setup_fee)}
+                      </Text>
+                    </Text>
+                    <Text style={styles.currentPlanFeeText}>
+                      Recurring Fee:{' '}
+                      <Text style={styles.currentPlanFeeValue}>
+                        {formatCurrency(currentSubscription.plan.recurring_fee)}
+                      </Text>
+                    </Text>
+                    <Text style={styles.currentPlanTotal}>
+                      {formatCurrency(
+                        currentSubscription.plan.setup_fee + currentSubscription.plan.recurring_fee,
+                      )}
+                      <Text style={styles.currentPlanPeriod}>
+                        {' / '}{formatPlanPeriod(currentSubscription.plan)}
+                      </Text>
+                    </Text>
+                  </View>
+                  {currentSubscription.is_assigned ? (
+                    <View style={styles.currentPlanExpiryRow}>
+                      <Text style={styles.currentPlanExpiry}>
+                        {currentSubscription.expires_at
+                          ? `Expires ${formatPlanExpiry(currentSubscription.expires_at)}`
+                          : 'This plan does not expire.'}
+                      </Text>
+                      {dashboardRole === 'owner'
+                        && currentSubscription.plan.name.trim().toLowerCase() === 'starter access' ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={isClaimingExtendedAccess}
+                            onPress={() => void handleClaimExtendedAccess()}
+                            style={[
+                              styles.chooseNewPlanButton,
+                              isClaimingExtendedAccess && styles.chooseNewPlanButtonDisabled,
+                            ]}>
+                            <Text style={styles.chooseNewPlanButtonText}>
+                              {isClaimingExtendedAccess ? 'Activating…' : 'Claim Extended Access'}
+                            </Text>
+                          </Pressable>
+                        ) : dashboardRole === 'owner'
+                          && ['extended access', 'one-time setup', 'standard subscription']
+                            .includes(currentSubscription.plan.name.trim().toLowerCase()) ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            onPress={() => router.push('/subscription-setup')}
+                            style={styles.chooseNewPlanButton}>
+                            <Text style={styles.chooseNewPlanButtonText}>Choose New Plan</Text>
+                          </Pressable>
+                        ) : null}
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={styles.activityEmptyText}>Current plan is not available.</Text>
+              )}
             </View>
           )}
         </View>
@@ -980,6 +1508,9 @@ const styles = StyleSheet.create({
   },
   dashboardScroll: {
     backgroundColor: '#f2f4ef',
+  },
+  stickyDashboardHeader: {
+    zIndex: 1,
   },
   content: {
     width: '100%',
@@ -1339,6 +1870,167 @@ const styles = StyleSheet.create({
   activityList: {
     gap: 8,
   },
+  expiredBatchList: {
+    gap: 8,
+  },
+  expiredBatchCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 11,
+    borderWidth: 1,
+    borderColor: '#e4eae1',
+    borderRadius: 12,
+    backgroundColor: '#fffefa',
+  },
+  expiredBatchField: {
+    paddingVertical: 5,
+    paddingRight: 8,
+  },
+  expiredBatchFirstRowField: {
+    width: '50%',
+  },
+  expiredBatchSecondRowField: {
+    width: '33.333%',
+    marginTop: 3,
+  },
+  expiredBatchInlineField: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+  },
+  expiredBatchLabel: {
+    color: '#758078',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  expiredBatchValue: {
+    marginTop: 3,
+    color: '#183c31',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  expiredBatchValueAlert: {
+    color: '#dc2626',
+  },
+  expiredBatchSwipeHint: {
+    width: '100%',
+    marginTop: 5,
+    color: '#9a615d',
+    fontSize: 9,
+    textAlign: 'right',
+  },
+  currentPlanCard: {
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#cce9d8',
+    borderRadius: 12,
+    backgroundColor: '#f6fbf7',
+  },
+  currentPlanHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  currentPlanTitleGroup: {
+    flex: 1,
+  },
+  currentPlanEyebrow: {
+    color: '#16845f',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  currentPlanName: {
+    marginTop: 6,
+    color: '#203128',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  currentPlanStoreName: {
+    marginTop: 3,
+    color: '#718078',
+    fontSize: 10,
+  },
+  currentPlanStatus: {
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 20,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  currentPlanStatusAssigned: {
+    backgroundColor: '#e8f6ee',
+    color: '#18794e',
+  },
+  currentPlanStatusAvailable: {
+    backgroundColor: '#eef4f0',
+    color: '#65746b',
+  },
+  currentPlanStatusExpired: {
+    backgroundColor: '#fff2dd',
+    color: '#9b6412',
+  },
+  currentPlanDescription: {
+    marginTop: 11,
+    color: '#687871',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  currentPlanFees: {
+    gap: 5,
+    marginTop: 12,
+  },
+  currentPlanFeeText: {
+    color: '#687871',
+    fontSize: 10,
+  },
+  currentPlanFeeValue: {
+    color: '#34453b',
+    fontWeight: '700',
+  },
+  currentPlanTotal: {
+    color: '#203128',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  currentPlanPeriod: {
+    color: '#718078',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  currentPlanExpiry: {
+    flex: 1,
+    color: '#526158',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  currentPlanExpiryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e7f0ea',
+  },
+  chooseNewPlanButton: {
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#179c70',
+  },
+  chooseNewPlanButtonText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  chooseNewPlanButtonDisabled: {
+    opacity: 0.65,
+  },
   activityRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1358,11 +2050,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#eaf3e7',
-  },
-  activityAvatarInitials: {
-    color: '#17664f',
-    fontSize: 12,
-    fontWeight: '800',
   },
   activityDetails: {
     flex: 1,
@@ -1392,12 +2079,6 @@ const styles = StyleSheet.create({
     color: '#526158',
     fontSize: 11,
     lineHeight: 16,
-  },
-  activityActor: {
-    marginTop: 4,
-    color: '#17664f',
-    fontSize: 10,
-    fontWeight: '700',
   },
   activityEmptyText: {
     paddingVertical: 10,
