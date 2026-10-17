@@ -898,7 +898,7 @@ export default function OwnerHomeScreen() {
         }
       }
     }
-    router.push(`/dashboard/${itemId}`);
+    router.push(itemId === 'reports' ? '/reports' : `/dashboard/${itemId}`);
   }
 
   const visibleQuickAccessItems = isQuickAccessExpanded

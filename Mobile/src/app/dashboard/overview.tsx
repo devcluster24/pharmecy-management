@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { supabase } from '@/lib/supabase';
 import {
   formatCurrency,
@@ -603,7 +604,8 @@ export default function OverviewScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <DashboardSubpageHeader subtitle="Overview Dashboard" />
+      <ScrollView style={styles.pageContent} contentContainerStyle={styles.content}>
         <Text style={styles.dateLabel}>
           {now.toLocaleDateString('en-BD', {
             weekday: 'long',
@@ -612,8 +614,6 @@ export default function OverviewScreen() {
             year: 'numeric',
           })}
         </Text>
-        <Text style={styles.title}>Overview</Text>
-        <Text style={styles.subtitle}>Live data from your pharmacy account</Text>
 
         {error ? (
           <View style={styles.errorCard}>
@@ -772,6 +772,10 @@ export default function OverviewScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+    backgroundColor: '#145642',
+  },
+  pageContent: {
+    flex: 1,
     backgroundColor: '#f5f7f5',
   },
   centered: {
@@ -789,17 +793,6 @@ const styles = StyleSheet.create({
   },
   dateLabel: {
     marginBottom: 5,
-    color: '#78867f',
-    fontSize: 11,
-  },
-  title: {
-    color: '#1d2c25',
-    fontSize: 25,
-    fontWeight: '800',
-  },
-  subtitle: {
-    marginTop: 4,
-    marginBottom: 16,
     color: '#78867f',
     fontSize: 11,
   },
