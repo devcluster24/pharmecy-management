@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase/client";
 import { dashboardNavItems } from "@/app/component/pharmacy-dashboard/navigation";
 import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
 import { clearPharmacyDashboardIdentity, loadPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
+import { recordPharmacySessionActivity } from "@/lib/pharmacy-session-activity";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,7 +46,6 @@ export default function LoginPage() {
       if (!identity || identity.role !== "pharmacy_staff" || identity.approvalStatus !== "approved") {
         throw new Error("Your staff account could not load its approved pharmacy access. Ask the pharmacy owner to check your account status.");
       }
-
       const firstAllowedPage = dashboardNavItems.find((item) =>
         item.slug !== "staff" && canPharmacyStaffAccess(item.slug || "overview", "view"),
       );
@@ -57,6 +57,12 @@ export default function LoginPage() {
           : "Your account is active, but your pharmacy owner has not enabled any dashboard pages yet.");
         setIsSubmitting(false);
         return;
+      }
+
+      try {
+        await recordPharmacySessionActivity("login");
+      } catch (error) {
+        console.error("Could not record pharmacy staff login activity.", error);
       }
 
       router.replace(firstAllowedPage.href);
@@ -77,6 +83,12 @@ export default function LoginPage() {
     }
 
     if (profile.role === "pharmacy_user") {
+      try {
+        await recordPharmacySessionActivity("login");
+      } catch (error) {
+        console.error("Could not record pharmacy owner login activity.", error);
+      }
+
       const { data: pharmacy, error: pharmacyError } = await supabase
         .from("pharmacies")
         .select("id")

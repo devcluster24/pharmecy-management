@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  AppState,
   ActivityIndicator,
   Modal,
   Pressable,
@@ -31,25 +32,15 @@ type TodaySalesSummary = {
   invoiceCount: number;
 };
 
-type LatestInvoice = {
+type PharmacyActivity = {
   id: string;
-  invoice: string;
-  createdAt: string;
-};
-
-type LatestPurchaseOrder = {
-  order: string;
-  createdAt: string;
-};
-
-type LatestReceiveOrder = {
-  order: string;
-  createdAt: string;
-};
-
-type LatestReturn = {
-  returnId: string;
-  createdAt: string;
+  event_type: string;
+  title: string;
+  description: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  actor_username: string;
+  actor_photo_url: string | null;
 };
 
 const quickAccessItems = [
@@ -70,6 +61,7 @@ const ownerActionItems = [
 type QuickAccessId = (typeof quickAccessItems)[number]['id'];
 type QuickAccessCounts = Partial<Record<QuickAccessId, number>>;
 type HomeMenu = 'quick-access' | 'favourites';
+type ActivityMenu = 'latest-update' | 'expired' | 'subscription';
 
 function isQuickAccessId(value: unknown): value is QuickAccessId {
   return typeof value === 'string' && quickAccessItems.some((item) => item.id === value);
@@ -86,49 +78,13 @@ function getLocalDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function parseReturnDate(value: string) {
-  const match = /^([A-Za-z]{3}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}) (AM|PM)$/.exec(value);
-  if (match) {
-    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      .indexOf(match[1]);
-    const day = Number(match[2]);
-    const year = Number(match[3]);
-    const hour = Number(match[4]) % 12 + (match[6] === 'PM' ? 12 : 0);
-    const minute = Number(match[5]);
-    const date = new Date(year, month, day, hour, minute);
-    if (
-      month >= 0
-      && date.getFullYear() === year
-      && date.getMonth() === month
-      && date.getDate() === day
-      && date.getHours() === hour
-      && date.getMinutes() === minute
-    ) {
-      return date;
-    }
-  }
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp) : null;
-}
-
-function parseOrderDate(value: string) {
-  const match = /^([A-Za-z]{3}) (\d{1,2}), (\d{4})$/.exec(value.trim());
-  if (match) {
-    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      .indexOf(match[1]);
-    const day = Number(match[2]);
-    const year = Number(match[3]);
-    if (month >= 0) {
-      const date = new Date(year, month, day);
-      if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) {
-        return date;
-      }
-    }
-  }
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+function getInitials(value: string) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase() ?? '')
+    .join('') || '?';
 }
 
 function formatCurrency(amount: number) {
@@ -151,22 +107,11 @@ function formatNotificationTime(value: string) {
   });
 }
 
-function formatInvoiceTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
 export default function OwnerHomeScreen() {
   const { ownerName, storeName, session } = useAuth();
   const router = useRouter();
   const [currentHour, setCurrentHour] = useState(() => new Date().getHours());
+  const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey(new Date()));
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<PharmacyNotification[]>([]);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
@@ -175,14 +120,13 @@ export default function OwnerHomeScreen() {
   const [todaySales, setTodaySales] = useState<TodaySalesSummary>({ amount: 0, invoiceCount: 0 });
   const [isLoadingTodaySales, setIsLoadingTodaySales] = useState(true);
   const [todaySalesError, setTodaySalesError] = useState('');
-  const [latestInvoices, setLatestInvoices] = useState<LatestInvoice[]>([]);
-  const [latestPurchaseOrders, setLatestPurchaseOrders] = useState<LatestPurchaseOrder[]>([]);
-  const [latestReceiveOrders, setLatestReceiveOrders] = useState<LatestReceiveOrder[]>([]);
-  const [latestReturns, setLatestReturns] = useState<LatestReturn[]>([]);
-  const [isLoadingLatestInvoices, setIsLoadingLatestInvoices] = useState(true);
-  const [latestInvoicesError, setLatestInvoicesError] = useState('');
-  const [latestUpdatesRealtimeError, setLatestUpdatesRealtimeError] = useState('');
+  const [activities, setActivities] = useState<PharmacyActivity[]>([]);
+  const [isLoadingActivities, setIsLoadingActivities] = useState(true);
+  const [activitiesError, setActivitiesError] = useState('');
+  const [activitiesRealtimeError, setActivitiesRealtimeError] = useState('');
+  const [isActivitiesRealtimeConnected, setIsActivitiesRealtimeConnected] = useState(false);
   const [selectedHomeMenu, setSelectedHomeMenu] = useState<HomeMenu>('quick-access');
+  const [selectedActivityMenu, setSelectedActivityMenu] = useState<ActivityMenu>('latest-update');
   const [isQuickAccessExpanded, setIsQuickAccessExpanded] = useState(false);
   const [quickAccessCounts, setQuickAccessCounts] = useState<QuickAccessCounts>({});
   const [favouritesLoadedForKey, setFavouritesLoadedForKey] = useState<string | null>(null);
@@ -192,7 +136,11 @@ export default function OwnerHomeScreen() {
     : null;
 
   useEffect(() => {
-    const interval = setInterval(() => setCurrentHour(new Date().getHours()), 60_000);
+    const interval = setInterval(() => {
+      const now = new Date();
+      setCurrentHour(now.getHours());
+      setCurrentDateKey(getLocalDateKey(now));
+    }, 60_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -224,73 +172,33 @@ export default function OwnerHomeScreen() {
   }, [session]);
 
   const loadTodaySales = useCallback(async () => {
-    if (!supabase || !session) {
+    const client = supabase;
+    if (!client || !session) {
       const message = 'Sales summary is unavailable. Check your Supabase connection.';
       setTodaySalesError(message);
-      setLatestInvoicesError(message);
       setIsLoadingTodaySales(false);
-      setIsLoadingLatestInvoices(false);
       return;
     }
 
     setIsLoadingTodaySales(true);
     setTodaySalesError('');
-    setIsLoadingLatestInvoices(true);
-    setLatestInvoicesError('');
 
     try {
-      const [salesResult, purchaseOrderResult, receiveOrderResult, returnsResult] = await Promise.all([
-        supabase
-          .from('pharmacy_app_data')
-          .select('payload')
-          .eq('owner_user_id', session.user.id)
-          .eq('data_key', 'pharmacy-sales-list-v1')
-          .maybeSingle(),
-        supabase
-          .from('pharmacy_app_data')
-          .select('payload')
-          .eq('owner_user_id', session.user.id)
-          .eq('data_key', 'pharmacy-place-order-list-v1')
-          .maybeSingle(),
-        supabase
-          .from('pharmacy_app_data')
-          .select('payload')
-          .eq('owner_user_id', session.user.id)
-          .eq('data_key', 'pharmacy-purchase-list-v1')
-          .maybeSingle(),
-        supabase
-          .from('pharmacy_app_data')
-          .select('payload')
-          .eq('owner_user_id', session.user.id)
-          .eq('data_key', 'pharmacy-return-records-v1')
-          .maybeSingle(),
-      ]);
+      const salesResult = await client
+        .from('pharmacy_app_data')
+        .select('payload')
+        .eq('owner_user_id', session.user.id)
+        .eq('data_key', 'pharmacy-sales-list-v1')
+        .maybeSingle();
 
       if (salesResult.error) throw salesResult.error;
-      if (purchaseOrderResult.error) throw purchaseOrderResult.error;
-      if (receiveOrderResult.error) throw receiveOrderResult.error;
-      if (returnsResult.error) throw returnsResult.error;
 
       const payload: unknown = salesResult.data?.payload ?? [];
-      const purchaseOrdersPayload: unknown = purchaseOrderResult.data?.payload ?? [];
-      const receiveOrdersPayload: unknown = receiveOrderResult.data?.payload ?? [];
-      const returnsPayload: unknown = returnsResult.data?.payload ?? [];
-      if (
-        !Array.isArray(payload)
-        || !Array.isArray(purchaseOrdersPayload)
-        || !Array.isArray(receiveOrdersPayload)
-        || !Array.isArray(returnsPayload)
-      ) {
-        throw new Error('Saved sales, purchase order, or return data has an invalid format.');
-      }
+      if (!Array.isArray(payload)) throw new Error('Saved sales data has an invalid format.');
 
       const todayKey = getLocalDateKey(new Date());
       let amount = 0;
       let invoiceCount = 0;
-      const savedInvoices: LatestInvoice[] = [];
-      const latestOrderByNumber = new Map<string, LatestPurchaseOrder>();
-      const latestReceiveOrderByNumber = new Map<string, LatestReceiveOrder>();
-      const latestReturnById = new Map<string, LatestReturn>();
 
       for (const item of payload) {
         if (!item || typeof item !== 'object') {
@@ -311,17 +219,6 @@ export default function OwnerHomeScreen() {
           throw new Error('Saved sales data contains an invalid invoice date.');
         }
 
-        if (typeof invoice.invoice === 'string' && invoice.invoice.trim()) {
-          const latestTimestamp = invoice.createdAt;
-          if (getLocalDateKey(new Date(latestTimestamp)) === todayKey) {
-            savedInvoices.push({
-              id: typeof invoice.id === 'string' ? invoice.id : invoice.invoice,
-              invoice: invoice.invoice,
-              createdAt: latestTimestamp,
-            });
-          }
-        }
-
         if (getLocalDateKey(createdAt) === todayKey) {
           amount += invoice.amount;
           invoiceCount += 1;
@@ -331,118 +228,77 @@ export default function OwnerHomeScreen() {
         }
       }
 
-      for (const item of purchaseOrdersPayload) {
-        if (!item || typeof item !== 'object') {
-          throw new Error('Saved purchase order data contains an invalid order.');
-        }
-
-        const row = item as Record<string, unknown>;
-        const orderNumber = typeof row.order === 'string' ? row.order.trim() : '';
-        if (!orderNumber) continue;
-
-        const placedAt = typeof row.placedAt === 'string' ? row.placedAt : '';
-        const updatedAt = typeof row.updatedAt === 'string' ? row.updatedAt : '';
-        const orderDate = typeof row.orderDate === 'string' ? row.orderDate : '';
-        const placedTimestamp = Date.parse(placedAt);
-        const updatedTimestamp = Date.parse(updatedAt);
-        const parsedOrderDate = parseOrderDate(orderDate);
-        const timestamp = Number.isFinite(placedTimestamp)
-          ? placedTimestamp
-          : Number.isFinite(updatedTimestamp)
-            ? updatedTimestamp
-            : parsedOrderDate?.getTime() ?? Number.NaN;
-        if (!Number.isFinite(timestamp)) continue;
-
-        const previous = latestOrderByNumber.get(orderNumber);
-        if (!previous || timestamp > Date.parse(previous.createdAt)) {
-          latestOrderByNumber.set(orderNumber, {
-            order: orderNumber,
-            createdAt: new Date(timestamp).toISOString(),
-          });
-        }
-      }
-
-      for (const item of receiveOrdersPayload) {
-        if (!item || typeof item !== 'object') {
-          throw new Error('Saved received order data contains an invalid order.');
-        }
-
-        const row = item as Record<string, unknown>;
-        const orderNumber = typeof row.order === 'string' ? row.order.trim() : '';
-        if (!orderNumber) continue;
-
-        const receivedAt = typeof row.receivedAt === 'string' ? row.receivedAt : '';
-        const orderDate = typeof row.orderDate === 'string' ? row.orderDate : '';
-        const receivedTimestamp = Date.parse(receivedAt);
-        const parsedOrderDate = parseOrderDate(orderDate);
-        const timestamp = Number.isFinite(receivedTimestamp)
-          ? receivedTimestamp
-          : parsedOrderDate?.getTime() ?? Number.NaN;
-        if (!Number.isFinite(timestamp)) continue;
-
-        const previous = latestReceiveOrderByNumber.get(orderNumber);
-        if (!previous || timestamp > Date.parse(previous.createdAt)) {
-          latestReceiveOrderByNumber.set(orderNumber, {
-            order: orderNumber,
-            createdAt: new Date(timestamp).toISOString(),
-          });
-        }
-      }
-
-      for (const item of returnsPayload) {
-        if (!item || typeof item !== 'object') {
-          throw new Error('Saved return data contains an invalid return record.');
-        }
-
-        const record = item as Record<string, unknown>;
-        const returnId = typeof record.returnId === 'string' && record.returnId.trim()
-          ? record.returnId.trim()
-          : typeof record.id === 'string'
-            ? record.id.trim()
-            : '';
-        const returnDate = typeof record.date === 'string' ? record.date : '';
-        const parsedDate = parseReturnDate(returnDate);
-        if (!returnId || !parsedDate) continue;
-
-        const createdAt = parsedDate.toISOString();
-        if (getLocalDateKey(parsedDate) === todayKey) {
-          const previous = latestReturnById.get(returnId);
-          if (!previous || Date.parse(createdAt) > Date.parse(previous.createdAt)) {
-            latestReturnById.set(returnId, { returnId, createdAt });
-          }
-        }
-      }
-
       setTodaySales({ amount, invoiceCount });
-      setLatestInvoices(
-        savedInvoices
-          .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt)),
-      );
-      setLatestPurchaseOrders(
-        [...latestOrderByNumber.values()]
-          .filter((order) => getLocalDateKey(new Date(order.createdAt)) === todayKey)
-          .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt)),
-      );
-      setLatestReceiveOrders(
-        [...latestReceiveOrderByNumber.values()]
-          .filter((order) => getLocalDateKey(new Date(order.createdAt)) === todayKey)
-          .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt)),
-      );
-      setLatestReturns(
-        [...latestReturnById.values()].sort(
-          (first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt),
-        ),
-      );
-      setLatestInvoicesError('');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load saved sales.';
       setTodaySalesError(message);
-      setLatestInvoicesError(message);
     } finally {
       setIsLoadingTodaySales(false);
-      setIsLoadingLatestInvoices(false);
     }
   }, [session]);
+
+  const loadTodayActivities = useCallback(async () => {
+    const client = supabase;
+    if (!client || !session) {
+      setActivitiesError('Activity history is unavailable. Check your Supabase connection.');
+      setIsLoadingActivities(false);
+      return;
+    }
+
+    setIsLoadingActivities(true);
+    setActivitiesError('');
+    const [year, month, day] = currentDateKey.split('-').map(Number);
+    const start = new Date(year, month - 1, day);
+    const end = new Date(year, month - 1, day + 1);
+
+    try {
+      const { data, error } = await client.rpc('get_pharmacy_activity_for_day', {
+        requested_start: start.toISOString(),
+        requested_end: end.toISOString(),
+      });
+      if (error) throw error;
+      if (!Array.isArray(data)) throw new Error('Activity history has an invalid format.');
+
+      const loadedActivities = data.map((value: unknown): PharmacyActivity => {
+        if (!value || typeof value !== 'object') {
+          throw new Error('Activity history contains an invalid record.');
+        }
+        const row = value as Record<string, unknown>;
+        if (
+          typeof row.id !== 'string'
+          || typeof row.event_type !== 'string'
+          || typeof row.title !== 'string'
+          || typeof row.description !== 'string'
+          || !row.metadata
+          || typeof row.metadata !== 'object'
+          || Array.isArray(row.metadata)
+          || typeof row.created_at !== 'string'
+          || typeof row.actor_username !== 'string'
+          || (row.actor_photo_url !== null && typeof row.actor_photo_url !== 'string')
+          || Number.isNaN(Date.parse(row.created_at))
+        ) {
+          throw new Error('Activity history contains an invalid record.');
+        }
+        return {
+          id: row.id,
+          event_type: row.event_type,
+          title: row.title,
+          description: row.description,
+          metadata: row.metadata as Record<string, unknown>,
+          created_at: row.created_at,
+          actor_username: row.actor_username,
+          actor_photo_url: row.actor_photo_url,
+        };
+      });
+      setActivities(loadedActivities);
+    } catch (error) {
+      setActivitiesError(
+        error instanceof Error ? error.message : 'Could not load today’s activity.',
+      );
+    } finally {
+      setIsLoadingActivities(false);
+    }
+  }, [currentDateKey, session]);
 
   useEffect(() => {
     void loadNotifications();
@@ -451,15 +307,10 @@ export default function OwnerHomeScreen() {
   useEffect(() => {
     void loadTodaySales();
 
-    if (!supabase || !session) return;
+    const client = supabase;
+    if (!client || !session) return;
 
-    const latestUpdateDataKeys = new Set([
-      'pharmacy-sales-list-v1',
-      'pharmacy-place-order-list-v1',
-      'pharmacy-purchase-list-v1',
-      'pharmacy-return-records-v1',
-    ]);
-    const channel = supabase
+    const channel = client
       .channel(`owner-home-updates-${session.user.id}`)
       .on(
         'postgres_changes',
@@ -471,26 +322,68 @@ export default function OwnerHomeScreen() {
         },
         (change) => {
           const row = change.eventType === 'DELETE' ? change.old : change.new;
-          if (typeof row.data_key === 'string' && latestUpdateDataKeys.has(row.data_key)) {
+          if (row.data_key === 'pharmacy-sales-list-v1') {
             void loadTodaySales();
           }
         },
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          setLatestUpdatesRealtimeError('');
           void loadTodaySales();
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setLatestUpdatesRealtimeError(
-            'Real-time updates are unavailable. Check the Supabase Realtime configuration.',
+        }
+      });
+
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [loadTodaySales, session]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadTodayActivities);
+
+    const client = supabase;
+    if (!client || !session) return;
+
+    const channel = client
+      .channel(`owner-home-activity-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'pharmacy_activity_feed',
+          filter: `owner_user_id=eq.${session.user.id}`,
+        },
+        () => void loadTodayActivities(),
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setIsActivitiesRealtimeConnected(true);
+          setActivitiesRealtimeError('');
+          void loadTodayActivities();
+        } else if (
+          status === 'CHANNEL_ERROR'
+          || status === 'TIMED_OUT'
+          || status === 'CLOSED'
+        ) {
+          setIsActivitiesRealtimeConnected(false);
+          setActivitiesRealtimeError(
+            'Live activity updates are unavailable. Check the Supabase Realtime configuration.',
           );
         }
       });
 
     return () => {
-      void supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
-  }, [loadTodaySales, session]);
+  }, [loadTodayActivities, session]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadTodayActivities();
+    });
+    return () => subscription.remove();
+  }, [loadTodayActivities]);
 
   useEffect(() => {
     if (!favouritesStorageKey) return;
@@ -639,35 +532,6 @@ export default function OwnerHomeScreen() {
   const visibleHomeMenuItems = selectedHomeMenu === 'quick-access'
     ? visibleQuickAccessItems
     : visibleFavouriteItems;
-  const combinedLatestUpdates = [
-    ...latestInvoices.map((invoice) => ({
-      key: `invoice-${invoice.id}`,
-      type: 'Sales',
-      number: invoice.invoice,
-      createdAt: invoice.createdAt,
-    })),
-    ...latestPurchaseOrders.map((order) => ({
-      key: `order-${order.order}`,
-      type: 'Pur. Order',
-      number: order.order,
-      createdAt: order.createdAt,
-    })),
-    ...latestReceiveOrders.map((order) => ({
-      key: `receive-order-${order.order}`,
-      type: 'Rec. Ord.',
-      number: order.order,
-      createdAt: order.createdAt,
-    })),
-    ...latestReturns.map((record) => ({
-      key: `return-${record.returnId}-${record.createdAt}`,
-      type: 'Return',
-      number: record.returnId,
-      createdAt: record.createdAt,
-    })),
-  ]
-    .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt))
-    .slice(0, 5);
-
   const unreadCount = notifications.filter((notification) => !notification.read_at).length;
 
   return (
@@ -910,34 +774,106 @@ export default function OwnerHomeScreen() {
           ))}
         </View>
 
-        <View style={styles.latestInvoicesSection}>
-          <Text style={styles.latestInvoicesTitle}>Latest Update</Text>
-          {isLoadingLatestInvoices ? (
-            <ActivityIndicator size="small" color="#17664f" />
-          ) : latestInvoicesError ? (
-            <Text style={styles.latestInvoicesMessage}>{latestInvoicesError}</Text>
-          ) : (
-            <>
-              {combinedLatestUpdates.length > 0 ? (
-                <View style={styles.latestInvoicesList}>
-                  {combinedLatestUpdates.map((item) => (
-                    <View key={item.key} style={styles.latestInvoiceRow}>
-                      <View style={styles.latestInvoiceDetails}>
-                        <Text style={styles.latestInvoiceType}>{item.type}</Text>
-                        <Text style={styles.latestInvoiceNumber}>{item.number}</Text>
+        <View style={styles.activitySection}>
+          <View style={styles.activityMenuHeader}>
+            <View style={styles.activityTabs}>
+              {([
+                { id: 'latest-update', label: 'Latest Update' },
+                { id: 'expired', label: 'Expired' },
+                { id: 'subscription', label: 'Subscription' },
+              ] as const).map((item) => (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: selectedActivityMenu === item.id }}
+                  onPress={() => setSelectedActivityMenu(item.id)}
+                  style={styles.activityTab}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.activityTabText,
+                      selectedActivityMenu === item.id && styles.activityTabTextSelected,
+                    ]}>
+                    {item.label}
+                  </Text>
+                  {selectedActivityMenu === item.id ? (
+                    <View style={styles.activityTabIndicator} />
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
+            {selectedActivityMenu === 'latest-update' ? (
+              <View style={styles.activityLiveStatus}>
+                <View
+                  style={[
+                    styles.activityLiveDot,
+                    isActivitiesRealtimeConnected && styles.activityLiveDotConnected,
+                  ]}
+                />
+                <Text style={styles.activityLiveText}>
+                  {isActivitiesRealtimeConnected ? 'Live' : 'Connecting'}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {selectedActivityMenu === 'latest-update' ? (
+            <View style={styles.activityContent}>
+              {activitiesError ? (
+                <View style={styles.activityErrorBox}>
+                  <Text style={styles.activityErrorText}>{activitiesError}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadTodayActivities()}>
+                    <Text style={styles.activityRetryText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : isLoadingActivities ? (
+                <ActivityIndicator size="small" color="#17664f" />
+              ) : activities.length > 0 ? (
+                <View style={styles.activityList}>
+                  {activities.map((activity) => (
+                    <View key={activity.id} style={styles.activityRow}>
+                      {activity.actor_photo_url ? (
+                        <Image
+                          source={{ uri: activity.actor_photo_url }}
+                          contentFit="cover"
+                          style={styles.activityAvatar}
+                          alt={`${activity.actor_username} profile photo`}
+                          accessibilityLabel={`${activity.actor_username} profile photo`}
+                        />
+                      ) : (
+                        <View style={[styles.activityAvatar, styles.activityAvatarFallback]}>
+                          <Text style={styles.activityAvatarInitials}>
+                            {getInitials(activity.actor_username)}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.activityDetails}>
+                        <View style={styles.activityHeading}>
+                          <Text style={styles.activityTitle}>{activity.title}</Text>
+                          <Text style={styles.activityTime}>
+                            {formatNotificationTime(activity.created_at)}
+                          </Text>
+                        </View>
+                        <Text style={styles.activityDescription}>{activity.description}</Text>
+                        <Text style={styles.activityActor}>{activity.actor_username}</Text>
                       </View>
-                      <Text style={styles.latestInvoiceTime}>{formatInvoiceTime(item.createdAt)}</Text>
                     </View>
                   ))}
                 </View>
               ) : (
-                <Text style={styles.latestInvoicesMessage}>No data</Text>
+                <Text style={styles.activityEmptyText}>No data</Text>
               )}
-            </>
+              {activitiesRealtimeError ? (
+                <Text style={styles.activityRealtimeError}>{activitiesRealtimeError}</Text>
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.activityContent}>
+              <Text style={styles.activityEmptyText}>No data</Text>
+            </View>
           )}
-          {latestUpdatesRealtimeError ? (
-            <Text style={styles.latestInvoicesMessage}>{latestUpdatesRealtimeError}</Text>
-          ) : null}
         </View>
 
       </ScrollView>
@@ -1336,54 +1272,160 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  latestInvoicesSection: {
+  activitySection: {
     marginHorizontal: 18,
     marginTop: 14,
     marginBottom: 24,
   },
-  latestInvoicesTitle: {
-    marginBottom: 8,
-    color: '#183c31',
-    fontSize: 15,
+  activityMenuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#dce5df',
+  },
+  activityTabs: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  activityTab: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  activityTabText: {
+    color: '#758078',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  activityTabTextSelected: {
+    color: '#17664f',
+    fontWeight: '800',
+  },
+  activityTabIndicator: {
+    position: 'absolute',
+    right: 8,
+    bottom: -1,
+    left: 8,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#17664f',
+  },
+  activityLiveStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 3,
+    paddingBottom: 2,
+  },
+  activityLiveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#a7b0a9',
+  },
+  activityLiveDotConnected: {
+    backgroundColor: '#2a9a6c',
+  },
+  activityLiveText: {
+    color: '#758078',
+    fontSize: 9,
     fontWeight: '700',
   },
-  latestInvoicesList: {
-    gap: 6,
+  activityContent: {
+    paddingTop: 12,
   },
-  latestInvoiceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    minHeight: 38,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#e4eae1',
-    borderRadius: 10,
-    backgroundColor: '#fffefa',
-  },
-  latestInvoiceDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  activityList: {
     gap: 8,
   },
-  latestInvoiceType: {
-    color: '#758078',
-    fontSize: 11,
-    fontWeight: '600',
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 11,
+    borderWidth: 1,
+    borderColor: '#e4eae1',
+    borderRadius: 12,
+    backgroundColor: '#fffefa',
   },
-  latestInvoiceNumber: {
-    color: '#315b47',
+  activityAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  activityAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eaf3e7',
+  },
+  activityAvatarInitials: {
+    color: '#17664f',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '800',
   },
-  latestInvoiceTime: {
-    color: '#758078',
+  activityDetails: {
+    flex: 1,
+    minWidth: 0,
+  },
+  activityHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  activityTitle: {
+    flex: 1,
+    color: '#183c31',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  activityTime: {
+    color: '#8b968e',
+    fontSize: 9,
+    lineHeight: 15,
+    textAlign: 'right',
+  },
+  activityDescription: {
+    marginTop: 3,
+    color: '#526158',
     fontSize: 11,
+    lineHeight: 16,
   },
-  latestInvoicesMessage: {
+  activityActor: {
+    marginTop: 4,
+    color: '#17664f',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  activityEmptyText: {
+    paddingVertical: 10,
     color: '#758078',
     fontSize: 12,
+    textAlign: 'center',
+  },
+  activityErrorBox: {
+    padding: 11,
+    borderRadius: 10,
+    backgroundColor: '#fff3f0',
+  },
+  activityErrorText: {
+    color: '#a63e34',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  activityRetryText: {
+    marginTop: 7,
+    color: '#17664f',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  activityRealtimeError: {
+    marginTop: 8,
+    color: '#a63e34',
+    fontSize: 10,
+    lineHeight: 15,
   },
   modalSafeArea: {
     flex: 1,

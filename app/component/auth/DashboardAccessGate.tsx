@@ -11,6 +11,7 @@ import {
   clearPharmacyDashboardIdentity,
   loadPharmacyDashboardIdentity,
 } from "@/lib/pharmacy-dashboard-identity";
+import { recordPharmacySessionActivity } from "@/lib/pharmacy-session-activity";
 import { PharmacySubscriptionExpiryProvider } from "./PharmacySubscriptionExpiry";
 import PharmacyDataSyncNotice from "./PharmacyDataSyncNotice";
 
@@ -262,6 +263,13 @@ export default function DashboardAccessGate({
   }, [checkAttempt, isSubscriptionPaymentPage, pathname, requiredRole, router]);
 
   async function signOut() {
+    if (requiredRole === "pharmacy_user") {
+      try {
+        await recordPharmacySessionActivity("logout");
+      } catch (error) {
+        console.error("Could not record pharmacy logout activity.", error);
+      }
+    }
     await supabase.auth.signOut();
     router.replace("/login");
   }

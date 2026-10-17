@@ -3,6 +3,7 @@
 import { useEffect, useState, type FocusEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { recordPharmacySessionActivity } from "@/lib/pharmacy-session-activity";
 
 export default function PharmacyProfileMenu() {
   const router = useRouter();
@@ -64,6 +65,12 @@ export default function PharmacyProfileMenu() {
   async function handleSignOut() {
     setIsSigningOut(true);
     setErrorMessage("");
+
+    try {
+      await recordPharmacySessionActivity("logout");
+    } catch (error) {
+      console.error("Could not record pharmacy logout activity.", error);
+    }
 
     const { error } = await supabase.auth.signOut();
     if (error) {

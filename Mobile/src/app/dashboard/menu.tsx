@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { supabase, supabaseConfigError } from '@/lib/supabase';
+import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
 export default function MenuScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -18,6 +19,16 @@ export default function MenuScreen() {
     setErrorMessage('');
 
     try {
+      try {
+        await recordPharmacySessionActivity('logout');
+      } catch (activityError) {
+        Alert.alert(
+          'Logout activity was not saved',
+          activityError instanceof Error
+            ? activityError.message
+            : 'Could not record this logout in the activity history.',
+        );
+      }
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
 

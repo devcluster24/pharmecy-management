@@ -1,10 +1,11 @@
 import { Redirect } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
 export default function DashboardLayout() {
   const {
@@ -36,9 +37,21 @@ export default function DashboardLayout() {
       }
       setIsSigningOut(true);
       setSignOutError('');
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        setSignOutError(error.message);
+      try {
+        try {
+          await recordPharmacySessionActivity('logout');
+        } catch (activityError) {
+          Alert.alert(
+            'Logout activity was not saved',
+            activityError instanceof Error
+              ? activityError.message
+              : 'Could not record this logout in the activity history.',
+          );
+        }
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+      } catch (error) {
+        setSignOutError(error instanceof Error ? error.message : 'Could not sign out.');
         setIsSigningOut(false);
       }
     }

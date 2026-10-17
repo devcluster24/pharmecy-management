@@ -1,6 +1,6 @@
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Keyboard, Pressable, Text, View } from 'react-native';
+import { Alert, Keyboard, Pressable, Text, View } from 'react-native';
 
 import {
   AuthField,
@@ -10,6 +10,7 @@ import {
 } from '@/components/auth/AuthScreen';
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
+import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -49,6 +50,16 @@ export default function LoginScreen() {
       if (error) throw error;
       if (!data.session || !data.user) {
         throw new Error('Sign in did not complete. Please try again.');
+      }
+      try {
+        await recordPharmacySessionActivity('login');
+      } catch (activityError) {
+        Alert.alert(
+          'Login activity was not saved',
+          activityError instanceof Error
+            ? activityError.message
+            : 'Could not record this login in the activity history.',
+        );
       }
       router.replace('/dashboard');
     } catch (error) {
