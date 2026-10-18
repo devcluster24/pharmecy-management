@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,12 +23,10 @@ export function AuthScreen({ eyebrow, title, subtitle, children, footer }: AuthS
   return (
     <View style={styles.page}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets>
             <View style={styles.brandRow}>
               <View style={styles.brandMark}>
                 <Text style={styles.brandMarkText}>+</Text>
@@ -63,8 +59,7 @@ export function AuthScreen({ eyebrow, title, subtitle, children, footer }: AuthS
             </View>
 
             <Text style={styles.bottomNote}>A secure workspace for your pharmacy team</Text>
-          </ScrollView>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </SafeAreaView>
     </View>
   );
@@ -171,9 +166,6 @@ export const authStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
   page: {
     flex: 1,
     backgroundColor: '#f2f4ef',

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
@@ -114,6 +114,7 @@ type PendingOrderReceipt = {
 };
 
 const PAGE_SIZE = 1000;
+const PRODUCT_PAGE_CONCURRENCY = 5;
 
 function createBrandSelection(id: number): BrandSelection {
   return {
@@ -282,6 +283,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const [isOpen, setIsOpen] = useState(false);
   const [isPlaceOrderOpen, setIsPlaceOrderOpen] = useState(false);
   const [products, setProducts] = useState<PurchaseProduct[]>([]);
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [companySelections, setCompanySelections] = useState<CompanySelection[]>([
     createCompanySelection(0, 0),
   ]);
@@ -317,11 +319,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const [nextPlaceOrderLineId, setNextPlaceOrderLineId] = useState(0);
   const [placeOrderError, setPlaceOrderError] = useState("");
 
-  const companyNames = useMemo(
-    () => [...new Set(products.map((product) => product.manufacturer.trim()).filter((name) => name && name !== "-"))]
-      .sort((left, right) => left.localeCompare(right)),
-    [products],
-  );
   function getSavedSupplierContacts() {
     const seenContacts = new Set<string>();
     return purchaseListSnapshot.rows
@@ -446,6 +443,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     async function loadProducts() {
       setIsLoading(true);
       setErrorMessage("");
+      setProducts([]);
+      setCompanyNames([]);
       try {
         const { data: { session }, error: authError } = await supabase.auth.getSession();
         const user = session?.user ?? null;
@@ -453,8 +452,32 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         if (!user) throw new Error("Sign in to create a purchase.");
         const pharmacyOwnerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
 
-        const rows: PurchaseProduct[] = [];
-        for (let offset = 0; ; offset += PAGE_SIZE) {
+        const firstPageResult = await supabase
+          .from("pharmacy_catalog_products")
+          .select("id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price", { count: "exact" })
+          .eq("owner_user_id", pharmacyOwnerId)
+          .order("manufacturer", { ascending: true })
+          .order("brand", { ascending: true })
+          .range(0, PAGE_SIZE - 1);
+        if (firstPageResult.error) throw firstPageResult.error;
+        const firstPage = (firstPageResult.data ?? []) as PurchaseProduct[];
+        if (!active) return;
+
+        const rows = [...firstPage];
+        const getCompanyNames = (productsToRead: PurchaseProduct[]) => [...new Set(
+          productsToRead
+            .map((product) => product.manufacturer.trim())
+            .filter((name) => name && name !== "-"),
+        )].sort((left, right) => left.localeCompare(right));
+        setCompanyNames(getCompanyNames(rows));
+        setProducts(rows);
+
+        const totalRows = firstPageResult.count ?? firstPage.length;
+        const offsets = Array.from(
+          { length: Math.max(0, Math.ceil(totalRows / PAGE_SIZE) - 1) },
+          (_, index) => (index + 1) * PAGE_SIZE,
+        );
+        const loadProductPage = async (offset: number) => {
           const { data, error } = await supabase
             .from("pharmacy_catalog_products")
             .select("id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price")
@@ -463,10 +486,17 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
             .order("brand", { ascending: true })
             .range(offset, offset + PAGE_SIZE - 1);
           if (error) throw error;
-
-          const page = (data ?? []) as PurchaseProduct[];
-          rows.push(...page);
-          if (page.length < PAGE_SIZE) break;
+          return (data ?? []) as PurchaseProduct[];
+        };
+        for (let index = 0; index < offsets.length; index += PRODUCT_PAGE_CONCURRENCY) {
+          const pages = await Promise.all(
+            offsets
+              .slice(index, index + PRODUCT_PAGE_CONCURRENCY)
+              .map(loadProductPage),
+          );
+          if (!active) return;
+          pages.forEach((page) => rows.push(...page));
+          setCompanyNames(getCompanyNames(rows));
         }
 
         if (!active) return;
@@ -1351,8 +1381,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                               companyDraft: event.target.value,
                               isAddingCompany: true,
                             })}
-                            placeholder={isLoading ? "Loading companies..." : "Type or select company"}
-                            disabled={isLoading}
+                            placeholder={isLoading && companyNames.length === 0 ? "Loading companies..." : "Type or select company"}
                             style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
                           />
                           {companySelection.isAddingCompany && companySelection.companyDraft.trim() && (
@@ -2229,7 +2258,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                     aria-label="Place Order Company Name"
                     required
                     value={placeOrderCompany}
-                    disabled={isLoading}
                     onChange={(event) => {
                       setPlaceOrderCompany(event.target.value);
                       setPlaceOrderDraft({ productId: "", packPrice: "", quantity: "", purchasePrice: "" });
@@ -2240,7 +2268,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                     }}
                     style={{ ...fieldStyle, height: 34, padding: "6px 8px", fontSize: 12, fontWeight: 400 }}
                   >
-                    <option value="">{isLoading ? "Loading companies..." : "Select company"}</option>
+                    <option value="">{isLoading && companyNames.length === 0 ? "Loading companies..." : "Select company"}</option>
                     {companyNames.map((company) => <option key={company} value={company}>{company}</option>)}
                   </select>
                 </label>

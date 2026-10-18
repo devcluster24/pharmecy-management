@@ -1,5 +1,5 @@
-import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
+import { Redirect } from 'expo-router';
 
 export default function SupplierScreen() {
-  return <DashboardTabScreen title="Supplier" />;
+  return <Redirect href="/supplier" />;
 }

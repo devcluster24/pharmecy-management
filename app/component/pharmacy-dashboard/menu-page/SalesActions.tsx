@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { confirmDelete } from "@/lib/confirmDelete";
+import { supabase } from "@/lib/supabase/client";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import { downloadSaleInvoicePdf, printSaleInvoicePdf } from "./saleInvoicePdf";
 import {
@@ -199,9 +200,11 @@ export default function SalesActions() {
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
   const [productError, setProductError] = useState("");
   const [saleSaveError, setSaleSaveError] = useState("");
+  const [isSavingSale, setIsSavingSale] = useState(false);
   const [saleInvoice, setSaleInvoice] = useState<SalesListRow | null>(null);
   const [expandedInvoiceLineIndex, setExpandedInvoiceLineIndex] = useState<number | null>(null);
   const [invoicePdfError, setInvoicePdfError] = useState("");
+  const savingSaleRef = useRef(false);
   const [expiredProduct, setExpiredProduct] = useState<SaleProduct | null>(null);
   const searchSequence = useRef(0);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -458,7 +461,8 @@ export default function SalesActions() {
     }));
   }
 
-  function saveSale() {
+  async function saveSale() {
+    if (savingSaleRef.current) return;
     if (!validCustomerName) {
       setSaleSaveError("Customer Name is required.");
       return;
@@ -494,6 +498,8 @@ export default function SalesActions() {
       return;
     }
 
+    savingSaleRef.current = true;
+    setIsSavingSale(true);
     const invoiceLines = completedLines.flatMap((line) =>
       getBatchAllocations(line).map(({ batch, quantity }) => {
         const unitPrice = getUnitPrice(batch.unitPrice);
@@ -513,6 +519,9 @@ export default function SalesActions() {
     );
 
     try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!user) throw new Error("Sign in again before recording this sale.");
       const savedSale = persistSale(
         invoiceLines,
         parsedPayAmount,
@@ -521,6 +530,7 @@ export default function SalesActions() {
         customerName.trim() || "Walk-in customer",
         customerPhone.trim(),
         paymentMethodOptions.find((option) => option.value === effectivePaymentMethod)?.label ?? "Cash",
+        user.id,
       );
       setSaleSaveError("");
       setSaleLines([]);
@@ -550,6 +560,9 @@ export default function SalesActions() {
       }
     } catch (error) {
       setSaleSaveError(getErrorMessage(error));
+    } finally {
+      savingSaleRef.current = false;
+      setIsSavingSale(false);
     }
   }
 
@@ -1123,10 +1136,10 @@ export default function SalesActions() {
                   <button
                     type="button"
                     onClick={saveSale}
-                    disabled={!validPayAmount || !validDiscount}
+                    disabled={isSavingSale || !validPayAmount || !validDiscount}
                     style={{ border: 0, borderRadius: 6, background: validPayAmount && validDiscount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount && validDiscount ? "pointer" : "not-allowed" }}
                   >
-                    Save
+                    {isSavingSale ? "Saving…" : "Save"}
                   </button>
                 </div>
               </aside>
@@ -1138,10 +1151,10 @@ export default function SalesActions() {
                 <button
                   type="button"
                   onClick={saveSale}
-                  disabled={!validPayAmount || !validDiscount}
+                  disabled={isSavingSale || !validPayAmount || !validDiscount}
                   style={{ border: 0, borderRadius: 6, background: validPayAmount && validDiscount ? "#179c70" : "#aab8b0", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: validPayAmount && validDiscount ? "pointer" : "not-allowed" }}
                 >
-                  Save
+                  {isSavingSale ? "Saving…" : "Save"}
                 </button>
               </div>
             </footer>

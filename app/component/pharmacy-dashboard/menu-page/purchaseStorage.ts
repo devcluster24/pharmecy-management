@@ -58,6 +58,16 @@ export function getOrderTotal(rows: PurchaseListRow[]) {
   }, 0);
 }
 
+function getPackSizeMultiplier(packSize: string) {
+  const factors = packSize.match(/\d[\d,]*(?:\.\d+)?/g)?.map((factor) =>
+    Number(factor.replace(/,/g, "")),
+  ) ?? [];
+  if (!factors.length || factors.some((factor) => !Number.isFinite(factor) || factor <= 0)) return null;
+
+  const multiplier = factors.reduce((total, factor) => total * factor, 1);
+  return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : null;
+}
+
 export function groupPurchaseOrders(
   rows: PurchaseListRow[],
   useReceivedAt = false,
@@ -126,14 +136,11 @@ function isPurchaseListRow(value: unknown): value is PurchaseListRow {
 
 export function calculateUnitPurchasePrice(packSize: string, totalPrice: string, quantity: string) {
   if (!packSize.trim() || !totalPrice.trim() || !quantity.trim()) return "-";
-  const packFactors = packSize.trim().split(/\s*[xX×]\s*/);
-  if (!packFactors.length || packFactors.some((factor) => !/^\d+(?:\.\d+)?$/.test(factor))) return "-";
-  const packMultiplier = packFactors.reduce((total, factor) => total * Number(factor), 1);
+  const packMultiplier = getPackSizeMultiplier(packSize);
   const parsedTotalPrice = Number(totalPrice);
   const parsedQuantity = Number(quantity);
   if (
-    !Number.isFinite(packMultiplier) ||
-    packMultiplier <= 0 ||
+    packMultiplier === null ||
     !Number.isFinite(parsedTotalPrice) ||
     parsedTotalPrice < 0 ||
     !Number.isFinite(parsedQuantity) ||
@@ -146,27 +153,23 @@ export function calculateTotalQuantity(packSize: string, quantity: string): numb
   if (!quantity.trim() || !packSize.trim()) return null;
 
   const parsedQuantity = Number(quantity);
-  const factors = packSize.trim().split(/\s*[xX×]\s*/);
   if (
     !Number.isFinite(parsedQuantity)
     || parsedQuantity < 0
-    || factors.some((factor) => !/^\d+(?:\.\d+)?$/.test(factor))
   ) return null;
 
-  const packMultiplier = factors.reduce((total, factor) => total * Number(factor), 1);
+  const packMultiplier = getPackSizeMultiplier(packSize);
+  if (packMultiplier === null) return null;
   const totalQuantity = parsedQuantity * packMultiplier;
-  return Number.isFinite(totalQuantity) && packMultiplier > 0
+  return Number.isFinite(totalQuantity)
     ? Number(totalQuantity.toFixed(4))
     : null;
 }
 
 export function calculatePackQuantity(packSize: string, totalQuantity: number): number | null {
   if (!packSize.trim() || !Number.isFinite(totalQuantity) || totalQuantity < 0) return null;
-  const factors = packSize.trim().split(/\s*[xX×]\s*/);
-  if (factors.some((factor) => !/^\d+(?:\.\d+)?$/.test(factor))) return null;
-
-  const packMultiplier = factors.reduce((total, factor) => total * Number(factor), 1);
-  return Number.isFinite(packMultiplier) && packMultiplier > 0
+  const packMultiplier = getPackSizeMultiplier(packSize);
+  return packMultiplier !== null
     ? Number((totalQuantity / packMultiplier).toFixed(4))
     : null;
 }

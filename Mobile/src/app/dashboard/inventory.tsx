@@ -453,7 +453,10 @@ export default function InventoryScreen() {
         ) : isLoading ? (
           <ActivityIndicator size="large" color="#17664f" style={styles.loader} />
         ) : (
-          <ScrollView contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets>
           <TextInput
             accessibilityLabel="Search inventory by batch number, brand name, or company name"
             value={searchQuery}

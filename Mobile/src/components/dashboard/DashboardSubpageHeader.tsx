@@ -2,7 +2,13 @@ import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 
-export default function DashboardSubpageHeader({ subtitle }: { subtitle: string }) {
+export default function DashboardSubpageHeader({
+  subtitle,
+  onBack,
+}: {
+  subtitle: string;
+  onBack?: () => void;
+}) {
   return (
     <>
       <StatusBar barStyle="light-content" backgroundColor="#145642" />
@@ -10,7 +16,7 @@ export default function DashboardSubpageHeader({ subtitle }: { subtitle: string 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          onPress={() => router.back()}
+          onPress={onBack ?? (() => router.back())}
           style={styles.backButton}>
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>

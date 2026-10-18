@@ -898,7 +898,17 @@ export default function OwnerHomeScreen() {
         }
       }
     }
-    router.push(itemId === 'reports' ? '/reports' : `/dashboard/${itemId}`);
+    if (itemId === 'reports') {
+      router.push('/reports');
+    } else if (itemId === 'invoice') {
+      router.push('/invoice');
+    } else if (itemId === 'customer') {
+      router.push('/customer');
+    } else if (itemId === 'supplier') {
+      router.push('/supplier');
+    } else {
+      router.push(`/dashboard/${itemId}`);
+    }
   }
 
   const visibleQuickAccessItems = isQuickAccessExpanded
@@ -1145,7 +1155,9 @@ export default function OwnerHomeScreen() {
               key={item.id}
               accessibilityRole="button"
               accessibilityLabel={item.label}
-              onPress={() => router.push(`/dashboard/${item.id}`)}
+              onPress={() => router.push(
+                item.id === 'sale' ? '/sales' : item.id === 'return' ? '/return' : '/purchase',
+              )}
               style={({ pressed }) => [
                 styles.ownerActionButton,
                 pressed && styles.ownerActionButtonPressed,

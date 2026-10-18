@@ -2,14 +2,18 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import { confirmDelete } from "@/lib/confirmDelete";
 import {
   emptyPurchaseListSnapshot,
   getPurchaseListSnapshot,
+  readPurchaseListRows,
   getAvailablePurchaseQuantity,
   calculatePackQuantity,
+  calculateTotalQuantity,
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
+import { addDestroyExpenseAndRemovePurchaseRow } from "./expensesStorage";
 import {
   emptyLowStockThresholdSnapshot,
   getLowStockThresholdSnapshot,
@@ -50,6 +54,66 @@ function getCurrentPackQuantity(row: PurchaseListRow) {
   return currentQuantity?.toLocaleString("en-BD", { maximumFractionDigits: 4 })
     ?? row.quantity
     ?? "-";
+}
+
+function getCurrentTotalQuantity(row: PurchaseListRow) {
+  if (row.availableQuantity !== undefined) {
+    const availableQuantity = Number(row.availableQuantity);
+    if (Number.isFinite(availableQuantity) && availableQuantity >= 0) return availableQuantity;
+  }
+
+  if (row.quantity === undefined || !row.quantity.trim()) return null;
+  const boxQuantity = Number(row.quantity);
+  const packMultiplier = calculateTotalQuantity(row.packSize, "1");
+  if (!Number.isFinite(boxQuantity) || boxQuantity < 0 || packMultiplier === null) return null;
+
+  const totalQuantity = boxQuantity * packMultiplier;
+  return Number.isFinite(totalQuantity) ? Number(totalQuantity.toFixed(4)) : null;
+}
+
+function getAvailableStockAmount(row: PurchaseListRow) {
+  const totalQuantity = getCurrentTotalQuantity(row);
+  if (totalQuantity === null) return null;
+  if (totalQuantity === 0) return 0;
+
+  const savedUnitPrice = Number(row.unitPurchasePrice);
+  const unitPrice = row.unitPurchasePrice?.trim()
+    && row.unitPurchasePrice.trim() !== "-"
+    && Number.isFinite(savedUnitPrice)
+    && savedUnitPrice >= 0
+    ? savedUnitPrice
+    : (() => {
+      const packQuantity = Number(row.quantity);
+      const totalPrice = Number(row.totalPrice);
+      const packMultiplier = calculateTotalQuantity(row.packSize, "1");
+      if (
+        !Number.isFinite(packQuantity)
+        || packQuantity <= 0
+        || !Number.isFinite(totalPrice)
+        || totalPrice < 0
+        || packMultiplier === null
+      ) return Number.NaN;
+      return totalPrice / packQuantity / packMultiplier;
+    })();
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
+
+  const availableValue = totalQuantity * unitPrice;
+  return Number.isFinite(availableValue) ? Number(availableValue.toFixed(2)) : null;
+}
+
+function getAvailableStockValue(row: PurchaseListRow) {
+  const amount = getAvailableStockAmount(row);
+  return amount !== null
+    ? `৳${amount.toLocaleString("en-BD", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`
+    : "-";
+}
+
+function todayInputValue() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
 function formatDateTime(row: PurchaseListRow) {
@@ -96,6 +160,49 @@ export default function InventoryPage() {
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<ExpiryMonthFilter>(3);
   const [searchQuery, setSearchQuery] = useState("");
   const [paginationState, setPaginationState] = useState({ key: "", page: 1 });
+  const [actionError, setActionError] = useState("");
+  const [destroyingRowId, setDestroyingRowId] = useState<string | null>(null);
+
+  async function handleDestroy(row: PurchaseListRow) {
+    setActionError("");
+    const amount = getAvailableStockAmount(row);
+    if (amount === null || amount < 0) {
+      setActionError(`Could not destroy ${row.brand}, batch ${row.batchNumber}: a valid purchase value is required.`);
+      return;
+    }
+    if (!await confirmDelete(
+      `Destroy ${row.brand}, batch ${row.batchNumber} and record ৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} as an expense?`,
+    )) return;
+
+    setDestroyingRowId(row.id);
+    try {
+      const currentRows = readPurchaseListRows();
+      const currentRow = currentRows.find((item) => item.id === row.id);
+      if (!currentRow) throw new Error("This inventory row could not be found. Refresh and try again.");
+      if (!isInventoryItemExpired(currentRow.expDate, new Date())) {
+        throw new Error("This batch is no longer expired. Refresh the inventory list and try again.");
+      }
+
+      const currentAmount = getAvailableStockAmount(currentRow);
+      if (currentAmount === null || currentAmount < 0) {
+        throw new Error(`Could not destroy ${currentRow.brand}, batch ${currentRow.batchNumber}: a valid purchase value is required.`);
+      }
+      addDestroyExpenseAndRemovePurchaseRow(
+        {
+          date: todayInputValue(),
+          category: "Destroy",
+          description: currentRow.brand.trim() || currentRow.genericName.trim(),
+          amount: currentAmount,
+          paymentMethod: "",
+        },
+        currentRows.filter((item) => item.id !== currentRow.id),
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not destroy this inventory row.");
+    } finally {
+      setDestroyingRowId(null);
+    }
+  }
   const sortedRows = useMemo(
     () => [...purchaseList.rows].sort((left, right) => {
       const leftTimestamp = Date.parse(left.updatedAt ?? "");
@@ -119,12 +226,12 @@ export default function InventoryPage() {
       : activeList === "low-stock"
         ? lowStockEnabled
           ? sortedRows.filter((row) => {
-            const totalQuantity = getAvailablePurchaseQuantity(row);
+            const totalQuantity = getCurrentTotalQuantity(row);
             return totalQuantity !== null && totalQuantity <= threshold;
           })
           : []
         : activeList === "out-of-stock"
-          ? sortedRows.filter((row) => getAvailablePurchaseQuantity(row) === 0)
+          ? sortedRows.filter((row) => getCurrentTotalQuantity(row) === 0)
           : sortedRows;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const rows = normalizedSearchQuery
@@ -156,7 +263,7 @@ export default function InventoryPage() {
           : activeList === "out-of-stock"
             ? "Items with zero quantity."
             : "Review stock received from your suppliers.",
-    errorMessage: purchaseList.error || returns.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
+    errorMessage: actionError || purchaseList.error || returns.error || (activeList === "low-stock" ? lowStockThresholdSnapshot.error : ""),
     action: "Adjust stock",
     metrics: [],
     columns: receiveOrderColumns,
@@ -173,7 +280,7 @@ export default function InventoryPage() {
         row.dosageForm,
         getCurrentPackQuantity(row),
         row.packSize,
-        getAvailablePurchaseQuantity(row)?.toLocaleString("en-BD") ?? "-",
+        getCurrentTotalQuantity(row)?.toLocaleString("en-BD", { maximumFractionDigits: 4 }) ?? "-",
         row.packPrice,
         row.expDate,
       ];
@@ -202,6 +309,17 @@ export default function InventoryPage() {
             ) : value}
           </span>
         )),
+        ...(activeList === "expaired" ? [
+          <button
+            key={`${row.id}-destroy`}
+            type="button"
+            disabled={destroyingRowId === row.id}
+            onClick={() => void handleDestroy(row)}
+            style={{ marginRight: 6, border: "1px solid #f0d5d3", borderRadius: 5, background: "#fff", color: "#dc2626", padding: "5px 10px", fontSize: 11, fontWeight: 650, cursor: destroyingRowId === row.id ? "wait" : "pointer", opacity: destroyingRowId === row.id ? 0.6 : 1 }}
+          >
+            {destroyingRowId === row.id ? "Destroying..." : "Destroy"}
+          </button>,
+        ] : []),
         <button
           key={`${row.id}-view`}
           type="button"
@@ -375,7 +493,8 @@ export default function InventoryPage() {
               ["Dosage Form", selectedRow.dosageForm],
               ["Box Quantity", getCurrentPackQuantity(selectedRow)],
               ["Pack Size", selectedRow.packSize],
-              ["Total Quantity", getAvailablePurchaseQuantity(selectedRow)?.toLocaleString("en-BD") ?? "-"],
+              ["Total Quantity", getCurrentTotalQuantity(selectedRow)?.toLocaleString("en-BD", { maximumFractionDigits: 4 }) ?? "-"],
+              ...(activeList === "expaired" ? [["Price", getAvailableStockValue(selectedRow)]] : []),
               ["Pack Price", selectedRow.packPrice],
               ["Exp Date", selectedRow.expDate],
             ].map(([label, value]) => (

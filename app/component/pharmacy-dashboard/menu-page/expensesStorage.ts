@@ -1,4 +1,13 @@
-import { getPharmacyDataJson, setPharmacyDataJson } from "@/lib/pharmacy-data-sync";
+import {
+  getPharmacyDataJson,
+  setPharmacyDataBatch,
+  setPharmacyDataJson,
+} from "@/lib/pharmacy-data-sync";
+import {
+  notifyPurchaseListRowsChanged,
+  PURCHASE_STORAGE_KEY,
+  type PurchaseListRow,
+} from "./purchaseStorage";
 
 export const EXPENSES_STORAGE_KEY = "pharmacy-expenses-v1";
 
@@ -31,7 +40,7 @@ function isExpenseRecord(value: unknown): value is ExpenseRecord {
     && typeof row.description === "string"
     && typeof row.amount === "number"
     && Number.isFinite(row.amount)
-    && row.amount > 0
+    && (row.amount > 0 || (row.amount === 0 && row.category === "Destroy" && row.paymentMethod === ""))
     && typeof row.paymentMethod === "string"
     && typeof row.createdAt === "string";
 }
@@ -87,18 +96,52 @@ function saveExpenses(rows: ExpenseRecord[], action: "create" | "edit" | "delete
 }
 
 export function addExpense(input: Omit<ExpenseRecord, "id" | "createdAt">) {
+  const rows = readExpenses();
+  const expense = createExpenseRecord(input);
+  saveExpenses([expense, ...rows], "create");
+  return expense;
+}
+
+export function addDestroyExpenseAndRemovePurchaseRow(
+  input: Omit<ExpenseRecord, "id" | "createdAt">,
+  remainingPurchaseRows: PurchaseListRow[],
+) {
+  const expenses = readExpenses();
+  const expense = createExpenseRecord(input, true);
+  const updatedExpenses = [expense, ...expenses];
+
+  setPharmacyDataBatch(
+    {
+      [EXPENSES_STORAGE_KEY]: updatedExpenses,
+      [PURCHASE_STORAGE_KEY]: remainingPurchaseRows,
+    },
+    {
+      [EXPENSES_STORAGE_KEY]: "create",
+      [PURCHASE_STORAGE_KEY]: "delete",
+    },
+  );
+  cachedSnapshot = { rows: updatedExpenses, error: "" };
+  window.dispatchEvent(new Event(expensesUpdatedEvent));
+  notifyPurchaseListRowsChanged(remainingPurchaseRows);
+  return expense;
+}
+
+function createExpenseRecord(
+  input: Omit<ExpenseRecord, "id" | "createdAt">,
+  allowEmptyPaymentMethod = false,
+) {
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(input.date)
     || !input.category.trim()
     || !input.description.trim()
     || !Number.isFinite(input.amount)
-    || input.amount <= 0
-    || !input.paymentMethod.trim()
+    || input.amount < 0
+    || (input.amount === 0 && !allowEmptyPaymentMethod)
+    || (!allowEmptyPaymentMethod && !input.paymentMethod.trim())
   ) {
     throw new Error("Enter a valid date, category, description, amount, and payment method.");
   }
-  const rows = readExpenses();
-  const expense: ExpenseRecord = {
+  return {
     ...input,
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     category: input.category.trim(),
@@ -107,8 +150,6 @@ export function addExpense(input: Omit<ExpenseRecord, "id" | "createdAt">) {
     amount: Number(input.amount.toFixed(2)),
     createdAt: new Date().toISOString(),
   };
-  saveExpenses([expense, ...rows], "create");
-  return expense;
 }
 
 export function deleteExpense(id: string) {

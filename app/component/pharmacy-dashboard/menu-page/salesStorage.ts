@@ -41,6 +41,7 @@ export type SalesListRow = {
   payment: string;
   paymentMethodName?: string;
   payments?: SalesPaymentEntry[];
+  createdByUserId?: string;
   createdAt: string;
   lines?: SalesInvoiceItem[];
 };
@@ -82,6 +83,7 @@ function isSalesListRow(value: unknown): value is SalesListRow {
     && (!("dueAmount" in row) || (typeof row.dueAmount === "number" && Number.isFinite(row.dueAmount)))
     && typeof row.payment === "string"
     && (!("paymentMethodName" in row) || typeof row.paymentMethodName === "string")
+    && (!("createdByUserId" in row) || typeof row.createdByUserId === "string")
     && (!("payments" in row) || (
       Array.isArray(row.payments)
       && row.payments.every((payment: unknown) => {
@@ -169,12 +171,14 @@ export function persistSale(
   customer = "Walk-in customer",
   phone = "",
   paymentMethodName = "Cash",
+  createdByUserId = "",
 ) {
   if (
     lines.length === 0
     || typeof customer !== "string"
     || typeof phone !== "string"
     || typeof paymentMethodName !== "string"
+    || !createdByUserId.trim()
     || !Number.isFinite(paidAmount)
     || paidAmount < 0
     || !Number.isFinite(discountAmount)
@@ -238,6 +242,7 @@ export function persistSale(
     dueAmount,
     payment: dueAmount > 0 ? "Due" : "Paid",
     paymentMethodName: paymentMethodName.trim() || "Cash",
+    createdByUserId,
     payments: roundedPaidAmount > 0
       ? [{ methodName: paymentMethodName.trim() || "Cash", amount: roundedPaidAmount }]
       : [],

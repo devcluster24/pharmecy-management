@@ -1,5 +1,5 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { KeyboardAvoidingView, Platform, useColorScheme } from 'react-native';
 
 import { AuthProvider } from '@/providers/AuthProvider';
 
@@ -8,7 +8,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Stack screenOptions={{ headerShown: false }} />
+        </KeyboardAvoidingView>
       </AuthProvider>
     </ThemeProvider>
   );
