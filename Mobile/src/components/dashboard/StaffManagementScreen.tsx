@@ -436,17 +436,27 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
                   <Text style={styles.staffName}>{member.full_name || '—'}</Text>
                   <Text style={styles.staffEmail}>{member.email}</Text>
                 </View>
+                <Pressable
+                  accessibilityRole="switch"
+                  accessibilityLabel={`Set ${member.full_name || member.email} ${member.approval_status === 'approved' ? 'inactive' : 'active'}`}
+                  accessibilityState={{ checked: member.approval_status === 'approved' }}
+                  onPress={() => void toggleStatus(member)}
+                  style={styles.statusButton}>
+                  <Text style={member.approval_status === 'approved' ? styles.success : styles.statusInactive}>
+                    {member.approval_status === 'approved' ? 'Active' : 'Inactive'}
+                  </Text>
+                  <View style={[
+                    styles.statusTrack,
+                    member.approval_status === 'approved' && styles.statusTrackActive,
+                  ]}>
+                    <View style={[
+                      styles.statusThumb,
+                      member.approval_status === 'approved' && styles.statusThumbActive,
+                    ]} />
+                  </View>
+                </Pressable>
               </View>
               <Text style={styles.staffMeta}>Role: {member.staff_role || 'Staff'}</Text>
-              <Pressable
-                accessibilityRole="switch"
-                accessibilityState={{ checked: member.approval_status === 'approved' }}
-                onPress={() => void toggleStatus(member)}
-                style={styles.statusButton}>
-                <Text style={member.approval_status === 'approved' ? styles.success : styles.statusInactive}>
-                  {member.approval_status === 'approved' ? '● Active — tap to deactivate' : `○ ${member.approval_status} — tap to activate`}
-                </Text>
-              </Pressable>
               <View style={styles.actionRow}>
                 <Pressable
                   accessibilityRole="button"
@@ -627,8 +637,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   statusButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginLeft: 8,
+    paddingVertical: 5,
+  },
+  statusTrack: {
+    width: 36,
+    height: 21,
+    justifyContent: 'center',
+    padding: 3,
+    borderRadius: 11,
+    backgroundColor: '#c8ceca',
+  },
+  statusTrackActive: {
+    backgroundColor: '#179c70',
+  },
+  statusThumb: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  statusThumbActive: {
+    alignSelf: 'flex-end',
   },
   statusInactive: {
     color: '#8a655f',
