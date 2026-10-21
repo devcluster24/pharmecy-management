@@ -34,7 +34,7 @@ const settingsMenus = [
   { id: "documents-invoice", label: "Documents & Invoice" },
 ] as const;
 
-const pharmacyStoreSubmenus = ["Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System", "Currency", "Backup File Name"] as const;
+const pharmacyStoreSubmenus = ["Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System", "Currency", "BackUp Setting"] as const;
 const defaultMobilePaymentNames = ["Bangla QR", "Bkash", "Nagad", "Rocket", "upay", "Tap", "gpay"] as const;
 const bankNames = [
   "Sonali Bank PLC",
@@ -398,9 +398,9 @@ export default function SettingPage() {
                   </button>
                 ))}
               </nav>
-              <fieldset disabled={isExpired && activeStoreSubmenu !== "Currency" && activeStoreSubmenu !== "Backup File Name"} style={{ display: "contents" }}>
+              <fieldset disabled={isExpired && activeStoreSubmenu !== "Currency" && activeStoreSubmenu !== "BackUp Setting"} style={{ display: "contents" }}>
               <section aria-live="polite" style={{ flex: "1 1 0", minWidth: 0, minHeight: 80, color: "#26352f", fontSize: 15, fontWeight: 600 }}>
-                {activeStoreSubmenu === "Backup File Name" && <BackupFileNameSection />}
+                {activeStoreSubmenu === "BackUp Setting" && <BackupFileNameSection />}
                 {activeStoreSubmenu === "Add Payment Method" && (
                   <section aria-labelledby="payment-method-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
                     <h2 id="payment-method-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>{editingPaymentMethodId ? "Edit Payment Method" : "Add Payment Method"}</h2>

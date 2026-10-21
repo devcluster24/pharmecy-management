@@ -187,7 +187,7 @@ export default function BackupFileNameSection() {
 
   return (
     <section aria-labelledby="backup-file-name-title" style={{ width: "100%", maxWidth: 980, color: "#26352f" }}>
-      <h2 id="backup-file-name-title" style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700 }}>Backup File Name</h2>
+      <h2 id="backup-file-name-title" style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700 }}>BackUp Setting</h2>
       <p style={{ margin: "0 0 18px", color: "#687871", fontSize: 12, fontWeight: 400, lineHeight: 1.6 }}>
         Connect Google Drive to save the dashboard Excel exports in one timestamped backup folder. Later backups reuse that folder.
       </p>

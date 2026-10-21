@@ -26,7 +26,7 @@ The refresh token is encrypted before it is written to a separate private secret
 
 ## Supabase setup
 
-1. Apply database migrations, including `20261021180000_pharmacy_drive_backups.sql`.
+1. Apply database migrations, including `20261021180000_pharmacy_drive_backups.sql` and `20261021181500_pharmacy_drive_backup_mobile_oauth.sql`.
 2. Enable `pg_cron`, `pg_net`, and Vault for the Supabase project. In the Supabase SQL editor, store the Next.js endpoint URL and the same cron secret in Vault (replace placeholders; do not commit actual values):
 
    ```sql
@@ -58,3 +58,7 @@ The refresh token is encrypted before it is written to a separate private secret
    ```
 
 After deployment, a pharmacy owner connects Google Drive once from Settings. Auto Backup then runs on the server at the selected interval, whether or not the dashboard is open. The weekly/monthly choices are 7/30-day intervals; Custom accepts 1–3650 days.
+
+## Mobile app
+
+Set `EXPO_PUBLIC_WEB_APP_URL` in `Mobile/.env.local` to the reachable web-app origin used by the mobile devices. For a physical device, do not use `localhost`; use a deployed HTTPS origin or a host address reachable on the same network. Restart Expo after changing the value. The mobile BackUp Setting page uses the same authenticated backup APIs, and Google OAuth returns to the app's `mobile://dashboard/menu/backup-file` deep link after authorization.

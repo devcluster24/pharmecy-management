@@ -19,6 +19,7 @@ import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
+import BackupSettingsScreen from '@/components/dashboard/BackupSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -218,6 +219,17 @@ export default function ManagementMenuScreen({
   }
 
   if (activeSlug) {
+    if (activeSlug === 'backup-file') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <BackupSettingsScreen />
+        </SafeAreaView>
+      );
+    }
     if (activeSlug === 'currency') {
       return (
         <SafeAreaView style={styles.fullPage}>

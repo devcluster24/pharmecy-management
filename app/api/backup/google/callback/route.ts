@@ -4,7 +4,36 @@ import { getBackupEncryptionKey } from "@/lib/drive-backup-auth";
 
 export const runtime = "nodejs";
 
-function settingsUrl(request: Request, status: "connected" | "error", message?: string) {
+function isMobileBackupReturnUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    const isBackupPage = (url.hostname === "dashboard" && url.pathname === "/menu/backup-file")
+      || (url.hostname === "" && url.pathname === "/dashboard/menu/backup-file");
+    return url.protocol === "mobile:"
+      && isBackupPage
+      && !url.username
+      && !url.password
+      && !url.port
+      && !url.search
+      && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function resultUrl(
+  request: Request,
+  status: "connected" | "error",
+  message?: string,
+  mobileReturnUrl?: string | null,
+) {
+  if (isMobileBackupReturnUrl(mobileReturnUrl)) {
+    const url = new URL(mobileReturnUrl);
+    url.searchParams.set("backup_oauth", status);
+    if (message) url.searchParams.set("backup_message", message);
+    return Response.redirect(url, 303);
+  }
   const appUrl = process.env.BACKUP_APP_URL || new URL(request.url).origin;
   const url = new URL("/dashboard/settings", appUrl);
   url.searchParams.set("backup_oauth", status);
@@ -17,9 +46,8 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const googleError = url.searchParams.get("error");
-  if (googleError) return settingsUrl(request, "error", "Google Drive access was not granted.");
-  if (!code || !state || !/^[a-f0-9]{64}$/i.test(state)) {
-    return settingsUrl(request, "error", "Google authorization response was incomplete.");
+  if (!state || !/^[a-f0-9]{64}$/i.test(state)) {
+    return resultUrl(request, "error", "Google authorization response was incomplete.");
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -27,7 +55,7 @@ export async function GET(request: Request) {
   const clientId = process.env.BACKUP_GOOGLE_CLIENT_ID;
   const clientSecret = process.env.BACKUP_GOOGLE_CLIENT_SECRET;
   if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret) {
-    return settingsUrl(request, "error", "Google Drive OAuth server configuration is incomplete.");
+    return resultUrl(request, "error", "Google Drive OAuth server configuration is incomplete.");
   }
 
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
@@ -36,11 +64,20 @@ export async function GET(request: Request) {
   const stateHash = createHash("sha256").update(state).digest("hex");
   const { data: backupSettings, error: settingsError } = await serviceClient
     .from("pharmacy_drive_backup_settings")
-    .select("owner_user_id, oauth_state_hash, oauth_state_expires_at")
+    .select("owner_user_id, oauth_state_hash, oauth_state_expires_at, oauth_return_url")
     .eq("oauth_state_hash", stateHash)
     .maybeSingle();
-  if (settingsError || !backupSettings || Date.parse(backupSettings.oauth_state_expires_at ?? "") <= Date.now()) {
-    return settingsUrl(request, "error", "Google authorization expired. Start the connection again.");
+  if (settingsError || !backupSettings) {
+    return resultUrl(request, "error", "Google authorization expired. Start the connection again.");
+  }
+  if (Date.parse(backupSettings.oauth_state_expires_at ?? "") <= Date.now()) {
+    return resultUrl(request, "error", "Google authorization expired. Start the connection again.", backupSettings.oauth_return_url);
+  }
+  if (googleError) {
+    return resultUrl(request, "error", "Google Drive access was not granted.", backupSettings.oauth_return_url);
+  }
+  if (!code) {
+    return resultUrl(request, "error", "Google authorization response was incomplete.", backupSettings.oauth_return_url);
   }
 
   try {
@@ -86,13 +123,14 @@ export async function GET(request: Request) {
       .update({
         oauth_state_hash: null,
         oauth_state_expires_at: null,
+        oauth_return_url: null,
         updated_at: new Date().toISOString(),
       })
       .eq("owner_user_id", backupSettings.owner_user_id);
     if (clearStateError) throw new Error("Google Drive connected, but the authorization request could not be cleared.");
-    return settingsUrl(request, "connected");
+    return resultUrl(request, "connected", undefined, backupSettings.oauth_return_url);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google Drive authorization failed.";
-    return settingsUrl(request, "error", message);
+    return resultUrl(request, "error", message, backupSettings.oauth_return_url);
   }
 }

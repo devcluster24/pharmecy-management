@@ -240,6 +240,7 @@ const bengaliTranslations: Record<string, string> = {
   'Suppliers, expenses, and reports': 'সরবরাহকারী, খরচ ও রিপোর্ট',
   'Payments and subscription screens': 'পেমেন্ট ও সাবস্ক্রিপশন পেজ',
   'BackUp File': 'ব্যাকআপ ফাইল',
+  'BackUp Setting': 'ব্যাকআপ সেটিংস',
   'Pharmacy Setup': 'ফার্মেসি সেটআপ',
   'Vat/Tax': 'ভ্যাট/ট্যাক্স',
   'Payment Methord': 'পেমেন্ট পদ্ধতি',
