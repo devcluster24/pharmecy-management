@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
+import { useProductCatalogAutoSync } from '@/components/dashboard/ProductCatalogAutoSync';
 import { supabase } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
@@ -25,6 +26,7 @@ export default function DashboardLayout() {
   } = useAuth();
   const [signOutError, setSignOutError] = useState('');
   const [isSigningOut, setIsSigningOut] = useState(false);
+  useProductCatalogAutoSync();
 
   if (isLoading || profileLoading) return null;
   if (!session) return <Redirect href="/Auth/login" />;

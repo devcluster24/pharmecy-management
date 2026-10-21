@@ -18,6 +18,7 @@ import { useAuth } from '@/providers/AuthProvider';
 const SALES_KEY = 'pharmacy-sales-list-v1';
 const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const RETURNS_KEY = 'pharmacy-return-records-v1';
+const RETURN_DEDUCTION_SETTINGS_KEY = 'pharmacy-return-deduction-settings-v1';
 const WALK_IN_CUSTOMER = 'Walk-in customer';
 
 type SaleLine = {
@@ -211,6 +212,8 @@ export default function ReturnScreen() {
   const [selectedItems, setSelectedItems] = useState<SelectedReturnItem[]>([]);
   const [searchValue, setSearchValue] = useState('');
   const [returnMethod, setReturnMethod] = useState<'Cash Return' | 'Product Adjust'>('Cash Return');
+  const [defaultReturnDeductionRate, setDefaultReturnDeductionRate] = useState(0);
+  const [returnDeductionRate, setReturnDeductionRate] = useState('0');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -237,12 +240,24 @@ export default function ReturnScreen() {
         const result = await client.from('pharmacy_app_data')
           .select('data_key, payload')
           .eq('owner_user_id', ownerId)
-          .in('data_key', [SALES_KEY, PURCHASE_KEY, RETURNS_KEY]);
+          .in('data_key', [SALES_KEY, PURCHASE_KEY, RETURNS_KEY, RETURN_DEDUCTION_SETTINGS_KEY]);
         if (result.error) throw result.error;
         const payloads = new Map((result.data ?? []).map((row) => [row.data_key, row.payload]));
         const nextInvoices = parseInvoices(payloads.get(SALES_KEY) ?? []);
         const nextReturns = parseReturns(payloads.get(RETURNS_KEY) ?? []);
         const nextPurchaseRows = payloads.get(PURCHASE_KEY) ?? [];
+        const deductionSettings = payloads.get(RETURN_DEDUCTION_SETTINGS_KEY);
+        let nextDeductionRate = 0;
+        if (deductionSettings !== undefined && deductionSettings !== null) {
+          if (!isRecord(deductionSettings)
+            || typeof deductionSettings.defaultRate !== 'number'
+            || !Number.isFinite(deductionSettings.defaultRate)
+            || deductionSettings.defaultRate < 0
+            || deductionSettings.defaultRate > 100) {
+            throw new Error('Saved return deduction settings are invalid. Update the rate in Pharmacy Setup.');
+          }
+          nextDeductionRate = deductionSettings.defaultRate;
+        }
         if (!Array.isArray(nextPurchaseRows) || nextPurchaseRows.some((row) =>
           !isRecord(row)
           || typeof row.id !== 'string'
@@ -255,6 +270,7 @@ export default function ReturnScreen() {
           setInvoices(nextInvoices);
           setReturns(nextReturns);
           setPurchaseRows(nextPurchaseRows as PurchaseRow[]);
+          setDefaultReturnDeductionRate(nextDeductionRate);
         }
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load return data.');
@@ -293,11 +309,15 @@ export default function ReturnScreen() {
     (total, item) => total + item.line.unitPrice * (Number(item.quantity) || 0),
     0,
   );
+  const deductionRate = Number(returnDeductionRate) || 0;
+  const returnDeductionAmount = Number((returnTotal * deductionRate / 100).toFixed(2));
+  const netRefundAmount = Math.max(0, Number((returnTotal - returnTotal * deductionRate / 100).toFixed(2)));
 
   function openRecordReturn() {
     setSelectedItems([]);
     setSearchValue('');
     setReturnMethod('Cash Return');
+    setReturnDeductionRate(String(defaultReturnDeductionRate));
     setError('');
     setScreen('record');
   }
@@ -379,6 +399,15 @@ export default function ReturnScreen() {
       setScreen('record');
       return;
     }
+    const parsedDeductionRate = Number(returnDeductionRate);
+    if (returnDeductionRate.trim() === ''
+      || !Number.isFinite(parsedDeductionRate)
+      || parsedDeductionRate < 0
+      || parsedDeductionRate > 100) {
+      setError('Return deduction must be between 0 and 100%.');
+      setScreen('summary');
+      return;
+    }
     const timestamp = new Date();
     const returnIdNumber = returns.reduce((highest, row) => {
       const match = /^RE-ID-(\d+)$/i.exec(row.returnId);
@@ -403,7 +432,7 @@ export default function ReturnScreen() {
         batchNumber: item.line.batchNumber,
         quantity,
         amount: Number((item.line.unitPrice * quantity).toFixed(2)),
-        ...(index === 0 ? { netRefundAmount: returnMethod === 'Cash Return' ? returnTotal : 0 } : {}),
+        ...(index === 0 ? { netRefundAmount: returnMethod === 'Cash Return' ? netRefundAmount : 0 } : {}),
         customer: item.invoice.customer.trim() || WALK_IN_CUSTOMER,
         phone: item.invoice.phone ?? '',
         returnMethod,
@@ -606,7 +635,7 @@ export default function ReturnScreen() {
               style={[styles.totalLink, selectedItems.length === 0 && styles.disabled]}>
               <View style={styles.flex}>
                 <Text style={styles.label}>Net Refund Amount</Text>
-                <Text style={styles.amount}>{money(returnTotal)}</Text>
+                <Text style={styles.amount}>{money(netRefundAmount)}</Text>
               </View>
               <Text style={styles.arrow}>›</Text>
             </Pressable>
@@ -627,8 +656,32 @@ export default function ReturnScreen() {
               ))}
               <View style={styles.separator} />
               <View style={styles.summaryLine}>
-                <Text style={styles.label}>Net Refund Amount</Text>
+                <Text style={styles.label}>Total Return Amount</Text>
                 <Text style={styles.amount}>{money(returnTotal)}</Text>
+              </View>
+              <View style={styles.summaryLine}>
+                <Text style={styles.label}>Return Deduction %</Text>
+                <TextInput
+                  accessibilityLabel="Return Deduction percentage"
+                  keyboardType="decimal-pad"
+                  onChangeText={(value) => {
+                    if (!/^\d*\.?\d*$/.test(value)) return;
+                    const parsedValue = Number(value);
+                    setReturnDeductionRate(value !== '' && parsedValue > 100 ? '100' : value);
+                    setError('');
+                  }}
+                  value={returnDeductionRate}
+                  style={styles.deductionInput}
+                />
+              </View>
+              <View style={styles.summaryLine}>
+                <Text style={styles.label}>Deduction Amount</Text>
+                <Text style={styles.amount}>{money(returnDeductionAmount)}</Text>
+              </View>
+              <View style={styles.separator} />
+              <View style={styles.summaryLine}>
+                <Text style={styles.label}>Net Refund Amount</Text>
+                <Text style={styles.amount}>{money(returnMethod === 'Cash Return' ? netRefundAmount : 0)}</Text>
               </View>
             </View>
             <Text style={styles.label}>Return Method</Text>
@@ -680,6 +733,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#34453b', fontSize: 14, fontWeight: '800' },
   label: { color: '#526158', fontSize: 12, fontWeight: '700' },
   quantityInput: { width: 72, minHeight: 37, paddingHorizontal: 9, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 8, backgroundColor: '#fff', color: '#24382e', textAlign: 'center' },
+  deductionInput: { width: 90, minHeight: 37, paddingHorizontal: 9, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 8, backgroundColor: '#fff', color: '#24382e', textAlign: 'right' },
   remove: { color: '#a63e34', fontSize: 11, fontWeight: '700' },
   totalLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 14, borderWidth: 1, borderColor: '#dce5df', borderRadius: 11, backgroundColor: '#e8f3eb' },
   arrow: { color: '#17664f', fontSize: 30, fontWeight: '600' },

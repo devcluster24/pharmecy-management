@@ -272,6 +272,37 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
 
   useEffect(() => {
     if (!supabase || !ownerId || isAddPage) return;
+    const client = supabase;
+    let active = true;
+    const channel = client
+      .channel(`pharmacy-product-list-${ownerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'pharmacy_catalog_products',
+          filter: `owner_user_id=eq.${ownerId}`,
+        },
+        () => {
+          void loadProducts(currentPage, search, ownerId).catch((loadError: unknown) => {
+            if (active) setError(`Could not refresh products after automatic import: ${getErrorMessage(loadError)}`);
+          });
+        },
+      )
+      .subscribe((status, subscribeError) => {
+        if (active && (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT')) {
+          setError(`Live product list updates are unavailable${subscribeError?.message ? `: ${subscribeError.message}` : '.'}`);
+        }
+      });
+    return () => {
+      active = false;
+      void client.removeChannel(channel);
+    };
+  }, [currentPage, isAddPage, loadProducts, ownerId, search]);
+
+  useEffect(() => {
+    if (!supabase || !ownerId || isAddPage) return;
     let active = true;
     async function loadCompanies() {
       try {

@@ -250,6 +250,8 @@ const translations: Record<string, string> = {
   'Import company products': 'কোম্পানির পণ্য ইমপোর্ট করুন',
   'Import one manufacturer or every product from the shared catalog.': 'শেয়ার করা ক্যাটালগ থেকে একটি প্রস্তুতকারকের অথবা সব পণ্য ইমপোর্ট করুন।',
   'Import product data': 'পণ্যের তথ্য ইমপোর্ট করুন',
+  'Auto Import': 'অটো ইমপোর্ট',
+  'Automatically import new shared catalog products.': 'শেয়ার করা ক্যাটালগে নতুন পণ্য এলে স্বয়ংক্রিয়ভাবে ইমপোর্ট করুন।',
   'Invoice history': 'ইনভয়েসের ইতিহাস',
   'Invoices': 'ইনভয়েস',
   'Items': 'আইটেম',

@@ -82,6 +82,7 @@ type CatalogCompany = { name: string; count: number };
 const CATALOG_PAGE_SIZE = 1000;
 const IMPORT_BATCH_SIZE = 500;
 const DEFAULT_PRODUCT_PAGE_SIZE = 25;
+const PRODUCT_CATALOG_AUTO_SYNC_KEY = "pharmacy-product-auto-sync-v1";
 
 type NewProductNameFields = {
   id: string;
@@ -239,11 +240,12 @@ function mapCatalogRowToProduct(row: CatalogProductRow): Product {
   };
 }
 
-async function loadAllCatalogRows(company?: string) {
+async function loadAllCatalogRows(company?: string, createdAfter?: string) {
   const rows: CatalogProductRow[] = [];
   for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
     let query = supabase.from("admin_medicine_catalog").select("*");
     if (company) query = query.eq("pharmaceutical_company", company);
+    if (createdAfter) query = query.gte("created_at", createdAfter);
     const { data, error } = await query
       .order("id", { ascending: true })
       .range(offset, offset + CATALOG_PAGE_SIZE - 1);
@@ -367,10 +369,21 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
   const [pharmacyUserId, setPharmacyUserId] = useState("");
   const [selectedCompany, setSelectedCompany] = useState("");
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
+  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
+  const [isSavingAutoImport, setIsSavingAutoImport] = useState(false);
   const initialQueryKey = useRef("");
   const productQuerySequence = useRef(0);
   const editRowRef = useRef<HTMLElement | null>(null);
   const savingProductRef = useRef(false);
+  const importingProductsRef = useRef(false);
+  const autoImportSettingsRef = useRef<{ enabled: boolean; enabledAt: string | null }>({
+    enabled: false,
+    enabledAt: null,
+  });
+  const autoImportPendingRef = useRef(false);
+  const productListViewRef = useRef({ currentPage, pageSize, searchTerm });
+  const importCatalogRef = useRef<(company?: string, createdAfter?: string) => Promise<void>>(async () => {});
+  productListViewRef.current = { currentPage, pageSize, searchTerm };
   const assignEditRowRef = useCallback((node: HTMLElement | null) => {
     editRowRef.current = node;
   }, []);
@@ -386,6 +399,25 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
 
         const ownerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
         setPharmacyUserId(ownerId);
+        const autoImportResult = await supabase
+          .from("pharmacy_app_data")
+          .select("payload")
+          .eq("owner_user_id", ownerId)
+          .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
+          .maybeSingle();
+        if (autoImportResult.error) throw autoImportResult.error;
+        const payload = autoImportResult.data?.payload;
+        const storedSettings = payload && typeof payload === "object"
+          ? payload as { enabled?: unknown; enabledAt?: unknown }
+          : null;
+        const autoImportIsEnabled = storedSettings?.enabled === true
+          && typeof storedSettings.enabledAt === "string"
+          && Number.isFinite(Date.parse(storedSettings.enabledAt));
+        autoImportSettingsRef.current = {
+          enabled: autoImportIsEnabled,
+          enabledAt: autoImportIsEnabled ? storedSettings.enabledAt as string : null,
+        };
+        setAutoImportEnabled(autoImportIsEnabled);
         const firstPage = await loadPharmacyProductPage(ownerId, 1, DEFAULT_PRODUCT_PAGE_SIZE, "");
         if (!active) return;
         setProducts(firstPage.products);
@@ -464,6 +496,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
 
     let active = true;
     let refreshTimeout: number | undefined;
+    let autoImportTimeout: number | undefined;
     const refreshAvailableCompanies = () => {
       if (refreshTimeout !== undefined) window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
@@ -479,6 +512,31 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
           });
       }, 250);
     };
+    const refreshCurrentProductPage = () => {
+      const view = productListViewRef.current;
+      const queryKey = `${pharmacyUserId}:${view.currentPage}:${view.pageSize}:${view.searchTerm.trim()}`;
+      void loadPharmacyProductPage(pharmacyUserId, view.currentPage, view.pageSize, view.searchTerm)
+        .then((result) => {
+          if (!active || queryKey !== `${pharmacyUserId}:${productListViewRef.current.currentPage}:${productListViewRef.current.pageSize}:${productListViewRef.current.searchTerm.trim()}`) return;
+          setProducts(result.products);
+          setTotalProductCount(result.count);
+        })
+        .catch((error: unknown) => {
+          if (active) setImportError(`Could not refresh the product list: ${getErrorMessage(error)}`);
+        });
+    };
+    const scheduleAutoImport = (catalogChanged = false) => {
+      if (autoImportTimeout !== undefined) window.clearTimeout(autoImportTimeout);
+      autoImportTimeout = window.setTimeout(() => {
+        const settings = autoImportSettingsRef.current;
+        if (!settings.enabled || !settings.enabledAt) return;
+        if (importingProductsRef.current) {
+          if (catalogChanged) autoImportPendingRef.current = true;
+          return;
+        }
+        void importCatalogRef.current(undefined, settings.enabledAt);
+      }, 500);
+    };
     const channel = supabase
       .channel(`admin-catalog-${pharmacyUserId}`)
       .on(
@@ -488,12 +546,51 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       )
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "admin_medicine_catalog" },
+        () => {
+          if (autoImportSettingsRef.current.enabled) scheduleAutoImport(true);
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "pharmacy_catalog_products", filter: `owner_user_id=eq.${pharmacyUserId}` },
-        refreshAvailableCompanies,
+        () => {
+          refreshAvailableCompanies();
+          refreshCurrentProductPage();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pharmacy_app_data", filter: `owner_user_id=eq.${pharmacyUserId}` },
+        (event) => {
+          const record = event.new as { data_key?: string; payload?: unknown } | null;
+          if (record?.data_key !== PRODUCT_CATALOG_AUTO_SYNC_KEY) return;
+          const payload = record.payload;
+          const nextEnabled = Boolean(
+            payload
+            && typeof payload === "object"
+            && "enabled" in payload
+            && payload.enabled === true
+            && "enabledAt" in payload
+            && typeof payload.enabledAt === "string"
+            && Number.isFinite(Date.parse(payload.enabledAt)),
+          );
+          autoImportSettingsRef.current = {
+            enabled: nextEnabled,
+            enabledAt: nextEnabled && payload && typeof payload === "object" && "enabledAt" in payload
+              ? payload.enabledAt as string
+              : null,
+          };
+          setAutoImportEnabled(nextEnabled);
+          if (nextEnabled) scheduleAutoImport();
+        },
       )
       .subscribe((status, error) => {
         if (!active) return;
-        if (status === "SUBSCRIBED") refreshAvailableCompanies();
+        if (status === "SUBSCRIBED") {
+          refreshAvailableCompanies();
+          if (autoImportSettingsRef.current.enabled) scheduleAutoImport();
+        }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           setImportError(`Live catalog updates are unavailable${error?.message ? `: ${error.message}` : "."}`);
         }
@@ -502,6 +599,7 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     return () => {
       active = false;
       if (refreshTimeout !== undefined) window.clearTimeout(refreshTimeout);
+      if (autoImportTimeout !== undefined) window.clearTimeout(autoImportTimeout);
       void supabase.removeChannel(channel);
     };
   }, [adminMode, pharmacyUserId]);
@@ -767,15 +865,66 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
     }
   }
 
-  async function importCatalog(company?: string) {
-    if (isImporting || !storageReady || !pharmacyUserId || (!company && !totalCatalogCount)) return;
+  async function saveAutoImportSetting(enabled: boolean) {
+    if (isSavingAutoImport || !pharmacyUserId) return;
+    setIsSavingAutoImport(true);
+    setImportError("");
+    try {
+      const existing = await supabase
+        .from("pharmacy_app_data")
+        .select("data_key")
+        .eq("owner_user_id", pharmacyUserId)
+        .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
+        .maybeSingle();
+      if (existing.error) throw existing.error;
+
+      const enabledAt = enabled ? new Date().toISOString() : null;
+      const payload = { enabled, enabledAt };
+      const updatedAt = new Date().toISOString();
+      const result = existing.data
+        ? await supabase.from("pharmacy_app_data")
+          .update({ payload, updated_at: updatedAt })
+          .eq("owner_user_id", pharmacyUserId)
+          .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
+          .select("data_key")
+          .maybeSingle()
+        : await supabase.from("pharmacy_app_data")
+          .insert({
+            owner_user_id: pharmacyUserId,
+            data_key: PRODUCT_CATALOG_AUTO_SYNC_KEY,
+            payload,
+            updated_at: updatedAt,
+          })
+          .select("data_key")
+          .maybeSingle();
+      if (result.error) throw result.error;
+      if (!result.data) throw new Error("Could not save Auto Import settings.");
+
+      autoImportSettingsRef.current = { enabled, enabledAt };
+      setAutoImportEnabled(enabled);
+      if (enabled && enabledAt) void importCatalog(undefined, enabledAt);
+    } catch (error) {
+      setImportError(`Could not save Auto Import settings: ${getErrorMessage(error)}`);
+    } finally {
+      setIsSavingAutoImport(false);
+    }
+  }
+
+  async function importCatalog(company?: string, createdAfter?: string) {
+    if (isImporting || importingProductsRef.current || !storageReady || !pharmacyUserId
+      || (!company && !totalCatalogCount && !createdAfter)) return;
+    importingProductsRef.current = true;
     setIsImporting(true);
     setImportError("");
-    setImportProgress({ phase: "Loading shared products", checked: 0, total: 0 });
+    setImportProgress({ phase: createdAfter ? "Checking new shared products" : "Loading shared products", checked: 0, total: 0 });
     let addedCount = 0;
     try {
-      const rows = await loadAllCatalogRows(company);
-      if (rows.length === 0) throw new Error("No shared catalog products were found to import.");
+      const rows = await loadAllCatalogRows(company, createdAfter);
+      if (rows.length === 0) {
+        if (!createdAfter) throw new Error("No shared catalog products were found to import.");
+        setImportProgress({ phase: "", checked: 0, total: 0 });
+        return;
+      }
       const knownProducts = await loadAllPharmacyProducts(pharmacyUserId);
       const importedIds = new Set(knownProducts.map((product) => product.sourceCatalogId).filter((id): id is string => Boolean(id)));
       const importedKeys = new Set(knownProducts.map(getProductIdentityKey).filter((key): key is string => Boolean(key)));
@@ -825,10 +974,14 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
 
       setImportSummary({ added: addedCount, duplicates: duplicateCount });
       setImportProgress({ phase: "Import complete", checked: rows.length, total: rows.length });
-      const refreshed = await loadPharmacyProductPage(pharmacyUserId, 1, pageSize, "");
-      initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
-      setCurrentPage(1);
-      setSearchTerm("");
+      const currentView = productListViewRef.current;
+      const refreshedPage = createdAfter ? currentView.currentPage : 1;
+      const refreshedSearch = createdAfter ? currentView.searchTerm : "";
+      const refreshedPageSize = currentView.pageSize;
+      const refreshed = await loadPharmacyProductPage(pharmacyUserId, refreshedPage, refreshedPageSize, refreshedSearch);
+      initialQueryKey.current = `${pharmacyUserId}:${refreshedPage}:${refreshedPageSize}:${refreshedSearch.trim()}`;
+      setCurrentPage(refreshedPage);
+      setSearchTerm(refreshedSearch);
       setProducts(refreshed.products);
       setTotalProductCount(refreshed.count);
     } catch (error) {
@@ -839,9 +992,16 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
         : message);
       setImportProgress({ phase: "Import failed", checked: addedCount, total: 0 });
     } finally {
+      importingProductsRef.current = false;
       setIsImporting(false);
+      if (autoImportPendingRef.current && autoImportSettingsRef.current.enabled) {
+        autoImportPendingRef.current = false;
+        const settings = autoImportSettingsRef.current;
+        if (settings.enabledAt) void importCatalog(undefined, settings.enabledAt);
+      }
     }
   }
+  importCatalogRef.current = importCatalog;
 
   function closeModal() {
     setSelectedProduct(null);
@@ -895,6 +1055,56 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                 >
                   {isImporting ? "Importing..." : "All Data Import"}
                 </button>
+              )}
+              {!adminMode && (
+                <div style={{ display: "grid", gap: 3, alignSelf: "end", minWidth: 170, marginLeft: 8 }}>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={autoImportEnabled}
+                    aria-label="Auto Import"
+                    disabled={isSavingAutoImport || !storageReady || !pharmacyUserId}
+                    onClick={() => void saveAutoImportSetting(!autoImportEnabled)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      border: 0,
+                      background: "transparent",
+                      color: "#34453b",
+                      padding: "8px 0",
+                      fontSize: 12,
+                      fontWeight: 650,
+                      cursor: isSavingAutoImport || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer",
+                      opacity: isSavingAutoImport || !storageReady || !pharmacyUserId ? 0.6 : 1,
+                    }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        width: 36,
+                        height: 21,
+                        padding: 2,
+                        borderRadius: 12,
+                        background: autoImportEnabled ? "#179c70" : "#c5cec8",
+                        transition: "background 0.15s ease",
+                      }}>
+                      <span style={{
+                        width: 17,
+                        height: 17,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transform: autoImportEnabled ? "translateX(15px)" : "translateX(0)",
+                        transition: "transform 0.15s ease",
+                      }} />
+                    </span>
+                    {isSavingAutoImport ? "Saving..." : "Auto Import"}
+                  </button>
+                  <span style={{ color: "#718078", fontSize: 10, lineHeight: 14 }}>
+                    Automatically import new shared catalog products.
+                  </span>
+                </div>
               )}
             </div>
 

@@ -5,7 +5,7 @@ import {
   useLocalizedAlert,
 } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import { useState, type ComponentProps } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { SymbolView } from 'expo-symbols';
 import {
   Pressable,
@@ -16,10 +16,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
+import {
+  loadProductAutoSyncSettings,
+  parseProductAutoSyncSettings,
+  PRODUCT_CATALOG_AUTO_SYNC_KEY,
+  saveProductAutoSyncSettings,
+} from '@/lib/product-catalog-auto-sync';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
 import BackupSettingsScreen from '@/components/dashboard/BackupSettingsScreen';
+import InventorySettingsScreen from '@/components/dashboard/InventorySettingsScreen';
+import PaymentMethodsSettingsScreen from '@/components/dashboard/PaymentMethodsSettingsScreen';
+import ReturnDeductionSettingsScreen from '@/components/dashboard/ReturnDeductionSettingsScreen';
+import VatTaxSettingsScreen from '@/components/dashboard/VatTaxSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -141,7 +151,16 @@ export default function ManagementMenuScreen({
   const [isCurrencyDropdownOpen, setIsCurrencyDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const { dashboardRole } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+  } = useAuth();
+  const [isProductSyncExpanded, setIsProductSyncExpanded] = useState(false);
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(false);
+  const [isAutoSyncLoading, setIsAutoSyncLoading] = useState(true);
+  const [isAutoSyncSaving, setIsAutoSyncSaving] = useState(false);
   const {
     language,
     setLanguage,
@@ -150,6 +169,69 @@ export default function ManagementMenuScreen({
     setCurrency,
     currencyError,
   } = useLanguage();
+
+  useEffect(() => {
+    if (isAuthLoading || profileLoading || !session || !dashboardRole || !supabase) return;
+    const client = supabase;
+    const currentSession = session;
+    let active = true;
+    let removeSettingsChannel: (() => void) | undefined;
+    async function loadAutoSyncPreference() {
+      setIsAutoSyncLoading(true);
+      try {
+        let ownerId = currentSession.user.id;
+        if (dashboardRole === 'staff') {
+          const { data, error } = await client.rpc('get_my_pharmacy_dashboard_context');
+          if (error) throw error;
+          const context = (data ?? [])[0] as { owner_user_id?: string } | undefined;
+          if (!context?.owner_user_id) throw new Error('Could not resolve the pharmacy account for auto sync.');
+          ownerId = context.owner_user_id;
+        }
+        const settings = await loadProductAutoSyncSettings(client, ownerId);
+        if (active) setIsAutoSyncEnabled(settings.enabled);
+        if (active) {
+          const channel = client
+            .channel(`menu-product-auto-sync-${currentSession.user.id}`)
+            .on(
+              'postgres_changes',
+              {
+                event: '*',
+                schema: 'public',
+                table: 'pharmacy_app_data',
+                filter: `owner_user_id=eq.${ownerId}`,
+              },
+              (event) => {
+                const record = event.new as { data_key?: string; payload?: unknown } | null;
+                if (record?.data_key !== PRODUCT_CATALOG_AUTO_SYNC_KEY) return;
+                try {
+                  setIsAutoSyncEnabled(parseProductAutoSyncSettings(record.payload).enabled);
+                  setErrorMessage('');
+                } catch (settingsError) {
+                  setErrorMessage(settingsError instanceof Error
+                    ? settingsError.message
+                    : 'Could not read product auto-sync settings.');
+                }
+              },
+            )
+            .subscribe();
+          removeSettingsChannel = () => {
+            void client.removeChannel(channel);
+          };
+        }
+      } catch (loadError) {
+        if (active) {
+          setErrorMessage(loadError instanceof Error ? loadError.message : 'Could not load product auto-sync settings.');
+        }
+      } finally {
+        if (active) setIsAutoSyncLoading(false);
+      }
+    }
+    void loadAutoSyncPreference();
+    return () => {
+      active = false;
+      removeSettingsChannel?.();
+    };
+  }, [dashboardRole, isAuthLoading, profileLoading, session]);
 
   function toggleGroup(slug: string, isExpanded: boolean) {
     setExpandedGroup(isExpanded ? null : slug);
@@ -187,6 +269,29 @@ export default function ManagementMenuScreen({
     }
   }
 
+  async function toggleAutoSync() {
+    if (!supabase || !session || !dashboardRole || isAutoSyncSaving) return;
+    setIsAutoSyncSaving(true);
+    setErrorMessage('');
+    try {
+      const client = supabase;
+      let ownerId = session.user.id;
+      if (dashboardRole === 'staff') {
+        const { data, error } = await client.rpc('get_my_pharmacy_dashboard_context');
+        if (error) throw error;
+        const context = (data ?? [])[0] as { owner_user_id?: string } | undefined;
+        if (!context?.owner_user_id) throw new Error('Could not resolve the pharmacy account for auto sync.');
+        ownerId = context.owner_user_id;
+      }
+      const settings = await saveProductAutoSyncSettings(client, ownerId, !isAutoSyncEnabled);
+      setIsAutoSyncEnabled(settings.enabled);
+    } catch (saveError) {
+      setErrorMessage(saveError instanceof Error ? saveError.message : 'Could not save auto sync settings.');
+    } finally {
+      setIsAutoSyncSaving(false);
+    }
+  }
+
   async function handleLogout() {
     if (!supabase) {
       setErrorMessage(supabaseConfigError);
@@ -219,6 +324,50 @@ export default function ManagementMenuScreen({
   }
 
   if (activeSlug) {
+    if (activeSlug === 'payment-methord') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <PaymentMethodsSettingsScreen />
+        </SafeAreaView>
+      );
+    }
+    if (activeSlug === 'return-management') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <ReturnDeductionSettingsScreen />
+        </SafeAreaView>
+      );
+    }
+    if (activeSlug === 'vat-tax') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <VatTaxSettingsScreen />
+        </SafeAreaView>
+      );
+    }
+    if (activeSlug === 'inventory') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <InventorySettingsScreen />
+        </SafeAreaView>
+      );
+    }
     if (activeSlug === 'backup-file') {
       return (
         <SafeAreaView style={styles.fullPage}>
@@ -321,6 +470,8 @@ export default function ManagementMenuScreen({
   function renderEntry(entry: MenuEntry, nested = false) {
     const isActive = activeSlug === entry.slug;
     const isExpanded = expandedGroup === entry.slug;
+    const hasAutoSyncToggle = entry.slug === 'pharmacy-product-management';
+    const isAutoSyncEntryExpanded = hasAutoSyncToggle && isProductSyncExpanded;
 
     return (
       <View key={entry.slug}>
@@ -362,10 +513,17 @@ export default function ManagementMenuScreen({
           ) : (
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
+              accessibilityState={{
+                selected: isActive,
+                ...(entry.slug === 'pharmacy-product-management'
+                  ? { expanded: isProductSyncExpanded }
+                  : {}),
+              }}
               onPress={() => {
                 if (entry.children) {
                   toggleGroup(entry.slug, isExpanded);
+                } else if (entry.slug === 'pharmacy-product-management') {
+                  setIsProductSyncExpanded((expanded) => !expanded);
                 } else {
                   openPage(entry.slug);
                 }
@@ -377,18 +535,21 @@ export default function ManagementMenuScreen({
               </Text>
             </Pressable>
           )}
-          {entry.children ? (
+          {entry.children || hasAutoSyncToggle ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${isExpanded ? 'Collapse' : 'Expand'} ${entry.label}`}
-              accessibilityState={{ expanded: isExpanded }}
-              onPress={() => toggleGroup(entry.slug, isExpanded)}
+              accessibilityLabel={`${(hasAutoSyncToggle ? isAutoSyncEntryExpanded : isExpanded) ? 'Collapse' : 'Expand'} ${entry.label}`}
+              accessibilityState={{ expanded: hasAutoSyncToggle ? isAutoSyncEntryExpanded : isExpanded }}
+              onPress={() => {
+                if (hasAutoSyncToggle) setIsProductSyncExpanded((expanded) => !expanded);
+                else toggleGroup(entry.slug, isExpanded);
+              }}
               style={({ pressed }) => [styles.expandButton, pressed && styles.menuButtonPressed]}>
               <SymbolView
                 name={{
-                  ios: isExpanded ? 'chevron.down' : 'chevron.right',
-                  android: isExpanded ? 'expand_more' : 'chevron_right',
-                  web: isExpanded ? 'expand_more' : 'chevron_right',
+                  ios: (hasAutoSyncToggle ? isAutoSyncEntryExpanded : isExpanded) ? 'chevron.down' : 'chevron.right',
+                  android: (hasAutoSyncToggle ? isAutoSyncEntryExpanded : isExpanded) ? 'expand_more' : 'chevron_right',
+                  web: (hasAutoSyncToggle ? isAutoSyncEntryExpanded : isExpanded) ? 'expand_more' : 'chevron_right',
                 }}
                 size={18}
                 tintColor="#526159"
@@ -398,7 +559,37 @@ export default function ManagementMenuScreen({
         </View>
         {entry.children && isExpanded ? (
           <View>
-            {entry.children.map((child) => renderEntry(child, true))}
+            {entry.children.map((child) => (
+              <View key={child.slug}>
+                {renderEntry(child, true)}
+                {child.slug === 'pharmacy-product-management' && isProductSyncExpanded ? (
+                  <View style={styles.autoSyncPanel}>
+                    <View style={styles.autoSyncCopy}>
+                      <Text style={styles.autoSyncTitle}>Auto Sync</Text>
+                      <Text style={styles.autoSyncDescription}>
+                        New shared manufacturer products will be added to your product list automatically.
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="switch"
+                      accessibilityLabel="Auto Sync"
+                      accessibilityState={{ checked: isAutoSyncEnabled, disabled: isAutoSyncLoading || isAutoSyncSaving }}
+                      disabled={isAutoSyncLoading || isAutoSyncSaving || !supabase}
+                      onPress={() => void toggleAutoSync()}
+                      style={[
+                        styles.autoSyncSwitch,
+                        isAutoSyncEnabled && styles.autoSyncSwitchEnabled,
+                        (isAutoSyncLoading || isAutoSyncSaving) && styles.autoSyncSwitchDisabled,
+                      ]}>
+                      <View style={[
+                        styles.autoSyncSwitchKnob,
+                        isAutoSyncEnabled && styles.autoSyncSwitchKnobEnabled,
+                      ]} />
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            ))}
           </View>
         ) : null}
       </View>
@@ -615,6 +806,58 @@ const styles = StyleSheet.create({
   },
   nestedMenuRow: {
     marginLeft: 12,
+  },
+  autoSyncPanel: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginLeft: 24,
+    marginRight: 8,
+    marginBottom: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#dce5df',
+    borderRadius: 10,
+    backgroundColor: '#fffefa',
+  },
+  autoSyncCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  autoSyncTitle: {
+    color: '#34453b',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  autoSyncDescription: {
+    color: '#718078',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  autoSyncSwitch: {
+    width: 44,
+    height: 25,
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderRadius: 20,
+    backgroundColor: '#c5cec8',
+  },
+  autoSyncSwitchEnabled: {
+    backgroundColor: '#179c70',
+  },
+  autoSyncSwitchDisabled: {
+    opacity: 0.55,
+  },
+  autoSyncSwitchKnob: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+  },
+  autoSyncSwitchKnobEnabled: {
+    alignSelf: 'flex-end',
   },
   menuButton: {
     flex: 1,
