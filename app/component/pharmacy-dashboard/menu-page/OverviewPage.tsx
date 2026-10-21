@@ -1,8 +1,10 @@
 'use client';
 
 import { Fragment, useState, useSyncExternalStore } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
+import DashboardLanguageMenu from "../components/DashboardLanguageMenu";
 import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
   emptyExpensesSnapshot,
@@ -50,7 +52,7 @@ function getDateFromKey(value: string) {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatQuantity(amount: number) {
@@ -492,6 +494,7 @@ export default function OverviewPage() {
       <header className="dashboard-navbar" style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e6ebe7" }}>
         <PharmacyDashboardBrand />
         <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 12, color: "#66756d", fontSize: 12 }}>
+          <DashboardLanguageMenu />
           <span className="dashboard-navbar-store-name">{storeName || "Pharmacy Cluster"}</span>
           <PharmacyProfileMenu />
         </div>

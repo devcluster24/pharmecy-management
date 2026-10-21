@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import {
   emptyPurchaseListSnapshot,
   getPurchaseListSnapshot,
@@ -83,7 +85,7 @@ function parseAmount(value?: string) {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getSupplierIdentity(name: string, phone: string) {
@@ -506,6 +508,28 @@ export default function SupplierManagementPage() {
       hideAction
       searchValue={searchQuery}
       onSearchChange={setSearchQuery}
+      searchAccessory={(
+        <ExcelExportButton
+          fileName="Suppliers"
+          sheets={[{
+            name: "Suppliers",
+            columns: ["Supplier", "Phone", "Order Count", "Last Order Date", "Total Purchase", "Total Paid", "Total Due", "Status"],
+            rows: filteredSuppliers.map((supplier) => [
+              supplier.name,
+              supplier.phone,
+              supplier.orders.length,
+              supplier.rows.reduce((latest, row) => {
+                const current = row.updatedAt || row.orderDate;
+                return !latest || Date.parse(current) > Date.parse(latest) ? current : latest;
+              }, ""),
+              supplier.purchaseAmount,
+              supplier.paidAmount,
+              supplier.dueAmount,
+              supplierStatuses[supplier.key] ?? "Active",
+            ]),
+          }]}
+        />
+      )}
       content={(selectedSupplier || selectedDueSupplier) && (
         <>
           {selectedSupplier && (

@@ -3,7 +3,9 @@
 import { Fragment, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
+import DashboardLanguageMenu from "../components/DashboardLanguageMenu";
 import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
+import ExcelExportButton from "../components/ExcelExportButton";
 import { supabase } from "@/lib/supabase/client";
 import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
 import { confirmDelete } from "@/lib/confirmDelete";
@@ -330,6 +332,7 @@ function ProductManagementHeader() {
     <header className="dashboard-navbar" style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
       <PharmacyDashboardBrand />
       <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
+        <DashboardLanguageMenu />
         <span className="dashboard-navbar-store-name">{storeName || "Pharmacy Cluster"}</span>
         <PharmacyProfileMenu />
       </div>
@@ -913,7 +916,54 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
           <section className="pharmacy-product-list" style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
             <div className="pharmacy-product-list-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
               <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Product list <span style={{ color: "#8a9690", fontSize: 12, fontWeight: 500 }}>({totalProductCount})</span></h2>
-              <input className="pharmacy-product-search" aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setCurrentPage(1); setExpandedProductId(null); }} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <ExcelExportButton
+                  fileName="Product_Management"
+                  disabled={adminMode || !storageReady || !pharmacyUserId}
+                  onError={(message) => setImportError(`Excel export failed: ${message}`)}
+                  sheets={[]}
+                  getSheets={async () => {
+                    if (!pharmacyUserId) throw new Error("Sign in to export your product list.");
+                    const allProducts: Product[] = [];
+                    let page = 1;
+                    let expectedCount = 0;
+                    let lastPageLength = 0;
+                    do {
+                      const result = await loadPharmacyProductPage(pharmacyUserId, page, CATALOG_PAGE_SIZE, searchTerm);
+                      allProducts.push(...result.products);
+                      expectedCount = result.count;
+                      lastPageLength = result.products.length;
+                      page += 1;
+                    } while (allProducts.length < expectedCount && lastPageLength > 0);
+
+                    return [{
+                      name: "Product Management",
+                      columns: ["ID Number", "Brand Name", "Generic Name", "Company", "Product Type", "Category", "Strength", "Dosage Form", "Pack Size", "Unit", "Barcode", "Retail Price", "Unit Price", "Pack Price", "Usage Type", "DAR Code", "Medicine Type Category", "Registration Information"],
+                      rows: allProducts.map((product) => [
+                        product.sourceCatalogId ?? product.id,
+                        product.brand,
+                        product.genericName,
+                        product.manufacturer,
+                        product.productType,
+                        product.category,
+                        product.strength,
+                        product.dosageForm,
+                        product.packSize,
+                        product.unit,
+                        product.barcode,
+                        product.retailPrice ?? "",
+                        product.unitPrice ?? "",
+                        product.packPrice ?? "",
+                        product.usageType ?? "",
+                        product.darCode ?? "",
+                        product.medicineTypeCategory ?? "",
+                        product.registrationInformation ?? "",
+                      ]),
+                    }];
+                  }}
+                />
+                <input className="pharmacy-product-search" aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setCurrentPage(1); setExpandedProductId(null); }} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
+              </div>
             </div>
             <div className="pharmacy-product-desktop-table" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1450, textAlign: "left" }}>

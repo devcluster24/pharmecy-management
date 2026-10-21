@@ -1,6 +1,11 @@
+import { Text } from '@/providers/LanguageProvider';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Keyboard, Pressable, Text, View } from 'react-native';
+import {
+  Keyboard,
+  Pressable,
+  View
+} from 'react-native';
 
 import {
   AuthField,

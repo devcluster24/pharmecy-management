@@ -1,6 +1,11 @@
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Keyboard, Pressable, Text, View } from 'react-native';
+import {
+  Keyboard,
+  Pressable,
+  View
+} from 'react-native';
 
 import {
   AuthField,
@@ -13,6 +18,7 @@ import { supabase, supabaseConfigError } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
 export default function LoginScreen() {
+  const alert = useLocalizedAlert();
   const router = useRouter();
   const { session, isLoading, authError } = useAuth();
   const [email, setEmail] = useState('');
@@ -54,7 +60,7 @@ export default function LoginScreen() {
       try {
         await recordPharmacySessionActivity('login');
       } catch (activityError) {
-        Alert.alert(
+        alert.alert(
           'Login activity was not saved',
           activityError instanceof Error
             ? activityError.message

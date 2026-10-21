@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { confirmDelete } from "@/lib/confirmDelete";
+import { useCurrency } from "@/app/component/CurrencyProvider";
+import { currencyOptions } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import { retryPharmacyDataSync } from "@/lib/pharmacy-data-sync";
 import {
@@ -23,6 +25,7 @@ import {
 } from "./returnDeductionStorage";
 import SubscriptionBillingSection from "./SubscriptionBillingSection";
 import InvoiceSetupSection from "./InvoiceSetupSection";
+import BackupFileNameSection from "./BackupFileNameSection";
 import { usePharmacySubscriptionExpiry } from "../../auth/PharmacySubscriptionExpiry";
 
 const settingsMenus = [
@@ -31,7 +34,7 @@ const settingsMenus = [
   { id: "documents-invoice", label: "Documents & Invoice" },
 ] as const;
 
-const pharmacyStoreSubmenus = ["Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System"] as const;
+const pharmacyStoreSubmenus = ["Inventory", "VAT/TAX", "Add Payment Method", "Account Info", "Return System", "Currency", "Backup File Name"] as const;
 const defaultMobilePaymentNames = ["Bangla QR", "Bkash", "Nagad", "Rocket", "upay", "Tap", "gpay"] as const;
 const bankNames = [
   "Sonali Bank PLC",
@@ -112,6 +115,7 @@ const emptyPageData: SectionData = {
 
 export default function SettingPage() {
   const { isExpired } = usePharmacySubscriptionExpiry();
+  const { currency, setCurrency, currencyError } = useCurrency();
   const [activeMenu, setActiveMenu] = useState<(typeof settingsMenus)[number]["id"]>("pharmacy-store");
   const [activeStoreSubmenu, setActiveStoreSubmenu] = useState<(typeof pharmacyStoreSubmenus)[number]>("Inventory");
   const [lowStockThreshold, setLowStockThreshold] = useState(() => getLowStockThresholdSnapshot().threshold);
@@ -394,8 +398,9 @@ export default function SettingPage() {
                   </button>
                 ))}
               </nav>
-              <fieldset disabled={isExpired} style={{ display: "contents" }}>
+              <fieldset disabled={isExpired && activeStoreSubmenu !== "Currency" && activeStoreSubmenu !== "Backup File Name"} style={{ display: "contents" }}>
               <section aria-live="polite" style={{ flex: "1 1 0", minWidth: 0, minHeight: 80, color: "#26352f", fontSize: 15, fontWeight: 600 }}>
+                {activeStoreSubmenu === "Backup File Name" && <BackupFileNameSection />}
                 {activeStoreSubmenu === "Add Payment Method" && (
                   <section aria-labelledby="payment-method-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
                     <h2 id="payment-method-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>{editingPaymentMethodId ? "Edit Payment Method" : "Add Payment Method"}</h2>
@@ -626,6 +631,52 @@ export default function SettingPage() {
                     </div>
                     {returnDeductionMessage && <p role="status" style={{ margin: "10px 0 0", color: "#16845f", fontSize: 12 }}>{returnDeductionMessage}</p>}
                     {returnDeductionError && <p role="alert" style={{ margin: "10px 0 0", color: "#b34b43", fontSize: 12 }}>{returnDeductionError}</p>}
+                  </section>
+                )}
+                {activeStoreSubmenu === "Currency" && (
+                  <section aria-labelledby="currency-settings-title" style={{ width: "100%", maxWidth: 900, color: "#26352f" }}>
+                    <h2 id="currency-settings-title" style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>Currency</h2>
+                    <div role="group" aria-label="Choose currency" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                      {currencyOptions.map((option) => (
+                        <button
+                          key={option.code}
+                          type="button"
+                          aria-pressed={currency === option.code}
+                          onClick={() => setCurrency(option.code)}
+                          style={{
+                            display: "grid",
+                            justifyItems: "center",
+                            gap: 8,
+                            minWidth: 112,
+                            padding: "16px 18px",
+                            border: `1px solid ${currency === option.code ? "#16845f" : "#dce5df"}`,
+                            borderRadius: 8,
+                            background: currency === option.code ? "#edf7f1" : "#fff",
+                            color: "#26352f",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span aria-hidden="true" style={{ fontSize: 25, fontWeight: 700 }}>{option.symbol}</span>
+                          <span style={{ fontSize: 12, fontWeight: 650 }}>{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <aside aria-labelledby="currency-usage-title" style={{ maxWidth: 620, marginTop: 22, padding: 16, border: "1px solid #e5ebe7", borderRadius: 8, background: "#fbfcfb" }}>
+                      <h3 id="currency-usage-title" style={{ margin: "0 0 10px", color: "#26352f", fontSize: 13, fontWeight: 700 }}>
+                        Where this currency is used
+                      </h3>
+                      <p style={{ margin: "0 0 10px", color: "#687871", fontSize: 12, fontWeight: 400 }}>
+                        {currencyOptions.find((option) => option.code === currency)?.label} ({currencyOptions.find((option) => option.code === currency)?.symbol}) is shown in:
+                      </p>
+                      <ul style={{ margin: 0, paddingLeft: 20, color: "#526159", fontSize: 12, fontWeight: 400, lineHeight: 1.8 }}>
+                        <li>Overview and dashboard metrics</li>
+                        <li>Sales, invoices, and customer balances</li>
+                        <li>Purchases, inventory, and supplier balances</li>
+                        <li>Returns, expenses, and reports</li>
+                        <li>Payment and subscription screens</li>
+                      </ul>
+                    </aside>
+                    {currencyError && <p role="alert" style={{ margin: "12px 0 0", color: "#b34b43", fontSize: 12 }}>{currencyError}</p>}
                   </section>
                 )}
                 {activeStoreSubmenu === "VAT/TAX" && (

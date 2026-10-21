@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, useState, useSyncExternalStore, type ReactNode } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
-import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
+import ExcelExportButton from "../components/ExcelExportButton";
 import {
   emptyPurchaseListSnapshot,
   getAvailablePurchaseQuantity,
@@ -273,7 +274,7 @@ function isInRange(value: string, range: DateRange) {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatQuantity(amount: number) {
@@ -287,25 +288,6 @@ function formatDate(date: Date) {
 function formatDateValue(value: string) {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString("en-BD") : value || "—";
-}
-
-function downloadCsv(fileName: string, columns: string[], rows: string[][]) {
-  const escapeCsvValue = (value: string) => {
-    const safeValue = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-    return `"${safeValue.replaceAll('"', '""')}"`;
-  };
-  const csvContent = [columns, ...rows]
-    .map((row) => row.map(escapeCsvValue).join(","))
-    .join("\r\n");
-  const blob = new Blob(["\uFEFF", csvContent], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function getSupplierIdentity(name: string, phone: string) {
@@ -565,7 +547,6 @@ function getReturnItemNames(records: ReturnRecord[]) {
 }
 
 export default function ReportsPage() {
-  const storeName = usePharmacyStoreName();
   const sales = useSyncExternalStore(subscribeToSalesList, getSalesListSnapshot, () => emptySalesListSnapshot);
   const purchases = useSyncExternalStore(subscribeToPurchaseList, getPurchaseListSnapshot, () => emptyPurchaseListSnapshot);
   const returns = useSyncExternalStore(subscribeToReturns, getReturnsSnapshot, () => emptyReturnsSnapshot);
@@ -893,54 +874,70 @@ export default function ReportsPage() {
       formatCurrency(expense.amount),
     ]);
 
-  const exportRows: { columns: string[]; rows: string[][] } = activeTab === "sales"
-    ? {
+  const reportExportSheets = [
+    {
+      name: "Sales Report",
       columns: ["Invoice", "Customer", "Date", "Items", "Total", "Discount", "VAT / TAX", "Cash rounding", "Paid to date", "Due", "Payment status"],
       rows: [...selectedSales].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((sale) => [
-        sale.invoice,
-        sale.customer,
-        formatDateValue(sale.createdAt),
-        String(sale.items),
-        String(sale.amount),
-        String(sale.discountAmount ?? 0),
-        String(sale.taxAmount ?? 0),
-        String(sale.cashRoundingAmount ?? 0),
-        String(sale.paidAmount ?? sale.amount),
-        String(getSaleDue(sale)),
-        sale.payment,
+        sale.invoice, sale.customer, sale.createdAt, sale.items, sale.amount, sale.discountAmount ?? 0,
+        sale.taxAmount ?? 0, sale.cashRoundingAmount ?? 0, sale.paidAmount ?? sale.amount, getSaleDue(sale), sale.payment,
       ]),
-    }
-    : activeTab === "customers"
-      ? {
-        columns: ["Customer", "Phone", "Invoice count", "Total bill", "Paid", "Due", "Last invoice"],
-        rows: dueCustomers.map((customer) => [customer.name, customer.phone, String(customer.invoices.length), String(customer.bill), String(customer.paid), String(customer.due), formatDateValue(customer.latestInvoice.createdAt)]),
-      }
-      : activeTab === "suppliers"
-        ? {
-          columns: ["Supplier", "Phone", "Orders in period", "Purchase in period", "Paid on period orders", "Due on period orders", "Current total due"],
-          rows: supplierSummaries.map((supplier) => [supplier.name, supplier.phone, String(supplier.periodOrders.length), String(supplier.periodPurchase), String(supplier.periodPaid), String(supplier.periodDue), String(supplier.currentDue)]),
-        }
-        : activeTab === "stock"
-          ? {
-            columns: ["Product", "Generic", "Batch", "Supplier", "Available quantity", "Expiry", "Status"],
-            rows: stockRows.map((row) => [row.brand, row.genericName, row.batchNumber, row.supplierContactName?.trim() || row.supplier, String(getAvailablePurchaseQuantity(row) ?? ""), row.expDate, getStockState(row)]),
-          }
-          : activeTab === "returns"
-            ? {
-              columns: ["Return ID", "Date", "Customer", "Products", "Quantity", "Reason", "Method", "Item value", "Net refund"],
-              rows: reportReturns.map((record) => [record.id, formatDateValue(record.records[0]?.date ?? ""), record.customer, getReturnItemNames(record.records), String(record.quantity), record.reason, record.method, String(record.grossAmount), String(record.refundAmount)]),
-            }
-            : {
-              columns: ["Profit & Loss item", "Amount / status", "Explanation"],
-              rows: [
-                ["Sales revenue", String(salesTotal), `${selectedSales.length} invoices`],
-                ["Customer returns", String(reportReturnAmount), "Net refund where recorded"],
-                ["Purchases received", String(periodPurchaseTotal), "Purchases are not the same as cost of goods sold"],
-                ["Cost of goods sold (COGS)", cogsIsComplete ? String(cogsTotal) : `Partial: ${cogsTotal}`, cogsCoverageDetail],
-                ["Shop expenses", String(periodExpenseTotal), `${periodExpenses.length} expenses in selected period`],
-                ["Estimated net profit / loss", String(estimatedNetProfit), cogsIsComplete ? "Sales less returns, COGS, and recorded expenses" : `Partial: ${cogsCoverageDetail}`],
-              ],
-            };
+    },
+    {
+      name: "Customer Due",
+      columns: ["Customer", "Phone", "Invoice count", "Total bill", "Paid", "Due", "Last invoice"],
+      rows: dueCustomers.map((customer) => [
+        customer.name, customer.phone, customer.invoices.length, customer.bill, customer.paid, customer.due,
+        customer.latestInvoice.createdAt,
+      ]),
+    },
+    {
+      name: "Purchase Supplier",
+      columns: ["Supplier", "Phone", "Orders in period", "Purchase in period", "Paid on period orders", "Due on period orders", "Current total due"],
+      rows: supplierSummaries.map((supplier) => [
+        supplier.name, supplier.phone, supplier.periodOrders.length, supplier.periodPurchase, supplier.periodPaid,
+        supplier.periodDue, supplier.currentDue,
+      ]),
+    },
+    {
+      name: "Stock Expiry",
+      columns: ["Product", "Generic", "Batch", "Supplier", "Available quantity", "Expiry", "Status"],
+      rows: stockRows.map((row) => [
+        row.brand, row.genericName, row.batchNumber, row.supplierContactName?.trim() || row.supplier,
+        getAvailablePurchaseQuantity(row) ?? "", row.expDate, getStockState(row),
+      ]),
+    },
+    {
+      name: "Returns",
+      columns: ["Return ID", "Date", "Customer", "Products", "Quantity", "Reason", "Method", "Item value", "Net refund"],
+      rows: reportReturns.map((record) => [
+        record.id, record.records[0]?.date ?? "", record.customer, getReturnItemNames(record.records),
+        record.quantity, record.reason, record.method, record.grossAmount, record.refundAmount,
+      ]),
+    },
+    {
+      name: "Profit Loss",
+      columns: ["Profit & Loss item", "Amount / status", "Explanation"],
+      rows: [
+        ["Sales revenue", salesTotal, `${selectedSales.length} invoices`],
+        ["Customer returns", reportReturnAmount, "Net refund where recorded"],
+        ["Purchases received", periodPurchaseTotal, "Purchases are not the same as cost of goods sold"],
+        ["Cost of goods sold (COGS)", cogsIsComplete ? cogsTotal : `Partial: ${cogsTotal}`, cogsCoverageDetail],
+        ["Shop expenses", periodExpenseTotal, `${periodExpenses.length} expenses in selected period`],
+        ["Estimated net profit / loss", estimatedNetProfit, cogsIsComplete ? "Sales less returns, COGS, and recorded expenses" : `Partial: ${cogsCoverageDetail}`],
+      ],
+    },
+    {
+      name: "COGS Details",
+      columns: ["Invoice", "Brand", "Batch", "Quantity sold", "Unit purchase cost", "COGS"],
+      rows: cogsRows.map((row) => row.map((cell) => typeof cell === "string" ? cell : "")),
+    },
+    {
+      name: "Recorded Expenses",
+      columns: ["Date", "Category", "Description", "Payment method", "Amount"],
+      rows: expenseDetailRows,
+    },
+  ];
 
   const errors = [sales.error, purchases.error, returns.error, lowStockThreshold.error, supplierDueLedger.error, expenses.error].filter(Boolean);
 
@@ -1207,22 +1204,6 @@ export default function ReportsPage() {
     );
   }
 
-  function exportCurrentReport() {
-    setExportError("");
-    try {
-      const rangeLabel = dateRange
-        ? `${toDateInputValue(dateRange.start)}-to-${toDateInputValue(dateRange.end)}`
-        : "invalid-range";
-      const safeStoreName = (storeName || "Pharmacy Cluster")
-        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
-        .replace(/[. ]+$/g, "")
-        .trim();
-      downloadCsv(`${safeStoreName}-${activeTab}-report-${rangeLabel}.csv`, exportRows.columns, exportRows.rows);
-    } catch (error) {
-      setExportError(error instanceof Error ? `CSV export failed: ${error.message}` : "CSV export failed.");
-    }
-  }
-
   const errorMessage = errors.join(" ");
   const pageData: SectionData = {
     ...emptyPageData,
@@ -1250,7 +1231,12 @@ export default function ReportsPage() {
                   </>
                 )}
                   <div className="report-export-actions" style={{ display: "flex", gap: 7, marginLeft: "auto" }}>
-                    <button className="report-export-button" type="button" disabled={!dateRange} onClick={exportCurrentReport} style={{ border: "1px solid #b9dfd0", borderRadius: 5, background: "#fff", color: "#17704e", padding: "8px 10px", fontSize: 11, fontWeight: 650, cursor: dateRange ? "pointer" : "not-allowed", opacity: dateRange ? 1 : 0.5 }}>Download CSV</button>
+                    <ExcelExportButton
+                      fileName="Reports"
+                      sheets={reportExportSheets}
+                      disabled={!dateRange}
+                      onError={(message) => setExportError(`Excel export failed: ${message}`)}
+                    />
                 </div>
               </div>
               <div aria-live="polite" style={{ color: dateRange ? "#687871" : "#ad4b43", fontSize: 11 }}>{dateRange ? `Selected period: ${formatDate(dateRange.start)} – ${formatDate(dateRange.end)}` : "Choose a valid date range. The start date must not be after the end date."}</div>

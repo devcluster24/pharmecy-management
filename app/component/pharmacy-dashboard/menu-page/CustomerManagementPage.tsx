@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import {
   addSalePayment,
   addSalePaymentAcrossInvoices,
@@ -52,7 +54,7 @@ const inputStyle = {
 };
 
 function formatPrice(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getDueAmount(invoice: SalesListRow) {
@@ -410,6 +412,51 @@ export default function CustomerManagementPage() {
         setSearchQuery(value);
         setCurrentPage(1);
       }}
+      searchAccessory={(
+        <ExcelExportButton
+          fileName="Customers"
+          sheets={[
+            {
+              name: "Customer Management List",
+              columns: ["Invoice", "Date & Time", "Customer", "Phone", "Items", "Subtotal", "Discount", "VAT/TAX", "Cash Rounding", "Total", "Paid", "Due", "Payment"],
+              rows: sales.rows
+                .filter((invoice) =>
+                  !normalizedSearch
+                  || [invoice.invoice, invoice.customer, invoice.phone ?? "", invoice.payment]
+                    .some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+                )
+                .map((invoice) => [
+                  invoice.invoice,
+                  invoice.createdAt,
+                  invoice.customer,
+                  invoice.phone ?? "",
+                  invoice.items,
+                  invoice.subtotalAmount ?? invoice.amount,
+                  invoice.discountAmount ?? 0,
+                  invoice.taxAmount ?? 0,
+                  invoice.cashRoundingAmount ?? 0,
+                  invoice.amount,
+                  invoice.paidAmount ?? invoice.amount,
+                  getDueAmount(invoice),
+                  invoice.payment,
+                ]),
+            },
+            {
+              name: "Due Customer List",
+              columns: ["Customer", "Phone", "Last Invoice Date", "Invoice Count", "Total Bill", "Total Paid", "Total Due"],
+              rows: dueCustomerGroups.map((group) => [
+                group.customer,
+                group.phone,
+                group.lastInvoice.createdAt,
+                group.invoices.length,
+                group.totalAmount,
+                group.totalPaid,
+                group.totalDue,
+              ]),
+            },
+          ]}
+        />
+      )}
       content={selectedInvoice ? (
         <div
           className="customer-modal-overlay"

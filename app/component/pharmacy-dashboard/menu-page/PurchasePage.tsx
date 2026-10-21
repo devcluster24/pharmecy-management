@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import PurchaseCreateAction from "./PurchaseCreateAction";
 import {
   calculateUnitPurchasePrice,
@@ -41,7 +43,7 @@ function formatMonthYear(value: string) {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function PurchasePage() {
@@ -178,6 +180,39 @@ export default function PurchasePage() {
         sectionSlug="purchase"
         data={pageData}
         listTitle=""
+        searchAccessory={(
+          <ExcelExportButton
+            fileName="Purchase"
+            sheets={[
+              {
+                name: "Place Order List",
+                columns: ["Date & Time", "Order", "Supplier", "Box Quantity", "Product Count", "Total Order Price"],
+                rows: placeOrders.map(({ order, rows, updatedAt }) => [
+                  updatedAt > 0 ? new Date(updatedAt).toISOString() : rows[0]?.orderDate ?? "",
+                  order,
+                  [...new Set(rows.map((row) => row.supplier))].join(", "),
+                  rows.reduce((total, row) => {
+                    const quantity = Number(row.quantity);
+                    return Number.isFinite(quantity) ? total + quantity : total;
+                  }, 0),
+                  new Set(rows.map((row) => row.brand.trim().toLocaleLowerCase()).filter(Boolean)).size,
+                  getOrderTotal(rows),
+                ]),
+              },
+              {
+                name: "Receive Order List",
+                columns: ["Date & Time", "Order Number", "Supplier", "Supplier Name & Phone Number", "Total Purchase Amount"],
+                rows: receiveOrders.map(({ order, rows, updatedAt }) => [
+                  updatedAt > 0 ? new Date(updatedAt).toISOString() : rows[0]?.orderDate ?? "",
+                  order,
+                  [...new Set(rows.map((row) => row.supplier))].join(", "),
+                  [...new Set(rows.map((row) => `${row.supplierContactName?.trim() ?? ""}${row.supplierPhone?.trim() ? ` · ${row.supplierPhone.trim()}` : ""}`))].join(", "),
+                  getOrderTotal(rows),
+                ]),
+              },
+            ]}
+          />
+        )}
         listNavigation={
           <div className="purchase-list-tabs" role="group" aria-label="Purchase list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
             {([

@@ -1,19 +1,17 @@
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import {Platform} from 'react-native';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { useAuth } from '@/providers/AuthProvider';
@@ -84,6 +82,7 @@ function hasPageAccess(permissions: StaffPermissions, page: string) {
 }
 
 export default function StaffManagementScreen({ actionPage = false }: { actionPage?: boolean }) {
+  const alert = useLocalizedAlert();
   const { dashboardRole } = useAuth();
   const { action, staffUserId } = useLocalSearchParams<{ action: string; staffUserId: string }>();
   const [members, setMembers] = useState<StaffMember[]>([]);
@@ -91,6 +90,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(supabase ? '' : 'Supabase is not configured.');
   const [inviteUrl, setInviteUrl] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
   const [inviteMessage, setInviteMessage] = useState('');
   const [isCreatingInvite, setIsCreatingInvite] = useState(false);
   const [search, setSearch] = useState('');
@@ -161,6 +161,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
     }
     setIsCreatingInvite(true);
     setInviteUrl('');
+    setInviteToken('');
     setInviteMessage('');
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -181,6 +182,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
       });
       if (inviteError) throw inviteError;
 
+      setInviteToken(token);
       setInviteUrl(`${origin}/staff-signup/${token}`);
       setInviteMessage('This private link accepts one staff application and expires in 30 days.');
     } catch (createError) {
@@ -248,7 +250,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
   }
 
   function confirmDelete(member: StaffMember) {
-    Alert.alert(
+    alert.alert(
       'Delete staff account',
       `Permanently delete ${member.full_name || member.email}'s staff account?`,
       [
@@ -401,7 +403,16 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
           {inviteMessage ? <Text style={inviteUrl ? styles.success : styles.helperText}>{inviteMessage}</Text> : null}
           {inviteUrl ? (
             <>
-              <Text selectable style={styles.inviteUrl}>{inviteUrl}</Text>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Open staff signup page in the app"
+                onPress={() => router.push({
+                  pathname: '/staff-signup/[token]',
+                  params: { token: inviteToken },
+                })}>
+                <Text selectable style={styles.inviteUrl}>{inviteUrl}</Text>
+              </Pressable>
+              <Text style={styles.helperText}>Tap the link to open the signup page in this app.</Text>
               <Pressable accessibilityRole="button" onPress={() => void shareInviteUrl()} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Share signup URL</Text>
               </Pressable>

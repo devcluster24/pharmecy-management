@@ -1,4 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Text } from '@/providers/LanguageProvider';
+import {
+  StyleSheet,
+  View
+} from 'react-native';
 
 export default function DashboardTabScreen({
   title,

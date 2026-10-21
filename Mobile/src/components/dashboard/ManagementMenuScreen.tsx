@@ -1,13 +1,17 @@
+import {
+  appCurrencyOptions,
+  Text,
+  useLanguage,
+  useLocalizedAlert,
+} from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useState, type ComponentProps } from 'react';
 import { SymbolView } from 'expo-symbols';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -47,8 +51,8 @@ const menuEntries: MenuEntry[] = [
         icon: { ios: 'globe', android: 'language', web: 'language' },
       },
       {
-        label: 'Currancy',
-        slug: 'currancy',
+        label: 'Currency',
+        slug: 'currency',
         icon: { ios: 'dollarsign.circle', android: 'currency_exchange', web: 'currency_exchange' },
       },
       {
@@ -128,19 +132,30 @@ export default function ManagementMenuScreen({
   activeSlug?: string;
   pageTitle?: string;
 }) {
+  const alert = useLocalizedAlert();
   const activeParent = menuEntries.find((entry) =>
     entry.children?.some((child) => child.slug === activeSlug),
   )?.slug;
   const [expandedGroup, setExpandedGroup] = useState<string | null>(activeParent ?? null);
+  const [isCurrencyDropdownOpen, setIsCurrencyDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const { dashboardRole } = useAuth();
+  const {
+    language,
+    setLanguage,
+    languageError,
+    currency,
+    setCurrency,
+    currencyError,
+  } = useLanguage();
 
   function toggleGroup(slug: string, isExpanded: boolean) {
     setExpandedGroup(isExpanded ? null : slug);
   }
 
   function openPage(slug: string) {
+    if (slug === 'language') return;
     if (slug === 'staff-management') {
       router.push('/dashboard/menu/staff-management');
       return;
@@ -150,6 +165,25 @@ export default function ManagementMenuScreen({
       return;
     }
     router.push({ pathname: '/dashboard/menu/[slug]', params: { slug } });
+  }
+
+  async function chooseLanguage(nextLanguage: 'en' | 'bn') {
+    setErrorMessage('');
+    try {
+      await setLanguage(nextLanguage);
+    } catch (languageError) {
+      setErrorMessage(languageError instanceof Error ? languageError.message : 'Could not save language preference.');
+    }
+  }
+
+  async function chooseCurrency(nextCurrency: (typeof appCurrencyOptions)[number]['code']) {
+    setErrorMessage('');
+    try {
+      await setCurrency(nextCurrency);
+      setIsCurrencyDropdownOpen(false);
+    } catch (saveError) {
+      setErrorMessage(saveError instanceof Error ? saveError.message : 'Could not save currency preference.');
+    }
   }
 
   async function handleLogout() {
@@ -165,7 +199,7 @@ export default function ManagementMenuScreen({
       try {
         await recordPharmacySessionActivity('logout');
       } catch (activityError) {
-        Alert.alert(
+        alert.alert(
           'Logout activity was not saved',
           activityError instanceof Error
             ? activityError.message
@@ -184,6 +218,80 @@ export default function ManagementMenuScreen({
   }
 
   if (activeSlug) {
+    if (activeSlug === 'currency') {
+      return (
+        <SafeAreaView style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <ScrollView
+            style={styles.pageContent}
+            contentContainerStyle={styles.currencyContent}>
+            <View style={styles.currencySelector}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={language === 'bn' ? 'মুদ্রা নির্বাচন করুন' : 'Choose currency'}
+                accessibilityState={{ expanded: isCurrencyDropdownOpen }}
+                onPress={() => setIsCurrencyDropdownOpen((isOpen) => !isOpen)}
+                style={styles.currencyDropdownTrigger}>
+                <Text style={styles.currencySymbol}>
+                  {appCurrencyOptions.find((option) => option.code === currency)?.symbol}
+                </Text>
+                <Text style={styles.currencyDropdownLabel}>
+                  {appCurrencyOptions.find((option) => option.code === currency)?.label}
+                </Text>
+                <Text style={styles.currencyDropdownChevron}>{isCurrencyDropdownOpen ? '⌃' : '⌄'}</Text>
+              </Pressable>
+              {isCurrencyDropdownOpen ? (
+                <View style={styles.currencyDropdownOptions}>
+                  {appCurrencyOptions.map((option) => {
+                    const selected = currency === option.code;
+                    return (
+                      <Pressable
+                        key={option.code}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${option.label} ${option.symbol}`}
+                        accessibilityState={{ selected }}
+                        onPress={() => void chooseCurrency(option.code)}
+                        style={[
+                          styles.currencyDropdownOption,
+                          selected && styles.currencyOptionSelected,
+                        ]}>
+                        <Text style={styles.currencySymbol}>{option.symbol}</Text>
+                        <Text style={styles.currencyOptionLabel}>{option.label}</Text>
+                        {selected ? <Text style={styles.currencySelectedMark}>✓</Text> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.currencyUsage}>
+              <Text style={styles.currencyUsageTitle}>
+                {language === 'bn' ? 'এই মুদ্রা যেসব জায়গায় ব্যবহৃত হবে' : 'Where this currency is used'}
+              </Text>
+              {[
+                'Home dashboard',
+                'Sales and invoices',
+                'Purchases and inventory',
+                'Returns and customer balances',
+                'Suppliers, expenses, and reports',
+                'Payments and subscription screens',
+              ].map((area) => (
+                <View key={area} style={styles.currencyUsageRow}>
+                  <Text style={styles.currencyUsageBullet}>•</Text>
+                  <Text style={styles.currencyUsageText}>{area}</Text>
+                </View>
+              ))}
+            </View>
+            {errorMessage || currencyError ? (
+              <Text style={styles.errorMessage}>{errorMessage || currencyError}</Text>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={styles.fullPage}>
         <DashboardSubpageHeader
@@ -205,22 +313,58 @@ export default function ManagementMenuScreen({
     return (
       <View key={entry.slug}>
         <View style={[styles.menuRow, nested && styles.nestedMenuRow]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive }}
-            onPress={() => {
-              if (entry.children) {
-                toggleGroup(entry.slug, isExpanded);
-              } else {
-                openPage(entry.slug);
-              }
-            }}
-            style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}>
-            <SymbolView name={entry.icon} size={18} tintColor={isActive ? '#17664f' : '#718078'} />
-            <Text style={[styles.menuButtonText, isActive && styles.activeMenuButtonText]}>
-              {entry.label}
-            </Text>
-          </Pressable>
+          {entry.slug === 'language' ? (
+            <>
+              <View style={[styles.menuButton, styles.languageLabel]}>
+                <SymbolView name={entry.icon} size={18} tintColor="#718078" />
+                <Text style={styles.menuButtonText}>{entry.label}</Text>
+              </View>
+              <View style={styles.languageButtons}>
+                {([
+                  { key: 'en', label: 'Eng' },
+                  { key: 'bn', label: 'বাং' },
+                ] as const).map((option) => (
+                  <Pressable
+                    key={option.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={option.key === 'en'
+                      ? language === 'bn' ? 'ইংরেজি' : 'English'
+                      : 'বাংলা'}
+                    accessibilityState={{ selected: language === option.key }}
+                    onPress={() => void chooseLanguage(option.key)}
+                    style={[
+                      styles.languageButton,
+                      language === option.key && styles.languageButtonSelected,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.languageButtonText,
+                        language === option.key && styles.languageButtonTextSelected,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
+              onPress={() => {
+                if (entry.children) {
+                  toggleGroup(entry.slug, isExpanded);
+                } else {
+                  openPage(entry.slug);
+                }
+              }}
+              style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}>
+              <SymbolView name={entry.icon} size={18} tintColor={isActive ? '#17664f' : '#718078'} />
+              <Text style={[styles.menuButtonText, isActive && styles.activeMenuButtonText]}>
+                {entry.label}
+              </Text>
+            </Pressable>
+          )}
           {entry.children ? (
             <Pressable
               accessibilityRole="button"
@@ -274,7 +418,9 @@ export default function ManagementMenuScreen({
           <Text style={styles.sidebarTitle}>Cluster Menu</Text>
         </View>
         {menuEntries.map((entry) => renderEntry(entry))}
-        {errorMessage ? <Text style={styles.errorMessage}>{errorMessage}</Text> : null}
+        {errorMessage || languageError ? (
+          <Text style={styles.errorMessage}>{errorMessage || languageError}</Text>
+        ) : null}
         <View style={styles.menuRow}>
           <Pressable
             accessibilityRole="button"
@@ -328,6 +474,99 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f7f5',
   },
+  currencyContent: {
+    flexGrow: 1,
+    padding: 20,
+  },
+  currencySelector: {
+    alignSelf: 'stretch',
+    maxWidth: 440,
+    borderWidth: 1,
+    borderColor: '#dce5df',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  currencyDropdownTrigger: {
+    minHeight: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+  },
+  currencyDropdownLabel: {
+    flex: 1,
+    color: '#26352f',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  currencyDropdownChevron: {
+    color: '#526159',
+    fontSize: 22,
+  },
+  currencyDropdownOptions: {
+    padding: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#e6ece8',
+  },
+  currencyDropdownOption: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  currencyOptionSelected: {
+    backgroundColor: '#e8f3ec',
+  },
+  currencySelectedMark: {
+    marginLeft: 'auto',
+    color: '#17664f',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  currencyUsage: {
+    alignSelf: 'stretch',
+    maxWidth: 600,
+    gap: 10,
+    marginTop: 28,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#dce5df',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+  },
+  currencyUsageTitle: {
+    marginBottom: 2,
+    color: '#183c31',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  currencyUsageRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  currencyUsageBullet: {
+    color: '#17664f',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  currencyUsageText: {
+    flex: 1,
+    color: '#526159',
+    fontSize: 13,
+  },
+  currencySymbol: {
+    color: '#17664f',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  currencyOptionLabel: {
+    color: '#526159',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   fullPageContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
@@ -373,6 +612,37 @@ const styles = StyleSheet.create({
     gap: 11,
     paddingHorizontal: 12,
     borderRadius: 10,
+  },
+  languageLabel: {
+    paddingRight: 4,
+  },
+  languageButtons: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingRight: 6,
+  },
+  languageButton: {
+    minWidth: 36,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    borderWidth: 1,
+    borderColor: '#d6dfd9',
+    borderRadius: 8,
+    backgroundColor: '#fffefa',
+  },
+  languageButtonSelected: {
+    borderColor: '#17664f',
+    backgroundColor: '#e8f3ec',
+  },
+  languageButtonText: {
+    color: '#526159',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  languageButtonTextSelected: {
+    color: '#17664f',
   },
   menuButtonPressed: {
     opacity: 0.72,

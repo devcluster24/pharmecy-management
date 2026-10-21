@@ -1,3 +1,4 @@
+import { Text } from '@/providers/LanguageProvider';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -5,8 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,13 +19,14 @@ import {
   type PharmacySubscriptionOptions,
   type PharmacySubscriptionPlan,
 } from '@/lib/pharmacy-subscription';
+import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
 type PaymentMethod = 'bKash' | 'Nagad';
 
 function formatAmount(value: number) {
-  return `৳ ${value.toLocaleString('en-BD', { maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()} ${value.toLocaleString('en-BD', { maximumFractionDigits: 2 })}`;
 }
 
 function formatFeeLabel(plan: PharmacySubscriptionPlan) {

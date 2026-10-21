@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import {
   emptyReturnsSnapshot,
   getReturnsSnapshot,
@@ -367,6 +368,28 @@ export default function ReturnSystemPage() {
         setSearchQuery(value);
         setReturnListPage(1);
       }}
+      searchAccessory={(
+        <ExcelExportButton
+          fileName="Returns"
+          sheets={[{
+            name: "Returns",
+            columns: ["Return ID", "Date & Time", "Customer", "Phone", "Re-Invoice", "Invoice", "Product", "Return Quantity", "Amount", "Net Refund", "Return Method"],
+            rows: matchingReturnRecords.map((record) => [
+              record.returnId ?? record.id,
+              record.date,
+              record.customer || "Walk-in customer",
+              record.phone ?? "",
+              record.reInvoice ?? getReInvoice(record.invoice),
+              record.invoice,
+              record.product,
+              record.quantity ?? "",
+              record.amount ?? "",
+              record.netRefundAmount ?? "",
+              record.returnMethod ?? "Cash Return",
+            ]),
+          }]}
+        />
+      )}
       actionContent={(
         <button
           className="return-record-launch-button"

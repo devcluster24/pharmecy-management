@@ -1,3 +1,4 @@
+import { Text, TextInput } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -6,13 +7,12 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -162,7 +162,7 @@ function parseRows(value: unknown, source: string): PurchaseRow[] {
 }
 
 function money(value: number) {
-  return `৳${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function orderAmount(rows: PurchaseRow[]) {

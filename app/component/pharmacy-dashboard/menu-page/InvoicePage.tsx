@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
 import {
   emptySalesListSnapshot,
@@ -22,7 +24,7 @@ const basePageData: SectionData = {
 };
 
 function formatPrice(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function InvoicePage() {
@@ -46,11 +48,11 @@ export default function InvoicePage() {
   }, []);
 
   const normalizedSearch = searchValue.trim().toLocaleLowerCase();
-  const rows = sales.rows
-    .filter((sale) =>
-      !normalizedSearch
-      || [sale.invoice, sale.customer, sale.phone ?? "", sale.payment].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
-    )
+  const filteredSales = sales.rows.filter((sale) =>
+    !normalizedSearch
+    || [sale.invoice, sale.customer, sale.phone ?? "", sale.payment].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+  );
+  const rows = filteredSales
     .map((sale) => {
       const subtotal = sale.subtotalAmount ?? sale.amount;
       const discount = sale.discountAmount ?? 0;
@@ -211,6 +213,30 @@ export default function InvoicePage() {
         setSearchValue(value);
         setCurrentPage(1);
       }}
+      searchAccessory={(
+        <ExcelExportButton
+          fileName="Invoice"
+          sheets={[{
+            name: "Invoice",
+            columns: ["Invoice", "Customer", "Phone", "Items", "Date & Time", "Subtotal", "Discount", "VAT/TAX", "Cash Rounding", "Total", "Paid", "Due", "Payment"],
+            rows: filteredSales.map((sale) => [
+              sale.invoice,
+              sale.customer,
+              sale.phone ?? "",
+              sale.items,
+              sale.createdAt,
+              sale.subtotalAmount ?? sale.amount,
+              sale.discountAmount ?? 0,
+              sale.taxAmount ?? 0,
+              sale.cashRoundingAmount ?? 0,
+              sale.amount,
+              sale.paidAmount ?? sale.amount,
+              sale.dueAmount ?? 0,
+              sale.payment,
+            ]),
+          }]}
+        />
+      )}
     />
   );
 }

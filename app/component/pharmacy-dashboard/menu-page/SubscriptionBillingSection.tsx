@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { downloadSubscriptionInvoicePdf, type SubscriptionInvoice } from "@/lib/subscriptionInvoicePdf";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
+import ExcelExportButton from "../components/ExcelExportButton";
 import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { usePharmacySubscriptionExpiry } from "../../auth/PharmacySubscriptionExpiry";
 
@@ -68,7 +70,7 @@ function formatDate(value: string) {
 }
 
 function formatAmount(value: number) {
-  return `৳ ${Number(value).toLocaleString("en-BD", { maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()} ${Number(value).toLocaleString("en-BD", { maximumFractionDigits: 2 })}`;
 }
 
 function formatRemaining(ms: number) {
@@ -469,6 +471,26 @@ export default function SubscriptionBillingSection() {
               <p style={{ margin: "4px 0 0", color: "#718078", fontSize: 11 }}>View your last payments and invoices.</p>
             </div>
           </div>
+          <ExcelExportButton
+            fileName="Payment_History"
+            disabled={isHistoryLoading}
+            onError={(message) => setPaymentHistoryError(`Excel export failed: ${message}`)}
+            sheets={[{
+              name: "Payment History",
+              columns: ["Date", "Invoice No.", "Plan", "Amount", "Payment Method", "Status", "Expiry Date", "Billing Period", "Billing Interval"],
+              rows: paymentHistory.map((entry) => [
+                entry.occurred_at,
+                entry.invoice_number,
+                entry.plan_name,
+                entry.amount,
+                entry.payment_method || "—",
+                entry.status,
+                entry.expires_at ?? "",
+                entry.billing_period,
+                entry.billing_interval,
+              ]),
+            }]}
+          />
         </div>
 
         {paymentHistoryError && (

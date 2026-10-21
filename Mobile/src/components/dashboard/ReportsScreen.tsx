@@ -1,15 +1,16 @@
+import { Text } from '@/providers/LanguageProvider';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -276,7 +277,7 @@ function isInRange(value: string, range: DateRange) {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatQuantity(amount: number) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import { confirmDelete } from "@/lib/confirmDelete";
 import { supabase } from "@/lib/supabase/client";
 import { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
@@ -112,7 +113,7 @@ function getUnitPrice(price: string) {
 }
 
 function formatPrice(price: number) {
-  return `৳${price.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${price.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function roundCurrency(amount: number) {

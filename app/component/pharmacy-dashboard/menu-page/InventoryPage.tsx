@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import { confirmDelete } from "@/lib/confirmDelete";
 import {
   emptyPurchaseListSnapshot,
@@ -219,30 +220,33 @@ export default function InventoryPage() {
   const lowStockEnabled = lowStockThresholdSnapshot.threshold.trim() !== ""
     && Number.isInteger(threshold)
     && threshold > 0;
-  const listRows = activeList === "expire-soon"
-    ? sortedRows.filter((row) => expiresWithinSelectedMonths(row.expDate, globalDate, expiryMonthFilter))
-    : activeList === "expaired"
-      ? sortedRows.filter((row) => isInventoryItemExpired(row.expDate, globalDate))
-      : activeList === "low-stock"
-        ? lowStockEnabled
-          ? sortedRows.filter((row) => {
-            const totalQuantity = getCurrentTotalQuantity(row);
-            return totalQuantity !== null && totalQuantity <= threshold;
-          })
-          : []
-        : activeList === "out-of-stock"
-          ? sortedRows.filter((row) => getCurrentTotalQuantity(row) === 0)
-          : sortedRows;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-  const rows = normalizedSearchQuery
-    ? listRows.filter((row) => [
+  function getInventoryRows(listType: InventoryListType) {
+    const filteredList = listType === "expire-soon"
+      ? sortedRows.filter((row) => expiresWithinSelectedMonths(row.expDate, globalDate, expiryMonthFilter))
+      : listType === "expaired"
+        ? sortedRows.filter((row) => isInventoryItemExpired(row.expDate, globalDate))
+        : listType === "low-stock"
+          ? lowStockEnabled
+            ? sortedRows.filter((row) => {
+              const totalQuantity = getCurrentTotalQuantity(row);
+              return totalQuantity !== null && totalQuantity <= threshold;
+            })
+            : []
+          : listType === "out-of-stock"
+            ? sortedRows.filter((row) => getCurrentTotalQuantity(row) === 0)
+            : sortedRows;
+    return normalizedSearchQuery
+      ? filteredList.filter((row) => [
       row.batchNumber,
       row.order,
       row.supplier,
       row.brand,
       row.genericName,
     ].some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery)))
-    : listRows;
+      : filteredList;
+  }
+  const rows = getInventoryRows(activeList);
   const paginationKey = `${activeList}:${expiryMonthFilter}:${threshold}:${rows.map(({ id, updatedAt }) => `${id}:${updatedAt ?? ""}`).join("|")}`;
   const totalPages = Math.max(1, Math.ceil(rows.length / ORDERS_PER_PAGE));
   const currentPage = Math.min(
@@ -367,26 +371,58 @@ export default function InventoryPage() {
       listTitle=""
       searchValue={searchQuery}
       onSearchChange={setSearchQuery}
-      searchAccessory={activeList === "expire-soon" ? (
-        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#687871", fontSize: 12 }}>
-          Expiry:
-          <select
-            aria-label="Filter items expiring within"
-            value={expiryMonthFilter}
-            onChange={(event) => {
-              const months = Number(event.target.value);
-              if (months === 1 || months === 2 || months === 3) {
-                setExpiryMonthFilter(months);
-              }
-            }}
-            style={{ border: "1px solid #e0e6e1", borderRadius: 5, background: "#fff", color: "#26352f", padding: "5px 8px", fontSize: 12 }}
-          >
-            <option value={1}>1 Month</option>
-            <option value={2}>2 Months</option>
-            <option value={3}>3 Months</option>
-          </select>
-        </label>
-      ) : undefined}
+      searchAccessory={(
+        <>
+          {activeList === "expire-soon" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#687871", fontSize: 12 }}>
+              Expiry:
+              <select
+                aria-label="Filter items expiring within"
+                value={expiryMonthFilter}
+                onChange={(event) => {
+                  const months = Number(event.target.value);
+                  if (months === 1 || months === 2 || months === 3) {
+                    setExpiryMonthFilter(months);
+                  }
+                }}
+                style={{ border: "1px solid #e0e6e1", borderRadius: 5, background: "#fff", color: "#26352f", padding: "5px 8px", fontSize: 12 }}
+              >
+                <option value={1}>1 Month</option>
+                <option value={2}>2 Months</option>
+                <option value={3}>3 Months</option>
+              </select>
+            </label>
+          )}
+          <ExcelExportButton
+            fileName="Inventory"
+            sheets={[
+              ["Inventory", "inventory"],
+              ["Expire Soon", "expire-soon"],
+              ["Expired", "expaired"],
+              ["Low Stock", "low-stock"],
+              ["Out of Stock", "out-of-stock"],
+            ].map(([name, listType]) => ({
+              name,
+              columns: receiveOrderColumns.slice(0, -1),
+              rows: getInventoryRows(listType as InventoryListType).map((row) => [
+                formatDateTime(row),
+                row.batchNumber,
+                row.order,
+                row.supplier,
+                row.brand,
+                row.genericName,
+                row.strength,
+                row.dosageForm,
+                getCurrentPackQuantity(row),
+                row.packSize,
+                getCurrentTotalQuantity(row) ?? "",
+                row.packPrice,
+                row.expDate,
+              ]),
+            }))}
+          />
+        </>
+      )}
       listNavigation={
         <div className="inventory-list-tabs" role="group" aria-label="Inventory list type" style={{ display: "flex", alignItems: "center", gap: 18 }}>
           {([

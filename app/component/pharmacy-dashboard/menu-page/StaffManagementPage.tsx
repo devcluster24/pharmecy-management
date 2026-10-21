@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
 import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
+import ExcelExportButton from "../components/ExcelExportButton";
 import { dashboardNavItems } from "../navigation";
 import { supabase } from "@/lib/supabase/client";
 import { confirmDelete } from "@/lib/confirmDelete";
@@ -366,8 +367,26 @@ export default function StaffManagementPage() {
                   Assign a role and menu access for each staff member. Active staff can sign in; suspended staff are blocked.
                 </p>
               </div>
-              {!isLoadingStaff && staffMembers.length > 0 && (
-                <input className="dashboard-staff-search" aria-label="Search staff" value={staffSearch} onChange={(event) => setStaffSearch(event.currentTarget.value)} placeholder="Search staff..." />
+              {!isLoadingStaff && (
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <ExcelExportButton
+                    fileName="Staff"
+                    sheets={[{
+                      name: "Staff",
+                      columns: ["Full Name", "Email", "Role", "Status", "Created At"],
+                      rows: filteredStaffMembers.map((member) => [
+                        member.full_name,
+                        member.email,
+                        member.staff_role,
+                        member.approval_status,
+                        member.created_at,
+                      ]),
+                    }]}
+                  />
+                  {staffMembers.length > 0 && (
+                    <input className="dashboard-staff-search" aria-label="Search staff" value={staffSearch} onChange={(event) => setStaffSearch(event.currentTarget.value)} placeholder="Search staff..." />
+                  )}
+                </div>
               )}
             </header>
             {staffError && <p role="alert" style={{ color: "#ad4b43", fontSize: 12 }}>{staffError}</p>}

@@ -1,13 +1,20 @@
+import { Text, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { Redirect } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View
+} from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 
 export default function DashboardLayout() {
+  const alert = useLocalizedAlert();
+  const t = useTranslate();
   const {
     session,
     isLoading,
@@ -41,7 +48,7 @@ export default function DashboardLayout() {
         try {
           await recordPharmacySessionActivity('logout');
         } catch (activityError) {
-          Alert.alert(
+          alert.alert(
             'Logout activity was not saved',
             activityError instanceof Error
               ? activityError.message
@@ -84,44 +91,44 @@ export default function DashboardLayout() {
       tintColor="#17664f"
       labelStyle={{ selected: { color: '#17664f' } }}>
       <NativeTabs.Trigger name="index" testID="dashboard-tab-home">
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t('Home')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
       </NativeTabs.Trigger>
 
       {dashboardRole === 'owner' ? (
         [
           <NativeTabs.Trigger key="overview" name="overview" testID="dashboard-tab-overview">
-            <NativeTabs.Trigger.Label>Overview</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Overview')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="chart.bar.fill" md="dashboard" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="inventory" name="inventory" testID="dashboard-tab-inventory">
-            <NativeTabs.Trigger.Label>Inventory</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Inventory')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="shippingbox.fill" md="inventory_2" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="supplier" name="supplier" testID="dashboard-tab-supplier">
-            <NativeTabs.Trigger.Label>Supplier</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Supplier')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="person.2.fill" md="people" />
           </NativeTabs.Trigger>,
         ]
       ) : (
         [
           <NativeTabs.Trigger key="purchase" name="purchase" testID="dashboard-tab-purchase">
-            <NativeTabs.Trigger.Label>Purchase</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Purchase')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="cart.fill" md="shopping_cart" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="sale" name="sale" testID="dashboard-tab-sale">
-            <NativeTabs.Trigger.Label>Sale</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Sale')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="creditcard.fill" md="point_of_sale" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="return" name="return" testID="dashboard-tab-return">
-            <NativeTabs.Trigger.Label>Return</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Label>{t('Return')}</NativeTabs.Trigger.Label>
             <NativeTabs.Trigger.Icon sf="arrow.uturn.backward" md="assignment_return" />
           </NativeTabs.Trigger>,
         ]
       )}
 
       <NativeTabs.Trigger name="menu" testID="dashboard-tab-menu">
-        <NativeTabs.Trigger.Label>Menu</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t('Menu')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="line.3.horizontal" md="menu" />
       </NativeTabs.Trigger>
     </NativeTabs>

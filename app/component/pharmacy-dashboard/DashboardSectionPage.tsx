@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import DashboardSectionInvoiceTable from "./DashboardSectionInvoiceTable";
 import Sidebar from "./components/Sidebar";
 import PharmacyProfileMenu from "./components/PharmacyProfileMenu";
+import DashboardLanguageMenu from "./components/DashboardLanguageMenu";
 import PharmacyDashboardBrand, { PharmacyDashboardStoreName } from "./components/PharmacyDashboardBrand";
 import { dashboardNavItems } from "./navigation";
 import { SubscriptionActionLock } from "../auth/PharmacySubscriptionExpiry";
@@ -72,6 +73,7 @@ export default function DashboardSectionPage({
       >
         <PharmacyDashboardBrand />
         <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
+          <DashboardLanguageMenu />
           <span className="dashboard-navbar-store-name"><PharmacyDashboardStoreName /></span>
           <PharmacyProfileMenu />
         </div>

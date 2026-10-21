@@ -1,3 +1,4 @@
+import { Text, TextInput } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -7,9 +8,7 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 

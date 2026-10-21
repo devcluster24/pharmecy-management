@@ -1,3 +1,4 @@
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { StatusBar } from 'expo-status-bar';
@@ -5,7 +6,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   AppState,
   ActivityIndicator,
   Modal,
@@ -13,12 +13,12 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { supabase } from '@/lib/supabase';
+import { getCurrencySymbol } from '@/lib/currency';
 import { useAuth } from '@/providers/AuthProvider';
 
 type PharmacyNotification = {
@@ -243,12 +243,12 @@ function getExpiredStockPrice(row: Record<string, unknown>, totalQuantity: numbe
 
   const stockPrice = totalQuantity * unitPrice;
   return Number.isFinite(stockPrice)
-    ? `৳${stockPrice.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `${getCurrencySymbol()}${stockPrice.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '-';
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString('en-BD', {
+  return `${getCurrencySymbol()}${amount.toLocaleString('en-BD', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -310,6 +310,7 @@ function formatNotificationTime(value: string) {
 }
 
 export default function OwnerHomeScreen() {
+  const alert = useLocalizedAlert();
   const { dashboardRole, ownerName, storeName, session } = useAuth();
   const router = useRouter();
   const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
@@ -620,7 +621,7 @@ export default function OwnerHomeScreen() {
 
   const handleClaimExtendedAccess = useCallback(async () => {
     if (!supabase) {
-      Alert.alert('Could not activate Extended Access', 'Supabase is not configured.');
+      alert.alert('Could not activate Extended Access', 'Supabase is not configured.');
       return;
     }
     setIsClaimingExtendedAccess(true);
@@ -629,25 +630,25 @@ export default function OwnerHomeScreen() {
       if (error) throw error;
       await loadCurrentSubscription();
     } catch (error) {
-      Alert.alert(
+      alert.alert(
         'Could not activate Extended Access',
         error instanceof Error ? error.message : 'Could not activate Extended Access.',
       );
     } finally {
       setIsClaimingExtendedAccess(false);
     }
-  }, [loadCurrentSubscription]);
+  }, [alert.alert, loadCurrentSubscription]);
 
   const handleSwipeDestroyExpiredBatch = useCallback((batchId: string) => {
     const batch = expiredBatches.find((item) => item.id === batchId);
     if (!batch || destroyingExpiredBatchId) return;
     const client = supabase;
     if (!client || !session) {
-      Alert.alert('Could not destroy batch', 'Sign in and check your Supabase connection, then try again.');
+      alert.alert('Could not destroy batch', 'Sign in and check your Supabase connection, then try again.');
       return;
     }
 
-    Alert.alert(
+    alert.alert(
       'Destroy expired batch?',
       `Destroy ${batch.brand}, batch ${batch.batchNumber} and record its value as a Destroy expense?`,
       [
@@ -665,7 +666,7 @@ export default function OwnerHomeScreen() {
               await loadExpiredBatches();
             })()
               .catch((error: unknown) => {
-                Alert.alert(
+                alert.alert(
                   'Could not destroy batch',
                   error instanceof Error ? error.message : 'Could not destroy this expired batch.',
                 );
@@ -675,7 +676,7 @@ export default function OwnerHomeScreen() {
         },
       ],
     );
-  }, [destroyingExpiredBatchId, expiredBatches, loadExpiredBatches, session]);
+  }, [alert.alert, destroyingExpiredBatchId, expiredBatches, loadExpiredBatches, session]);
 
   useEffect(() => {
     void loadNotifications();
@@ -1191,33 +1192,30 @@ export default function OwnerHomeScreen() {
                     if (item.id === 'subscription') void loadCurrentSubscription();
                   }}
                   style={styles.activityTab}>
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.activityTabText,
-                      selectedActivityMenu === item.id && styles.activityTabTextSelected,
-                    ]}>
-                    {item.label}
-                  </Text>
+                  <View style={styles.activityTabLabel}>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.activityTabText,
+                        selectedActivityMenu === item.id && styles.activityTabTextSelected,
+                      ]}>
+                      {item.label}
+                    </Text>
+                    {item.id === 'latest-update' ? (
+                      <View
+                        style={[
+                          styles.activityLiveDot,
+                          isActivitiesRealtimeConnected && styles.activityLiveDotConnected,
+                        ]}
+                      />
+                    ) : null}
+                  </View>
                   {selectedActivityMenu === item.id ? (
                     <View style={styles.activityTabIndicator} />
                   ) : null}
                 </Pressable>
               ))}
             </View>
-            {selectedActivityMenu === 'latest-update' ? (
-              <View style={styles.activityLiveStatus}>
-                <View
-                  style={[
-                    styles.activityLiveDot,
-                    isActivitiesRealtimeConnected && styles.activityLiveDotConnected,
-                  ]}
-                />
-                <Text style={styles.activityLiveText}>
-                  {isActivitiesRealtimeConnected ? 'Live' : 'Connecting'}
-                </Text>
-              </View>
-            ) : null}
           </View>
 
           {selectedActivityMenu === 'latest-update' ? (
@@ -1837,6 +1835,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
+  activityTabLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   activityTabText: {
     color: '#758078',
     fontSize: 11,
@@ -1855,13 +1858,6 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     backgroundColor: '#17664f',
   },
-  activityLiveStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 3,
-    paddingBottom: 2,
-  },
   activityLiveDot: {
     width: 7,
     height: 7,
@@ -1870,11 +1866,6 @@ const styles = StyleSheet.create({
   },
   activityLiveDotConnected: {
     backgroundColor: '#2a9a6c',
-  },
-  activityLiveText: {
-    color: '#758078',
-    fontSize: 9,
-    fontWeight: '700',
   },
   activityContent: {
     paddingTop: 12,

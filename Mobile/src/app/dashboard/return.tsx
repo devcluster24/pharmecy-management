@@ -1,3 +1,4 @@
+import { Text, TextInput } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -5,13 +6,12 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -159,7 +159,7 @@ function parseReturns(value: unknown): ReturnRecord[] {
 }
 
 function money(value: number) {
-  return `৳${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function returnInvoice(invoice: string) {

@@ -2,7 +2,9 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useSyncExternalStore } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage";
+import ExcelExportButton from "../components/ExcelExportButton";
 import DashboardSectionInvoiceTable from "../DashboardSectionInvoiceTable";
 import { confirmDelete } from "@/lib/confirmDelete";
 import {
@@ -55,7 +57,7 @@ function todayInputValue() {
 }
 
 function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${getCurrencySymbol()}${amount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatExpenseDate(date: string) {
@@ -212,7 +214,23 @@ export default function ExpensesPage() {
                 <h2 style={{ margin: 0, color: "#26352f", fontSize: 15 }}>Expense list</h2>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 10 }}>Search by date, category, description, payment method, or amount.</p>
               </div>
-              <input className="dashboard-expenses-search" aria-label="Search expenses" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setCurrentPage(1); }} placeholder="Search expenses..." style={{ ...inputStyle, width: 240, maxWidth: "100%" }} />
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <ExcelExportButton
+                  fileName="Expenses"
+                  sheets={[{
+                    name: "Expenses",
+                    columns: ["Date", "Category", "Description", "Payment Method", "Amount"],
+                    rows: filteredExpenses.map((expense) => [
+                      expense.date,
+                      expense.category,
+                      expense.description,
+                      expense.paymentMethod,
+                      expense.amount,
+                    ]),
+                  }]}
+                />
+                <input className="dashboard-expenses-search" aria-label="Search expenses" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setCurrentPage(1); }} placeholder="Search expenses..." style={{ ...inputStyle, width: 240, maxWidth: "100%" }} />
+              </div>
             </header>
             {actionError && <p role="alert" style={{ margin: 0, padding: "10px 16px", color: "#ad4b43", fontSize: 11 }}>{actionError}</p>}
             <div className="dashboard-expenses-table-scroll dashboard-invoice-desktop-table" style={{ overflowX: "auto" }}>

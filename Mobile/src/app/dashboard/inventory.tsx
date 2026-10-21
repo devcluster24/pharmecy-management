@@ -1,16 +1,16 @@
+import { Text, TextInput } from '@/providers/LanguageProvider';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -178,7 +178,7 @@ function formatMoney(value?: string) {
   if (value === undefined || !value.trim() || value.trim() === '-') return '—';
   const amount = Number(value);
   return Number.isFinite(amount)
-    ? `৳${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `${getCurrencySymbol()}${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : value;
 }
 
@@ -203,7 +203,7 @@ function getStockValue(row: InventoryBatch, totalQuantity: number | null) {
   }
   const amount = totalQuantity * unitPrice;
   return Number.isFinite(amount)
-    ? `৳${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `${getCurrencySymbol()}${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '—';
 }
 

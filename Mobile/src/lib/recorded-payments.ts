@@ -1,3 +1,5 @@
+import { getCurrencySymbol } from '@/lib/currency';
+
 export const PAYMENT_COLORS = ['#27a879', '#dc6695', '#4387ad', '#9a6a11'];
 export const DAILY_SUMMARY_DAYS = 10;
 
@@ -13,7 +15,7 @@ export type DailyPaymentGroup = {
 };
 
 export function formatCurrency(amount: number) {
-  return `৳${amount.toLocaleString('en-BD', {
+  return `${getCurrencySymbol()}${amount.toLocaleString('en-BD', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

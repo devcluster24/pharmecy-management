@@ -1,11 +1,11 @@
+import { Text } from '@/providers/LanguageProvider';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 

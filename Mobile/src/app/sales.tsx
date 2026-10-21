@@ -1,17 +1,15 @@
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   Pressable,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -256,6 +254,7 @@ function roundCurrency(amount: number) {
 }
 
 export default function SalesScreen() {
+  const alert = useLocalizedAlert();
   const {
     dashboardRole,
     isLoading: isAuthLoading,
@@ -703,7 +702,7 @@ export default function SalesScreen() {
         await FileSystem.writeAsStringAsync(fileUri, pdf.base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        Alert.alert('Invoice downloaded', `${savedInvoice.invoice}.pdf`);
+        alert.alert('Invoice downloaded', `${savedInvoice.invoice}.pdf`);
         return;
       }
 
@@ -722,7 +721,7 @@ export default function SalesScreen() {
         dialogTitle: `Save ${savedInvoice.invoice}.pdf`,
       });
     } catch (downloadError) {
-      Alert.alert(
+      alert.alert(
         'Could not download invoice',
         downloadError instanceof Error ? downloadError.message : 'Please try downloading the PDF again.',
       );
@@ -737,7 +736,7 @@ export default function SalesScreen() {
     try {
       await Print.printAsync({ html: getInvoiceHtml(savedInvoice, storeName) });
     } catch (printError) {
-      Alert.alert(
+      alert.alert(
         'Could not print invoice',
         printError instanceof Error ? printError.message : 'Please try printing the invoice again.',
       );

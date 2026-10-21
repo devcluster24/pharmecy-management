@@ -1,6 +1,12 @@
+import { Text } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  View
+} from 'react-native';
 
 export default function DashboardSubpageHeader({
   subtitle,
