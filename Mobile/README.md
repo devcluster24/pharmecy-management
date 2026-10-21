@@ -10,7 +10,7 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Configure Supabase by creating `Mobile/.env.local` from `Mobile/.env.example`, then set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` to the values from your Supabase project.
+2. Configure the app by creating `Mobile/.env.local` from `Mobile/.env.example`. Set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` to the values from your Supabase project. Set `EXPO_PUBLIC_WEB_APP_URL` to the deployed web dashboard origin so native staff signup links point to the web signup flow.
 
 3. Start the app
 

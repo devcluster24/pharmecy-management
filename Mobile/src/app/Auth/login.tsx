@@ -82,11 +82,11 @@ export default function LoginScreen() {
         </View>
       }>
       <View style={authStyles.form}>
-        {(authError || supabaseConfigError) && (
+        {authError || supabaseConfigError ? (
           <Text style={[authStyles.feedback, authStyles.errorFeedback]}>
             {authError || supabaseConfigError}
           </Text>
-        )}
+        ) : null}
         <AuthField
           label="Email address"
           value={email}

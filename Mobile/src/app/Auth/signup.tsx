@@ -110,11 +110,11 @@ export default function SignupScreen() {
         </View>
       }>
       <View style={authStyles.form}>
-        {(authError || supabaseConfigError) && (
+        {authError || supabaseConfigError ? (
           <Text style={[authStyles.feedback, authStyles.errorFeedback]}>
             {authError || supabaseConfigError}
           </Text>
-        )}
+        ) : null}
         <AuthField
           label="Full name"
           value={fullName}
