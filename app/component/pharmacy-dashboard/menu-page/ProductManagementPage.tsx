@@ -1033,31 +1033,31 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
               <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Import product data</h2>
               <p style={{ margin: "5px 0 0", color: "#6a7973", fontSize: 11 }}>Import one manufacturer or add every product from the shared catalog to your pharmacy list.</p>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", padding: "14px 18px" }}>
+            <div style={{ display: "flex", alignItems: "end", gap: 9, flexWrap: "nowrap", overflowX: "auto", padding: "14px 18px" }}>
               {!adminMode && (
                 <>
-                  <label style={{ display: "grid", gap: 5, color: "#526158", fontSize: 11 }}>
+                  <label style={{ display: "grid", flex: "0 0 auto", gap: 5, color: "#526158", fontSize: 11 }}>
                     Manufacturer / company
-                    <select aria-label="Select manufacturer or company" value={effectiveSelectedCompany} onChange={(event) => setSelectedCompany(event.target.value)} disabled={isLoadingCompanies || isImporting || !availableCompanies.length} style={{ minWidth: 260, maxWidth: "min(560px, 80vw)", border: "1px solid #dce5df", borderRadius: 6, background: "#fff", padding: "9px 10px", color: "#26352f", fontSize: 12 }}>
+                    <select aria-label="Select manufacturer or company" value={effectiveSelectedCompany} onChange={(event) => setSelectedCompany(event.target.value)} disabled={isLoadingCompanies || isImporting || !availableCompanies.length} style={{ width: 280, maxWidth: "min(32vw, 560px)", minWidth: 220, border: "1px solid #dce5df", borderRadius: 6, background: "#fff", padding: "9px 10px", color: "#26352f", fontSize: 12 }}>
                       <option value="">{isLoadingCompanies ? "Loading manufacturers..." : availableCompanies.length ? "Select manufacturer" : "No new products available"}</option>
                       {availableCompanies.map((company) => <option key={company.name} value={company.name}>{company.name} ({company.count} products)</option>)}
                     </select>
                   </label>
-                  <button type="button" disabled={isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany} onClick={() => void importCatalog(effectiveSelectedCompany)} style={{ alignSelf: "end", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "not-allowed" : "pointer" }}>{isImporting ? "Importing..." : "Import company products"}</button>
+                  <button type="button" disabled={isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany} onClick={() => void importCatalog(effectiveSelectedCompany)} style={{ flex: "0 0 auto", alignSelf: "end", whiteSpace: "nowrap", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "not-allowed" : "pointer" }}>{isImporting ? "Importing..." : "Import company products"}</button>
                 </>
               )}
               {!adminMode && (
                 <button
                   type="button"
+                  style={{ flex: "0 0 auto", alignSelf: "end", whiteSpace: "nowrap", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "not-allowed" : "pointer" }}
                   disabled={isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0}
                   onClick={() => void importCatalog()}
-                  style={{ alignSelf: "end", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "not-allowed" : "pointer" }}
                 >
                   {isImporting ? "Importing..." : "All Data Import"}
                 </button>
               )}
               {!adminMode && (
-                <div style={{ display: "grid", gap: 3, alignSelf: "end", minWidth: 170, marginLeft: 8 }}>
+                <div style={{ display: "flex", flex: "0 0 auto", alignItems: "center", alignSelf: "end", minWidth: 120, marginLeft: 4 }}>
                   <button
                     type="button"
                     role="switch"
@@ -1072,9 +1072,10 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                       border: 0,
                       background: "transparent",
                       color: "#34453b",
-                      padding: "8px 0",
+                      padding: "8px 4px",
                       fontSize: 12,
                       fontWeight: 650,
+                      whiteSpace: "nowrap",
                       cursor: isSavingAutoImport || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer",
                       opacity: isSavingAutoImport || !storageReady || !pharmacyUserId ? 0.6 : 1,
                     }}>
@@ -1101,9 +1102,6 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
                     </span>
                     {isSavingAutoImport ? "Saving..." : "Auto Import"}
                   </button>
-                  <span style={{ color: "#718078", fontSize: 10, lineHeight: 14 }}>
-                    Automatically import new shared catalog products.
-                  </span>
                 </div>
               )}
             </div>
