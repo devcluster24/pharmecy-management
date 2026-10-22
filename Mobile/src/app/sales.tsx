@@ -1,5 +1,8 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
+import TextRecognition from '@react-native-ml-kit/text-recognition';
+import * as ImagePicker from 'expo-image-picker';
+import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,6 +22,11 @@ import * as Sharing from 'expo-sharing';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
+import {
+  loadInvoiceTemplateSettings,
+  type InvoiceFieldKey,
+  type InvoiceTemplateItem,
+} from '@/lib/invoice-template-settings';
 import { useAuth } from '@/providers/AuthProvider';
 
 const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
@@ -100,7 +108,54 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
-function getInvoiceHtml(invoice: SaleInvoice, storeName: string) {
+function getInvoiceHtml(
+  invoice: SaleInvoice,
+  storeName: string,
+  settings: Awaited<ReturnType<typeof loadInvoiceTemplateSettings>>,
+) {
+  const template = settings.templates.find((item) => item.id === settings.activeTemplateId);
+  if (!template) throw new Error('The active invoice template is not available.');
+  const colors = {
+    classic: { accent: '#17704e', pale: '#eff7f2', ink: '#26352f', muted: '#526158' },
+    modern: { accent: '#247a78', pale: '#ebf6f5', ink: '#1f3133', muted: '#4e6363' },
+    compact: { accent: '#566fa6', pale: '#eff2fa', ink: '#273043', muted: '#566075' },
+    elegant: { accent: '#98714d', pale: '#f8f3ed', ink: '#382f28', muted: '#685b4d' },
+  }[template.style];
+  const date = new Date(invoice.createdAt).toLocaleString('en-BD');
+  const fieldValues: Record<InvoiceFieldKey, string> = {
+    storeName: storeName || 'Pharmacy Cluster',
+    invoiceNumber: invoice.invoice,
+    dateTime: date,
+    customer: invoice.customer,
+    phone: invoice.phone ?? '',
+    paymentMethod: invoice.paymentMethodName,
+    paymentStatus: invoice.payment,
+  };
+  function getItemValue(item: InvoiceTemplateItem) {
+    if (item.type === 'text') return item.value.trim();
+    const value = fieldValues[item.key];
+    return item.key === 'storeName' ? value : `${item.label}: ${value}`;
+  }
+  const leftHeader = template.header
+    .filter((item) => (item.align ?? 'left') === 'left')
+    .map(getItemValue)
+    .filter(Boolean);
+  const rightHeader = template.header
+    .filter((item) => item.align === 'right')
+    .map(getItemValue)
+    .filter(Boolean);
+  const headerRows = Array.from(
+    { length: Math.max(leftHeader.length, rightHeader.length) },
+    (_, index) => `<div class="header-row">
+      <span>${escapeHtml(leftHeader[index] ?? '')}</span>
+      <span class="right">${escapeHtml(rightHeader[index] ?? '')}</span>
+    </div>`,
+  ).join('');
+  const footerRows = template.footer
+    .map(getItemValue)
+    .filter(Boolean)
+    .map((value) => `<div>${escapeHtml(value)}</div>`)
+    .join('');
   const rows = invoice.lines.map((line) => `
     <tr>
       <td>${escapeHtml(line.brand)}<small>${escapeHtml(line.details)} · Batch ${escapeHtml(line.batchNumber)}</small></td>
@@ -108,36 +163,60 @@ function getInvoiceHtml(invoice: SaleInvoice, storeName: string) {
       <td class="number">${escapeHtml(formatCurrency(line.unitPrice))}</td>
       <td class="number">${escapeHtml(formatCurrency(line.totalPrice))}</td>
     </tr>`).join('');
-  const date = new Date(invoice.createdAt).toLocaleString('en-BD');
+  const hasDue = invoice.dueAmount > 0;
+  const seal = hasDue
+    ? settings.seals.due
+      ? '<span class="seal due">DUE</span>'
+      : ''
+    : settings.seals.paid
+      ? '<span class="seal paid">PAID</span>'
+      : '';
+  const signature = settings.signature.type === 'image' && settings.signature.imageDataUrl
+    ? `<img class="signature-image" src="${escapeHtml(settings.signature.imageDataUrl)}" alt="Signature">`
+    : settings.signature.text.trim()
+      ? `<div class="signature-text">${escapeHtml(settings.signature.text.trim())}</div>`
+      : '';
+  const pageSize = settings.pageSize;
+  const pageWidth = pageSize.format === 'a4' ? 210 : pageSize.format === 'a5' ? 148 : pageSize.widthMm;
+  const pageHeight = pageSize.format === 'a4' ? 297 : pageSize.format === 'a5' ? 210 : pageSize.heightMm;
+  const corner = template.style === 'modern'
+    ? `<span class="modern-corner" style="border-top-color:${colors.accent}"></span>`
+    : template.style === 'elegant'
+      ? `<span class="elegant-mark" style="border-color:${colors.accent}"></span>`
+      : '';
+  const compactEdge = template.style === 'compact' ? `border-left:4px solid ${colors.accent};` : '';
   return `<!doctype html>
     <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+      @page { size: ${pageWidth}mm ${pageHeight}mm; margin: 12mm; }
       * { box-sizing: border-box; }
-      body { color: #203128; font: 14px Arial, sans-serif; margin: 0 auto; max-width: 760px; padding: 28px; }
-      header { border-bottom: 2px solid #17664f; padding-bottom: 16px; }
-      h1 { color: #145642; font-size: 24px; margin: 0 0 6px; }
-      .muted, small { color: #6c7b73; }
-      .invoice-no { color: #17664f; font-size: 18px; font-weight: bold; margin-top: 20px; }
-      .section { border-bottom: 1px dashed #cbd5ce; padding: 14px 0; }
+      body { color: ${colors.ink}; font: 14px Arial, sans-serif; margin: 0 auto; max-width: 760px; padding: 0; position: relative; ${compactEdge} }
+      header { border-bottom: 2px solid ${colors.accent}; padding: 0 0 12px; position: relative; }
+      h1 { color: ${colors.accent}; font-size: 24px; margin: 0 0 6px; }
+      .muted, small { color: ${colors.muted}; }
+      .header-row { display:flex; justify-content:space-between; gap:12px; padding-top:5px; color:${colors.muted}; font-size:11px; }
+      .right { text-align:right; }
+      .section { border-bottom: 1px dashed #cbd5ce; padding: 12px 0; }
       .row { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; }
       table { border-collapse: collapse; margin-top: 14px; width: 100%; }
-      th, td { border-bottom: 1px solid #e3e9e4; padding: 9px 5px; text-align: left; }
-      th { color: #65746b; font-size: 11px; }
+      th, td { border-bottom: 1px solid #e3e9e4; padding: 8px 5px; text-align: left; }
+      th { background:${colors.pale}; color: ${colors.accent}; font-size: 11px; }
       .number { text-align: right; white-space: nowrap; }
       td small { display: block; font-size: 10px; margin-top: 4px; }
-      .total { color: #145642; font-size: 18px; font-weight: bold; }
-      footer { color: #6c7b73; font-size: 11px; margin-top: 20px; text-align: center; }
+      .total { color: ${colors.accent}; font-size: 18px; font-weight: bold; }
+      .bottom { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-top:18px; }
+      .seal { display:inline-block; border:2px solid; border-radius:10px; padding:5px 12px; font-weight:900; font-size:18px; transform:rotate(-8deg); }
+      .paid { color:#c91625; border-color:#c91625; } .due { color:#d45232; border-color:#d45232; }
+      .signature { min-width:150px; margin-top:14px; color:${colors.muted}; font-size:10px; }
+      .signature-text { color:${colors.ink}; font:italic 16px Georgia,serif; margin-bottom:4px; }
+      .signature-image { display:block; object-fit:contain; object-position:left bottom; width:140px; height:42px; margin-bottom:4px; }
+      .signature-line { border-top:1px solid #8e9992; padding-top:4px; }
+      footer { color: ${colors.muted}; font-size: 11px; margin-top: 12px; text-align: center; }
+      .modern-corner { position:absolute; top:-12px; right:-12px; width:0; height:0; border-top:28px solid; border-left:28px solid transparent; }
+      .elegant-mark { position:absolute; top:0; right:0; width:12px; height:12px; border:1px solid; border-radius:50%; }
     </style></head><body>
-      <header><h1>${escapeHtml(storeName || 'Pharmacy Cluster')}</h1>
-        <div class="muted">Sales invoice</div></header>
-      <div class="invoice-no">${escapeHtml(invoice.invoice)}</div>
-      <section class="section">
-        <div class="row"><span class="muted">Customer</span><strong>${escapeHtml(invoice.customer)}</strong></div>
-        ${invoice.phone ? `<div class="row"><span class="muted">Phone</span><span>${escapeHtml(invoice.phone)}</span></div>` : ''}
-        <div class="row"><span class="muted">Date &amp; time</span><span>${escapeHtml(date)}</span></div>
-        <div class="row"><span class="muted">Payment method</span><span>${escapeHtml(invoice.paymentMethodName)}</span></div>
-        <div class="row"><span class="muted">Payment status</span><strong>${escapeHtml(invoice.payment)}</strong></div>
-      </section>
+      <header>${corner}<h1>SALES INVOICE</h1>
+        <div class="muted">Date &amp; time: ${escapeHtml(date)}</div>${headerRows}</header>
       <table><thead><tr><th>Item</th><th class="number">Qty</th><th class="number">Price</th><th class="number">Amount</th></tr></thead>
         <tbody>${rows}</tbody></table>
       <section class="section">
@@ -148,8 +227,10 @@ function getInvoiceHtml(invoice: SaleInvoice, storeName: string) {
         <div class="row total"><span>Total</span><span>${escapeHtml(formatCurrency(invoice.amount))}</span></div>
         <div class="row"><span>Paid</span><span>${escapeHtml(formatCurrency(invoice.paidAmount))}</span></div>
         <div class="row"><span>Due</span><span>${escapeHtml(formatCurrency(invoice.dueAmount))}</span></div>
+        <div>${seal}</div>
       </section>
-      <footer>Thank you for your purchase.</footer>
+      ${signature ? `<div class="bottom"><div class="signature">${signature}<div class="signature-line">Signature</div></div></div>` : ''}
+      <footer>${footerRows}</footer>
     </body></html>`;
 }
 
@@ -283,6 +364,7 @@ export default function SalesScreen() {
   const [loadError, setLoadError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const salesScrollRef = useRef<ScrollView>(null);
@@ -438,6 +520,74 @@ export default function SalesScreen() {
       || row.genericName.toLocaleLowerCase().includes(query),
     ).slice(0, SEARCH_RESULT_LIMIT);
   }, [availableInventory, searchValue]);
+
+  async function scanMedicine() {
+    if (Platform.OS === 'web') {
+      alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
+      return;
+    }
+
+    setIsScanning(true);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        alert.alert('Camera permission required', 'Allow camera access to scan a medicine label.');
+        return;
+      }
+
+      const capture = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+      });
+      if (capture.canceled || !capture.assets[0]) return;
+
+      const recognized = await TextRecognition.recognize(capture.assets[0].uri);
+      const terms = [...new Set(
+        recognized.text.toLocaleLowerCase().match(/[a-z0-9]+/g) ?? [],
+      )].filter((term) => term.length >= 3);
+      if (!terms.length) {
+        alert.alert('No medicine text found', 'Try scanning the medicine name or generic name more clearly.');
+        return;
+      }
+
+      const matches = availableInventory
+        .map((batch) => {
+          const brand = batch.brand.toLocaleLowerCase();
+          const generic = batch.genericName.toLocaleLowerCase();
+          const details = [batch.strength, batch.dosageForm, batch.packSize]
+            .join(' ')
+            .toLocaleLowerCase();
+          const score = terms.reduce((total, term) => total
+            + (brand.includes(term) ? 3 : 0)
+            + (generic.includes(term) ? 2 : 0)
+            + (details.includes(term) ? 1 : 0), 0);
+          return { batch, score };
+        })
+        .filter((match) => match.score > 0)
+        .sort((left, right) => right.score - left.score);
+
+      if (!matches.length) {
+        setSearchValue(terms.join(' '));
+        alert.alert(
+          'No matching stock found',
+          'The scanned text did not match available inventory. Check the search results or enter the medicine name manually.',
+        );
+        return;
+      }
+
+      setSearchValue(matches[0].batch.brand || matches[0].batch.genericName);
+      setError('');
+      Keyboard.dismiss();
+    } catch (scanError) {
+      alert.alert(
+        'Medicine scan failed',
+        scanError instanceof Error ? scanError.message : 'Could not read text from this image.',
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
   const selectedRows = lines.map((line) => ({
     line,
     batch: inventory.find((row) => row.id === line.batchId),
@@ -686,7 +836,9 @@ export default function SalesScreen() {
     if (!savedInvoice || isSaving) return;
     setIsSaving(true);
     try {
-      const html = getInvoiceHtml(savedInvoice, storeName);
+      if (!session) throw new Error('Sign in to load your invoice setup.');
+      const invoiceSettings = await loadInvoiceTemplateSettings(session.user.id);
+      const html = getInvoiceHtml(savedInvoice, storeName, invoiceSettings);
       const pdf = await Print.printToFileAsync({ html, base64: true });
       if (Platform.OS === 'android') {
         const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
@@ -734,7 +886,9 @@ export default function SalesScreen() {
     if (!savedInvoice || isSaving) return;
     setIsSaving(true);
     try {
-      await Print.printAsync({ html: getInvoiceHtml(savedInvoice, storeName) });
+      if (!session) throw new Error('Sign in to load your invoice setup.');
+      const invoiceSettings = await loadInvoiceTemplateSettings(session.user.id);
+      await Print.printAsync({ html: getInvoiceHtml(savedInvoice, storeName, invoiceSettings) });
     } catch (printError) {
       alert.alert(
         'Could not print invoice',
@@ -849,7 +1003,6 @@ export default function SalesScreen() {
         contentContainerStyle={[
           styles.content,
           keyboardHeight > 0 && { paddingBottom: keyboardHeight + 40 },
-          !isBillSummaryOpen && lines.length > 0 && styles.contentWithTotalBar,
         ]}
         keyboardShouldPersistTaps="handled"
         onScroll={(event) => {
@@ -880,21 +1033,40 @@ export default function SalesScreen() {
             {!isBillSummaryOpen ? (
               <>
                 <Text style={styles.fieldLabel}>Find medicine</Text>
-            <TextInput
-              ref={(input) => {
-                if (input) inputRefs.current.set('inventorySearch', input);
-                else inputRefs.current.delete('inventorySearch');
-              }}
-              accessibilityLabel="Search inventory brand or generic name"
-              autoCapitalize="none"
-              onChangeText={setSearchValue}
-              placeholder={`Search ${availableInventory.length} inventory batches`}
-              placeholderTextColor="#87928d"
-              onFocus={() => focusSaleInput('inventorySearch')}
-              returnKeyType="search"
-              style={styles.searchInput}
-              value={searchValue}
-            />
+                <View style={styles.searchRow}>
+                  <TextInput
+                    ref={(input) => {
+                      if (input) inputRefs.current.set('inventorySearch', input);
+                      else inputRefs.current.delete('inventorySearch');
+                    }}
+                    accessibilityLabel="Search inventory brand or generic name"
+                    autoCapitalize="none"
+                    onChangeText={setSearchValue}
+                    placeholder={`Search ${availableInventory.length} inventory batches`}
+                    placeholderTextColor="#87928d"
+                    onFocus={() => focusSaleInput('inventorySearch')}
+                    returnKeyType="search"
+                    style={styles.searchInput}
+                    value={searchValue}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Scan medicine"
+                    accessibilityState={{ disabled: isScanning }}
+                    disabled={isScanning}
+                    onPress={() => void scanMedicine()}
+                    style={[styles.scanButton, isScanning && styles.buttonDisabled]}>
+                    {isScanning ? (
+                      <ActivityIndicator color="#17664f" />
+                    ) : (
+                      <SymbolView
+                        name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                        size={20}
+                        tintColor="#17664f"
+                      />
+                    )}
+                  </Pressable>
+                </View>
             {searchValue.trim() ? (
               <View style={styles.searchResults}>
                 {filteredInventory.length > 0 ? filteredInventory.map((batch) => (
@@ -1168,18 +1340,17 @@ export default function SalesScreen() {
       {!isBillSummaryOpen && !loadError && !isLoading && lines.length > 0 ? (
         <View style={styles.totalBar}>
           <View style={styles.totalBarText}>
-            <Text style={styles.totalBarLabel}>Total Amount</Text>
+            <Text style={styles.totalBarLabel}>Total Price</Text>
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.totalBarAmount}>
               {formatCurrency(roundedTotal)}
             </Text>
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={isBillSummaryOpen ? 'Hide bill summary' : 'Show bill summary'}
-            accessibilityState={{ expanded: isBillSummaryOpen }}
+            accessibilityLabel="Open bill summary"
             onPress={() => setIsBillSummaryOpen(true)}
             style={styles.totalBarArrow}>
-            <Text style={styles.totalBarArrowText}>{isBillSummaryOpen ? '↑' : '→'}</Text>
+            <Text style={styles.totalBarArrowText}>→</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1245,7 +1416,6 @@ const styles = StyleSheet.create({
   pageContent: { flex: 1, backgroundColor: '#f4f8f5' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f4f8f5' },
   content: { width: '100%', maxWidth: 680, alignSelf: 'center', padding: 18, paddingBottom: 32 },
-  contentWithTotalBar: { paddingBottom: 20 },
   receiptContent: {
     width: '100%',
     maxWidth: 680,
@@ -1296,7 +1466,9 @@ const styles = StyleSheet.create({
   retryButton: { alignSelf: 'flex-start', marginTop: 10 },
   retryButtonText: { color: '#17664f', fontSize: 13, fontWeight: '800' },
   fieldLabel: { marginTop: 10, marginBottom: 6, color: '#526158', fontSize: 12, fontWeight: '700' },
-  searchInput: { minHeight: 46, paddingHorizontal: 13, borderWidth: 1, borderColor: '#dce5df', borderRadius: 10, backgroundColor: '#fff', color: '#203128', fontSize: 13 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchInput: { flex: 1, minHeight: 46, paddingHorizontal: 13, borderWidth: 1, borderColor: '#dce5df', borderRadius: 10, backgroundColor: '#fff', color: '#203128', fontSize: 13 },
+  scanButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 10, backgroundColor: '#eef8f2' },
   searchResults: { marginTop: 6, overflow: 'hidden', borderWidth: 1, borderColor: '#e3e9e4', borderRadius: 10, backgroundColor: '#fff' },
   productResult: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, borderBottomWidth: 1, borderBottomColor: '#edf0ed' },
   productResultInfo: { flex: 1 },

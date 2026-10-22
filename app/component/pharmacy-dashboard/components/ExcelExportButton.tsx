@@ -144,12 +144,28 @@ export default function ExcelExportButton({
   }
 
   return (
-    <button type="button" disabled={disabled || isExporting} onClick={() => void exportWorkbook()} style={{
+    <button
+      className="dashboard-excel-export-button"
+      type="button"
+      aria-label={isExporting ? "Preparing Excel export" : "Export Excel"}
+      title={isExporting ? "Preparing Excel export" : "Export Excel"}
+      disabled={disabled || isExporting}
+      onClick={() => void exportWorkbook()}
+      style={{
       ...exportButtonStyle,
       opacity: disabled || isExporting ? 0.55 : 1,
       cursor: disabled || isExporting ? "not-allowed" : "pointer",
-    }}>
-      {isExporting ? "Preparing..." : "Export Excel"}
+      }}
+    >
+      <span className="dashboard-excel-export-label">{isExporting ? "Preparing..." : "Export Excel"}</span>
+      <svg
+        className="dashboard-excel-export-icon"
+        aria-hidden="true"
+        viewBox="0 0 20 20"
+        fill="none"
+      >
+        <path d="M10 2.5v9m0 0 3.5-3.5M10 11.5 6.5 8M3.5 13.5v2a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      </svg>
     </button>
   );
 }

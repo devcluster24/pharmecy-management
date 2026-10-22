@@ -128,7 +128,7 @@ export default function SubscriptionPaymentScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (paymentError) throw paymentError;
-      router.replace('/dashboard');
+      router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } });
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : 'Could not complete subscription payment.');
       setIsSubmitting(false);

@@ -561,12 +561,12 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
 
   if (isAddPage) {
     return (
-      <SafeAreaView style={styles.screen}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.screen}>
         <DashboardSubpageHeader
           subtitle="Add New Product"
           onBack={() => router.replace('/dashboard/menu/product-management')}
         />
-        <ScrollView contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.pageBody} contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
           <View style={styles.sectionHeader}>
             <Text style={styles.heading}>Add New Product</Text>
             <Text style={styles.helperText}>Add product details and pricing to your pharmacy list.</Text>
@@ -599,9 +599,9 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.screen}>
       <DashboardSubpageHeader subtitle="Product Management" />
-      <ScrollView contentContainerStyle={styles.pageContent}>
+      <ScrollView style={styles.pageBody} contentContainerStyle={styles.pageContent}>
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.heading}>Product Management</Text>
@@ -750,6 +750,10 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
 
 const styles = StyleSheet.create({
   screen: {
+    flex: 1,
+    backgroundColor: '#145642',
+  },
+  pageBody: {
     flex: 1,
     backgroundColor: '#f5f7f5',
   },

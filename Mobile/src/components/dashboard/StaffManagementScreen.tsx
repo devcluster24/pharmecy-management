@@ -281,12 +281,12 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
   if (actionPage) {
     const isPermissionPage = action === 'permissions';
     return (
-      <SafeAreaView style={styles.screen}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.screen}>
         <DashboardSubpageHeader
           subtitle={isPermissionPage ? 'Staff Permissions' : 'Edit Staff'}
           onBack={() => router.replace('/dashboard/menu/staff-management')}
         />
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView style={styles.pageBody} contentContainerStyle={styles.content}>
           {isLoading ? (
             <ActivityIndicator color="#17664f" />
           ) : !selectedMember ? (
@@ -383,9 +383,9 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.screen}>
       <DashboardSubpageHeader subtitle="Staff Management" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView style={styles.pageBody} contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <Text style={styles.heading}>Create staff signup link</Text>
           <Text style={styles.helperText}>
@@ -504,6 +504,10 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
 
 const styles = StyleSheet.create({
   screen: {
+    flex: 1,
+    backgroundColor: '#145642',
+  },
+  pageBody: {
     flex: 1,
     backgroundColor: '#f5f7f5',
   },

@@ -1049,7 +1049,7 @@ export default function PurchaseScreen() {
   return (
     <SafeAreaView style={styles.page}>
       <DashboardSubpageHeader subtitle="Purchase" onBack={() => router.replace('/dashboard')} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.pageContent} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.titleRow}>
           <View style={styles.titleGroup}>
             <Text style={styles.title}>Purchase</Text>
@@ -1383,14 +1383,14 @@ export default function PurchaseScreen() {
                 ))}
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Open Bill Summary"
+                  accessibilityLabel="Open purchase summary"
                   onPress={() => {
                     setReceiveStep('summary');
                     setSaveError('');
                   }}
                   style={styles.receiveTotalLink}>
                   <View style={styles.lineText}>
-                    <Text style={styles.receiveTotalLabel}>Total Purchase Price</Text>
+                    <Text style={styles.receiveTotalLabel}>Total Amount</Text>
                     <Text style={styles.receiveTotalAmount}>{money(batchTotal)}</Text>
                   </View>
                   <Text style={styles.receiveTotalArrow}>›</Text>
@@ -1688,7 +1688,8 @@ function SummaryRow({
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f4f6f2' },
+  page: { flex: 1, backgroundColor: '#145642' },
+  pageContent: { flex: 1, backgroundColor: '#f4f6f2' },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f4f6f2' },
   content: { padding: 16, paddingBottom: 36, gap: 14 },
   titleRow: { flexDirection: 'row', alignItems: 'center' },

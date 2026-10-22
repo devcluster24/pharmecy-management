@@ -26,9 +26,12 @@ import { supabase, supabaseConfigError } from '@/lib/supabase';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
 import BackupSettingsScreen from '@/components/dashboard/BackupSettingsScreen';
+import InvoiceSetupScreen from '@/components/dashboard/InvoiceSetupScreen';
 import InventorySettingsScreen from '@/components/dashboard/InventorySettingsScreen';
 import PaymentMethodsSettingsScreen from '@/components/dashboard/PaymentMethodsSettingsScreen';
+import ProfileScreen from '@/components/dashboard/ProfileScreen';
 import ReturnDeductionSettingsScreen from '@/components/dashboard/ReturnDeductionSettingsScreen';
+import SubscriptionBillingScreen from '@/components/dashboard/SubscriptionBillingScreen';
 import VatTaxSettingsScreen from '@/components/dashboard/VatTaxSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
 import { useAuth } from '@/providers/AuthProvider';
@@ -49,7 +52,7 @@ const menuEntries: MenuEntry[] = [
   {
     label: 'Staff Management',
     slug: 'staff-management',
-    icon: { ios: 'person.2.fill', android: 'people', web: 'people' },
+    icon: { ios: 'person.2.fill', android: 'groups', web: 'groups' },
   },
   {
     label: 'Setting',
@@ -101,7 +104,7 @@ const menuEntries: MenuEntry[] = [
       {
         label: 'Product Management',
         slug: 'pharmacy-product-management',
-        icon: { ios: 'pills.fill', android: 'medication', web: 'medication' },
+        icon: { ios: 'shippingbox.fill', android: 'inventory_2', web: 'inventory_2' },
       },
     ],
   },
@@ -326,7 +329,7 @@ export default function ManagementMenuScreen({
   if (activeSlug) {
     if (activeSlug === 'payment-methord') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -337,7 +340,7 @@ export default function ManagementMenuScreen({
     }
     if (activeSlug === 'return-management') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -348,7 +351,7 @@ export default function ManagementMenuScreen({
     }
     if (activeSlug === 'vat-tax') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -359,7 +362,7 @@ export default function ManagementMenuScreen({
     }
     if (activeSlug === 'inventory') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -370,7 +373,7 @@ export default function ManagementMenuScreen({
     }
     if (activeSlug === 'backup-file') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -381,7 +384,7 @@ export default function ManagementMenuScreen({
     }
     if (activeSlug === 'currency') {
       return (
-        <SafeAreaView style={styles.fullPage}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
             onBack={() => router.replace('/dashboard/menu')}
@@ -453,8 +456,41 @@ export default function ManagementMenuScreen({
         </SafeAreaView>
       );
     }
+    if (activeSlug === 'subscription') {
+      return (
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <SubscriptionBillingScreen />
+        </SafeAreaView>
+      );
+    }
+    if (activeSlug === 'documents') {
+      return (
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <InvoiceSetupScreen />
+        </SafeAreaView>
+      );
+    }
+    if (activeSlug === 'profile') {
+      return (
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <ProfileScreen />
+        </SafeAreaView>
+      );
+    }
     return (
-      <SafeAreaView style={styles.fullPage}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
         <DashboardSubpageHeader
           subtitle={pageTitle}
           onBack={() => router.replace('/dashboard/menu')}

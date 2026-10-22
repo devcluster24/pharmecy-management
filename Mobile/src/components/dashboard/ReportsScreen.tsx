@@ -690,11 +690,11 @@ export default function ReportsScreen() {
   const selectedRange = getPeriodRange(period, new Date());
 
   if (isAuthLoading || profileLoading) {
-    return <SafeAreaView style={styles.centered}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
+    return <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <DashboardSubpageHeader subtitle="Report Dashboard" />
       <ScrollView style={styles.pageContent} contentContainerStyle={styles.content}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.periodTabs}>

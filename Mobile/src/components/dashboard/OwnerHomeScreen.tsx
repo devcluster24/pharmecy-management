@@ -132,16 +132,17 @@ function ExpiredBatchCard({
 }
 
 const quickAccessItems = [
-  { id: 'overview', label: 'Overview', icon: 'chart.bar.fill' },
-  { id: 'inventory', label: 'Inventory', icon: 'shippingbox.fill' },
-  { id: 'reports', label: 'Reports', icon: 'doc.text.magnifyingglass' },
-  { id: 'invoice', label: 'Invoice', icon: 'doc.text.fill' },
-  { id: 'customer', label: 'Customer', icon: 'person.2.fill' },
-  { id: 'supplier', label: 'Supplier', icon: 'shippingbox' },
+  { id: 'overview', label: 'Overview', icon: 'square.grid.2x2.fill', androidIcon: 'dashboard' },
+  { id: 'inventory', label: 'Inventory', icon: 'shippingbox.fill', androidIcon: 'inventory_2' },
+  { id: 'reports', label: 'Reports', icon: 'doc.text.magnifyingglass', androidIcon: 'assessment' },
+  { id: 'invoice', label: 'Invoice', icon: 'doc.text.fill', androidIcon: 'receipt_long' },
+  { id: 'customer', label: 'Customer', icon: 'person.2.fill', androidIcon: 'people_alt' },
+  { id: 'supplier', label: 'Supplier', icon: 'shippingbox', androidIcon: 'local_shipping' },
+  { id: 'expenses', label: 'Expenses', icon: 'chart.bar.fill', androidIcon: 'business_center' },
 ] as const;
 
 const ownerActionItems = [
-  { id: 'sale', label: 'Sales', icon: 'cart.fill', androidIcon: 'point_of_sale' },
+  { id: 'sale', label: 'Sales', icon: 'arrow.left.arrow.right', androidIcon: 'currency_exchange' },
   { id: 'purchase', label: 'Purchase', icon: 'bag.fill', androidIcon: 'shopping_bag' },
   { id: 'return', label: 'Return', icon: 'arrow.uturn.backward', androidIcon: 'assignment_return' },
 ] as const;
@@ -906,7 +907,9 @@ export default function OwnerHomeScreen() {
     } else if (itemId === 'customer') {
       router.push('/customer');
     } else if (itemId === 'supplier') {
-      router.push('/supplier');
+      router.push('/dashboard/supplier');
+    } else if (itemId === 'expenses') {
+      router.push('/expenses');
     } else {
       router.push(`/dashboard/${itemId}`);
     }
@@ -1097,18 +1100,8 @@ export default function OwnerHomeScreen() {
                       <SymbolView
                         name={{
                           ios: item.icon,
-                          android: item.id === 'overview'
-                            ? 'dashboard'
-                            : item.id === 'inventory'
-                              ? 'inventory_2'
-                              : item.id === 'reports'
-                                ? 'assessment'
-                                : item.id === 'invoice'
-                                  ? 'receipt_long'
-                                  : item.id === 'customer'
-                                    ? 'people'
-                                    : 'local_shipping',
-                          web: 'circle.grid.2x2.fill',
+                          android: item.androidIcon,
+                          web: item.androidIcon,
                         }}
                         size={19}
                         tintColor="#17664f"
@@ -1164,7 +1157,7 @@ export default function OwnerHomeScreen() {
                 pressed && styles.ownerActionButtonPressed,
               ]}>
               <SymbolView
-                name={{ ios: item.icon, android: item.androidIcon, web: 'circle.grid.2x2.fill' }}
+                name={{ ios: item.icon, android: item.androidIcon, web: item.androidIcon }}
                 size={18}
                 tintColor="#17664f"
               />
@@ -1252,7 +1245,7 @@ export default function OwnerHomeScreen() {
                         ) : (
                           <View style={[styles.activityAvatar, styles.activityAvatarFallback]}>
                             <SymbolView
-                              name={{ ios: 'person.fill', android: 'person', web: 'person.fill' }}
+                              name={{ ios: 'person.fill', android: 'person', web: 'person' }}
                               size={18}
                               tintColor="#17664f"
                             />

@@ -596,15 +596,6 @@ export default function SalesActions() {
               <div>
                 <div className="new-sale-title-row">
                   <h2 id="new-sale-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>New Sale</h2>
-                  <span className="mobile-bill-action">
-                    <button
-                      type="button"
-                      onClick={() => setIsMobileBillOpen(true)}
-                      style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "6px 12px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}
-                    >
-                      Bill
-                    </button>
-                  </span>
                 </div>
                 <p style={{ margin: "4px 0 0", color: "#77857d", fontSize: 12 }}>Search the Product List and add quantities.</p>
               </div>
@@ -1159,6 +1150,21 @@ export default function SalesActions() {
                 </button>
               </div>
             </footer>
+            {saleLines.length > 0 ? (
+              <footer className="mobile-bill-total-footer">
+                <div className="mobile-bill-total-footer-text">
+                  <span>Total Price</span>
+                  <strong>{formatPrice(roundedTotal)}</strong>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Open Bill Summary"
+                  onClick={() => setIsMobileBillOpen(true)}
+                >
+                  <span aria-hidden="true">→</span>
+                </button>
+              </footer>
+            ) : null}
       </section>
 
       {batchSelectionLineId && (() => {

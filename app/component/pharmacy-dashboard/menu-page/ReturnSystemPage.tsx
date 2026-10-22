@@ -539,7 +539,6 @@ export default function ReturnSystemPage() {
             <header className="return-record-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "16px 20px", borderBottom: "1px solid #e9eeea" }}>
               <h2 id="record-return-title" style={{ margin: 0, color: "#20342a", fontSize: 18, fontWeight: 700 }}>Record Return</h2>
               <div className="return-record-header-actions">
-                <button className="return-mobile-bill-button" type="button" aria-label="Open bill summary" onClick={() => setIsMobileBillOpen(true)}>Bill</button>
                 <button type="button" aria-label="Close Record Return" onClick={() => setIsModalOpen(false)} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
               </div>
             </header>
@@ -797,6 +796,21 @@ export default function ReturnSystemPage() {
               </div>
               {error && <p role="alert" style={{ margin: 0, color: "#b34b43", fontSize: 12 }}>{error}</p>}
               </div>
+              {selectedItems.length > 0 ? (
+                <footer className="return-mobile-total-footer">
+                  <div className="return-mobile-total-footer-text">
+                    <span>Total Amount</span>
+                    <strong>৳{totalReturnAmount.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Open Bill Summary"
+                    onClick={() => setIsMobileBillOpen(true)}
+                  >
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </footer>
+              ) : null}
             </form>
           </section>
         </div>

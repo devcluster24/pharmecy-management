@@ -477,11 +477,11 @@ export default function ReturnScreen() {
   }
 
   if (authLoading || profileLoading) {
-    return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
+    return <SafeAreaView edges={['top', 'left', 'right']} style={styles.center}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
   }
   if (dashboardRole !== 'owner') {
     return (
-      <SafeAreaView style={styles.page}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.page}>
         <DashboardSubpageHeader subtitle="Returns" onBack={() => router.replace('/dashboard')} />
         <View style={styles.center}><Text style={styles.error}>Returns are available to store owners.</Text></View>
       </SafeAreaView>
@@ -489,7 +489,7 @@ export default function ReturnScreen() {
   }
   if (!supabase || !session) {
     return (
-      <SafeAreaView style={styles.page}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.page}>
         <DashboardSubpageHeader subtitle="Returns" onBack={() => router.replace('/dashboard')} />
         <View style={styles.center}><Text style={styles.error}>Return data is unavailable. Check your account connection.</Text></View>
       </SafeAreaView>
@@ -498,7 +498,7 @@ export default function ReturnScreen() {
 
   const headerTitle = screen === 'list' ? 'Return System' : screen === 'record' ? 'Record Return' : 'Bill Summary';
   return (
-    <SafeAreaView style={styles.page}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.page}>
       <DashboardSubpageHeader
         subtitle={headerTitle}
         onBack={() => {
@@ -507,7 +507,7 @@ export default function ReturnScreen() {
           else router.replace('/dashboard');
         }}
       />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.pageContent} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {screen === 'list' ? (
           <>
             <View style={styles.headingRow}>
@@ -634,7 +634,7 @@ export default function ReturnScreen() {
               }}
               style={[styles.totalLink, selectedItems.length === 0 && styles.disabled]}>
               <View style={styles.flex}>
-                <Text style={styles.label}>Net Refund Amount</Text>
+                <Text style={styles.label}>Total Amount</Text>
                 <Text style={styles.amount}>{money(netRefundAmount)}</Text>
               </View>
               <Text style={styles.arrow}>›</Text>
@@ -709,7 +709,8 @@ export default function ReturnScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f4f6f2' },
+  page: { flex: 1, backgroundColor: '#145642' },
+  pageContent: { flex: 1, backgroundColor: '#f4f6f2' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: '#f4f6f2' },
   content: { padding: 16, paddingBottom: 36, gap: 12 },
   headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },

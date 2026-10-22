@@ -76,6 +76,10 @@ body {
   height: 14px;
 }
 
+.dashboard-excel-export-icon {
+  display: none;
+}
+
 .public-page,
 .public-auth-page {
   min-width: 0;
@@ -464,16 +468,16 @@ body {
 
   .dashboard-sidebar-item {
     justify-content: center;
-    gap: clamp(2px, 1vw, 6px) !important;
-    height: clamp(20px, 5.2vw, 24px) !important;
+    gap: 0 !important;
+    height: clamp(30px, 8vw, 36px) !important;
     padding: 0 clamp(3px, 1vw, 6px) !important;
     border-radius: 6px !important;
   }
 
   .dashboard-sidebar-icon {
-    width: clamp(8px, 2.3vw, 9px) !important;
-    min-width: clamp(8px, 2.3vw, 9px) !important;
-    font-size: clamp(7px, 2vw, 8px) !important;
+    width: 18px !important;
+    min-width: 18px !important;
+    font-size: clamp(14px, 4vw, 16px) !important;
   }
 
   .dashboard-sidebar-label {
@@ -505,23 +509,40 @@ body {
   }
 
   .dashboard-navbar-brand img {
-    width: clamp(24px, 7vw, 28px) !important;
-    height: clamp(24px, 7vw, 28px) !important;
-    flex-basis: clamp(24px, 7vw, 28px) !important;
+    width: clamp(20px, 6vw, 24px) !important;
+    height: clamp(20px, 6vw, 24px) !important;
+    flex-basis: clamp(20px, 6vw, 24px) !important;
   }
 
   .dashboard-navbar-brand-name {
-    font-size: clamp(12px, 3.7vw, 14px) !important;
+    font-size: clamp(10px, 3.2vw, 12px) !important;
   }
 
   .dashboard-navbar-actions {
     flex: 0 0 auto;
-    gap: 0 !important;
+    gap: 8px !important;
     margin-left: auto;
   }
 
   .dashboard-navbar-store-name {
     display: none !important;
+  }
+
+  .dashboard-language-trigger {
+    width: 30px;
+    min-width: 30px;
+    min-height: 30px !important;
+    padding: 0 !important;
+  }
+
+  .dashboard-language-trigger svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .dashboard-language-trigger-label,
+  .dashboard-language-trigger-caret {
+    display: none;
   }
 
   .dashboard-profile-menu {
@@ -530,9 +551,9 @@ body {
   }
 
   .dashboard-profile-trigger {
-    width: clamp(34px, 9vw, 40px) !important;
-    height: clamp(34px, 9vw, 40px) !important;
-    font-size: clamp(12px, 3.5vw, 14px) !important;
+    width: clamp(28px, 7.5vw, 32px) !important;
+    height: clamp(28px, 7.5vw, 32px) !important;
+    font-size: clamp(10px, 3vw, 12px) !important;
   }
 
   .dashboard-profile-actions {
@@ -1019,6 +1040,7 @@ body {
 .mobile-bill-action,
 .mobile-bill-backdrop,
 .mobile-bill-summary-header button,
+.mobile-bill-total-footer,
 .mobile-bill-save-footer,
 .mobile-bill-customer-fields,
 .new-sale-line-delete-mobile {
@@ -1078,7 +1100,8 @@ body {
 
 .receive-order-mobile-bill-action,
 .receive-order-summary-header button,
-.receive-order-bill-backdrop {
+.receive-order-bill-backdrop,
+.receive-order-mobile-total-footer {
   display: none;
 }
 
@@ -1205,11 +1228,11 @@ body {
   display: none;
 }
 
-.return-mobile-bill-button,
 .return-mobile-bill-backdrop,
 .return-bill-summary-header button,
 .return-mobile-invoice-link,
-.return-mobile-invoice-fallback {
+.return-mobile-invoice-fallback,
+.return-mobile-total-footer {
   display: none;
 }
 
@@ -1220,6 +1243,27 @@ body {
 }
 
 @media (max-width: 760px) {
+  .dashboard-excel-export-button {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 36px;
+    min-width: 36px;
+    min-height: 34px;
+    justify-content: center;
+    padding: 7px !important;
+  }
+
+  .dashboard-excel-export-label {
+    display: none;
+  }
+
+  .dashboard-excel-export-icon {
+    display: block;
+    width: 18px;
+    height: 18px;
+  }
+
   .dashboard-invoice-desktop-table {
     display: none;
   }
@@ -2023,20 +2067,6 @@ body {
     font-size: 18px !important;
   }
 
-  .receive-order-mobile-bill-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    border-radius: 5px;
-    background: #179c70;
-    color: #fff;
-    padding: 5px 10px;
-    font-size: 10px;
-    font-weight: 650;
-    cursor: pointer;
-  }
-
   .receive-order-layout {
     gap: 6px !important;
     padding: 8px !important;
@@ -2253,6 +2283,52 @@ body {
     padding: 0;
   }
 
+  .receive-order-mobile-total-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    border-top: 1px solid #e3e9e4;
+    background: #fff;
+    box-shadow: 0 -4px 14px rgba(18, 35, 27, 0.06);
+  }
+
+  .receive-order-mobile-total-footer-text {
+    display: grid;
+    gap: 3px;
+    color: #687871;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .receive-order-mobile-total-footer-text strong {
+    color: #173c2c;
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .receive-order-mobile-total-footer button {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 0;
+    border-radius: 10px;
+    background: #17664f;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .receive-order-mobile-total-footer button span {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
   .purchase-batch-details-overlay {
     justify-items: end !important;
     padding: 6px 6px 6px 46px !important;
@@ -2391,9 +2467,7 @@ body {
   }
 
   .mobile-bill-action {
-    display: inline-flex;
-    align-items: center;
-    margin-left: auto;
+    display: none !important;
   }
 
   .new-sale-title-row {
@@ -2418,6 +2492,52 @@ body {
 
   .new-sale-footer {
     display: none !important;
+  }
+
+  .mobile-bill-total-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    border-top: 1px solid #e3e9e4;
+    background: #fff;
+    box-shadow: 0 -4px 14px rgba(18, 35, 27, 0.06);
+  }
+
+  .mobile-bill-total-footer-text {
+    display: grid;
+    gap: 3px;
+    color: #687871;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .mobile-bill-total-footer-text strong {
+    color: #173c2c;
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .mobile-bill-total-footer button {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 0;
+    border-radius: 10px;
+    background: #17664f;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .mobile-bill-total-footer button span {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .mobile-bill-save-footer {
@@ -3534,21 +3654,6 @@ body {
     font-size: 18px !important;
   }
 
-  .return-mobile-bill-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 36px !important;
-    border: 1px solid #b9dfd0;
-    border-radius: 5px;
-    background: #eef8f2;
-    color: #17704e;
-    padding: 7px 10px !important;
-    font-size: 12px !important;
-    font-weight: 650;
-    cursor: pointer;
-  }
-
   .return-record-form {
     flex: 0 1 auto !important;
     max-height: calc(88dvh - 48px);
@@ -3769,6 +3874,53 @@ body {
     min-height: 30px !important;
     padding: 5px 8px !important;
     font-size: 10px !important;
+  }
+
+  .return-mobile-total-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    border-top: 1px solid #e3e9e4;
+    background: #fff;
+    box-shadow: 0 -4px 14px rgba(18, 35, 27, 0.06);
+  }
+
+  .return-mobile-total-footer-text {
+    display: grid;
+    gap: 3px;
+    color: #687871;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .return-mobile-total-footer-text strong {
+    color: #173c2c;
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .return-mobile-total-footer button {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 0;
+    border-radius: 10px;
+    background: #17664f;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .return-mobile-total-footer button span {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .return-sales-invoice-body {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { MdDashboard } from "react-icons/md";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
@@ -81,7 +82,7 @@ export default function AdminSidebar() {
               }}
             >
               <span style={{ width: 18, minWidth: 18, textAlign: "center", fontSize: 15, lineHeight: 1 }}>
-                {item.icon}
+                {item.label === "Overview" ? <MdDashboard size={18} color="#17664f" /> : item.icon}
               </span>
               <span
                 style={{

@@ -2,9 +2,35 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AiFillProduct } from "react-icons/ai";
+import { BiSolidPurchaseTag } from "react-icons/bi";
+import { FaFileInvoiceDollar } from "react-icons/fa";
+import { FaTruckMedical } from "react-icons/fa6";
+import { GiReturnArrow } from "react-icons/gi";
+import { GrDocumentStore } from "react-icons/gr";
+import { MdCurrencyExchange, MdDashboard, MdOutlineInventory, MdPeopleAlt, MdSettings } from "react-icons/md";
+import { RxPeople } from "react-icons/rx";
+import { TbBusinessplan } from "react-icons/tb";
 import { useState } from "react";
+import type { IconType } from "react-icons";
 import { canPharmacyStaffAccess } from "@/lib/pharmacy-staff-permissions";
 import { dashboardNavItems } from "../navigation";
+
+const sidebarIcons: Record<string, IconType> = {
+  "": MdDashboard,
+  "product-management": AiFillProduct,
+  sales: MdCurrencyExchange,
+  invoice: FaFileInvoiceDollar,
+  purchase: BiSolidPurchaseTag,
+  inventory: MdOutlineInventory,
+  returns: GiReturnArrow,
+  customers: MdPeopleAlt,
+  suppliers: FaTruckMedical,
+  reports: GrDocumentStore,
+  expenses: TbBusinessplan,
+  staff: RxPeople,
+  settings: MdSettings,
+};
 
 export default function Sidebar() {
   const [expanded, setExpanded] = useState(false);
@@ -30,6 +56,7 @@ export default function Sidebar() {
       <div className="dashboard-sidebar-items" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {dashboardNavItems.filter((item) => canPharmacyStaffAccess(item.slug || "overview")).map((item) => {
           const isActive = pathname === item.href;
+          const SidebarIcon = sidebarIcons[item.slug];
 
           return (
             <Link
@@ -62,7 +89,7 @@ export default function Sidebar() {
                   color: isActive ? "#111827" : "#2b2d31",
                 }}
               >
-                {item.icon}
+                {SidebarIcon ? <SidebarIcon size={18} color="#17664f" /> : item.icon}
               </span>
 
               <span

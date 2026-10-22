@@ -1295,11 +1295,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
               <div>
                 <div className="receive-order-title-row">
                   <h2 id="create-purchase-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Receive Order</h2>
-                  <button
-                    className="receive-order-mobile-bill-action"
-                    type="button"
-                    onClick={() => setIsMobileReceiveSummaryOpen(true)}
-                  >Bill</button>
                 </div>
                 <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Select a company, then choose one of its products.</p>
               </div>
@@ -2000,6 +1995,22 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                 >Received</button>
               </aside>
             </div>
+
+            {receiveSummaryLines.length > 0 ? (
+              <footer className="receive-order-mobile-total-footer">
+                <div className="receive-order-mobile-total-footer-text">
+                  <span>Total Purchase Price</span>
+                  <strong>৳{receiveSummaryTotal.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Open Bill Summary"
+                  onClick={() => setIsMobileReceiveSummaryOpen(true)}
+                >
+                  <span aria-hidden="true">→</span>
+                </button>
+              </footer>
+            ) : null}
 
             {pendingBatchEntry && (
               <div

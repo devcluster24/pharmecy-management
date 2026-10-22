@@ -405,14 +405,14 @@ export default function InventoryScreen() {
 
   if (isAuthLoading || profileLoading) {
     return (
-      <SafeAreaView style={styles.centered}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <DashboardSubpageHeader subtitle="Inventory Dashboard" />
       <View style={styles.pageBody}>
         <ScrollView

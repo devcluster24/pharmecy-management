@@ -1,5 +1,5 @@
-import { Redirect } from 'expo-router';
+import SupplierManagementScreen from '../supplier';
 
 export default function SupplierScreen() {
-  return <Redirect href="/supplier" />;
+  return <SupplierManagementScreen />;
 }

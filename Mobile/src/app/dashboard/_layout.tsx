@@ -101,7 +101,7 @@ export default function DashboardLayout() {
         [
           <NativeTabs.Trigger key="overview" name="overview" testID="dashboard-tab-overview">
             <NativeTabs.Trigger.Label>{t('Overview')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="chart.bar.fill" md="dashboard" />
+            <NativeTabs.Trigger.Icon sf="square.grid.2x2.fill" md="dashboard" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="inventory" name="inventory" testID="dashboard-tab-inventory">
             <NativeTabs.Trigger.Label>{t('Inventory')}</NativeTabs.Trigger.Label>
@@ -109,18 +109,18 @@ export default function DashboardLayout() {
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="supplier" name="supplier" testID="dashboard-tab-supplier">
             <NativeTabs.Trigger.Label>{t('Supplier')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="person.2.fill" md="people" />
+            <NativeTabs.Trigger.Icon sf="shippingbox" md="local_shipping" />
           </NativeTabs.Trigger>,
         ]
       ) : (
         [
           <NativeTabs.Trigger key="purchase" name="purchase" testID="dashboard-tab-purchase">
             <NativeTabs.Trigger.Label>{t('Purchase')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="cart.fill" md="shopping_cart" />
+            <NativeTabs.Trigger.Icon sf="bag.fill" md="shopping_bag" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="sale" name="sale" testID="dashboard-tab-sale">
             <NativeTabs.Trigger.Label>{t('Sale')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="creditcard.fill" md="point_of_sale" />
+            <NativeTabs.Trigger.Icon sf="arrow.left.arrow.right" md="currency_exchange" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="return" name="return" testID="dashboard-tab-return">
             <NativeTabs.Trigger.Label>{t('Return')}</NativeTabs.Trigger.Label>

@@ -129,7 +129,7 @@ export default function SubscriptionSetupScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (activationError) throw activationError;
-      router.replace('/dashboard');
+      router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not continue with the selected plan.');
       setIsSubmitting(false);

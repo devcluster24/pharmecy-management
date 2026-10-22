@@ -596,14 +596,14 @@ export default function OverviewScreen() {
 
   if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
     return (
-      <SafeAreaView style={styles.centered}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <DashboardSubpageHeader subtitle="Overview Dashboard" />
       <ScrollView style={styles.pageContent} contentContainerStyle={styles.content}>
         <Text style={styles.dateLabel}>

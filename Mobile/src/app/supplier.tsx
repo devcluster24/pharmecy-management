@@ -433,14 +433,14 @@ export default function SupplierScreen() {
 
   if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
     return (
-      <SafeAreaView style={styles.centered}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#145642" />
       <DashboardSubpageHeader
         subtitle="Supplier management"

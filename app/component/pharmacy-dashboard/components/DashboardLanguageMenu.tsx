@@ -55,8 +55,10 @@ export default function DashboardLanguageMenu() {
           <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.4" />
           <path d="M2.9 10h14.2M10 2.75c1.75 1.9 2.6 4.3 2.6 7.25s-.85 5.35-2.6 7.25C8.25 15.35 7.4 12.95 7.4 10s.85-5.35 2.6-7.25Z" stroke="currentColor" strokeWidth="1.2" />
         </svg>
-        {language === "bn" ? "ভাষা" : "Language"}
-        <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1 }}>▾</span>
+        <span className="dashboard-language-trigger-label">
+          {language === "bn" ? "ভাষা" : "Language"}
+        </span>
+        <span className="dashboard-language-trigger-caret" aria-hidden="true" style={{ fontSize: 10, lineHeight: 1 }}>▾</span>
       </button>
 
       {isOpen && (
