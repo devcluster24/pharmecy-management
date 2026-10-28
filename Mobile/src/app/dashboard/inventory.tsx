@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -208,6 +209,8 @@ function getStockValue(row: InventoryBatch, totalQuantity: number | null) {
 }
 
 function InventoryDetails({ batch, totalQuantity }: { batch: InventoryBatch; totalQuantity: number | null }) {
+  const packPrice = getInventoryPackPrice(batch.mrp);
+  const unitPrice = getInventoryUnitPrice(packPrice, batch.packSize);
   const details: [string, string][] = [
     ['Order Number', batch.order || '—'],
     ['Date & Time', batch.updatedAt || batch.orderDate || '—'],
@@ -222,12 +225,11 @@ function InventoryDetails({ batch, totalQuantity }: { batch: InventoryBatch; tot
     ['Strength', batch.strength || '—'],
     ['Dosage Form', batch.dosageForm || '—'],
     ['Product ID', batch.productId || '—'],
-    ['MRP', formatMoney(batch.mrp)],
+    ['Pack Price', formatMoney(packPrice)],
     ['Box Quantity', batch.quantity || '—'],
     ['Pack Size', batch.packSize || '—'],
     ['Total Quantity', formatQuantity(totalQuantity)],
-    ['Unit Price', formatMoney(batch.unitPrice)],
-    ['Pack Price', formatMoney(batch.packPrice)],
+    ['Unit Price', formatMoney(unitPrice === null ? undefined : String(unitPrice))],
     ['Product Pack Price', formatMoney(batch.productPackPrice)],
     ['Total Purchase Price', formatMoney(batch.totalPrice)],
     ['Order Paid Amount', formatMoney(batch.orderPaidAmount)],
@@ -482,10 +484,13 @@ export default function InventoryScreen() {
               <Text numberOfLines={2} style={[styles.headerCell, styles.batchColumn]}>Batch</Text>
               <Text numberOfLines={2} style={[styles.headerCell, styles.brandSupplierColumn]}>Brand Name / Supplier</Text>
               <Text numberOfLines={2} style={[styles.headerCell, styles.quantityColumn]}>Quantity</Text>
+              <Text numberOfLines={2} style={[styles.headerCell, styles.unitPriceColumn]}>Unit Price</Text>
             </View>
             {pageBatches.length > 0 ? pageBatches.map((batch) => {
               const expanded = expandedBatchId === batch.id;
               const quantity = getTotalQuantity(batch);
+              const packPrice = getInventoryPackPrice(batch.mrp);
+              const unitPrice = getInventoryUnitPrice(packPrice, batch.packSize);
               return (
                 <View key={batch.id} style={styles.batchContainer}>
                   <Pressable
@@ -502,6 +507,9 @@ export default function InventoryScreen() {
                     </Text>
                     <Text style={[styles.cell, styles.quantityColumn, styles.quantityValue]}>
                       {formatQuantity(quantity)}
+                    </Text>
+                    <Text style={[styles.cell, styles.unitPriceColumn]}>
+                      {formatMoney(unitPrice === null ? undefined : String(unitPrice))}
                     </Text>
                   </Pressable>
                   {expanded ? (
@@ -677,6 +685,10 @@ const styles = StyleSheet.create({
   },
   quantityColumn: {
     flex: 0.9,
+    textAlign: 'right',
+  },
+  unitPriceColumn: {
+    flex: 1,
     textAlign: 'right',
   },
   quantityValue: {

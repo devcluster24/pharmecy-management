@@ -11,6 +11,8 @@ import {
   getAvailablePurchaseQuantity,
   calculatePackQuantity,
   calculateTotalQuantity,
+  calculateInventoryUnitPrice,
+  getInventoryPackPrice,
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
@@ -39,6 +41,7 @@ const receiveOrderColumns = [
   "Box Quantity",
   "Pack Size",
   "Total Quantity",
+  "Unit Price",
   "Pack Price",
   "Exp Date",
   "Actions",
@@ -285,7 +288,8 @@ export default function InventoryPage() {
         getCurrentPackQuantity(row),
         row.packSize,
         getCurrentTotalQuantity(row)?.toLocaleString("en-BD", { maximumFractionDigits: 4 }) ?? "-",
-        row.packPrice,
+        calculateInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize),
+        getInventoryPackPrice(row.mrp),
         row.expDate,
       ];
       const hasReturnForBatch = returns.rows.some((record) =>
@@ -416,7 +420,8 @@ export default function InventoryPage() {
                 getCurrentPackQuantity(row),
                 row.packSize,
                 getCurrentTotalQuantity(row) ?? "",
-                row.packPrice,
+                calculateInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize),
+                getInventoryPackPrice(row.mrp),
                 row.expDate,
               ]),
             }))}
@@ -530,8 +535,9 @@ export default function InventoryPage() {
               ["Box Quantity", getCurrentPackQuantity(selectedRow)],
               ["Pack Size", selectedRow.packSize],
               ["Total Quantity", getCurrentTotalQuantity(selectedRow)?.toLocaleString("en-BD", { maximumFractionDigits: 4 }) ?? "-"],
+              ["Unit Price", calculateInventoryUnitPrice(getInventoryPackPrice(selectedRow.mrp), selectedRow.packSize)],
               ...(activeList === "expaired" ? [["Price", getAvailableStockValue(selectedRow)]] : []),
-              ["Pack Price", selectedRow.packPrice],
+              ["Pack Price", getInventoryPackPrice(selectedRow.mrp)],
               ["Exp Date", selectedRow.expDate],
             ].map(([label, value]) => (
               <div key={label} style={{ display: "contents" }}>

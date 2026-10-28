@@ -68,6 +68,23 @@ function getPackSizeMultiplier(packSize: string) {
   return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : null;
 }
 
+export function getInventoryPackPrice(mrp?: string) {
+  const parsedMrp = mrp?.trim();
+  return parsedMrp && parsedMrp !== "-" ? parsedMrp : "-";
+}
+
+export function calculateInventoryUnitPrice(packPrice: string, packSize: string) {
+  if (!packPrice.trim() || !packSize.trim() || packPrice.trim() === "-") return "-";
+  const parsedPackPrice = Number(packPrice);
+  const packMultiplier = getPackSizeMultiplier(packSize);
+  if (
+    !Number.isFinite(parsedPackPrice)
+    || parsedPackPrice < 0
+    || packMultiplier === null
+  ) return "-";
+  return String(Number((parsedPackPrice / packMultiplier).toFixed(4)));
+}
+
 export function groupPurchaseOrders(
   rows: PurchaseListRow[],
   useReceivedAt = false,

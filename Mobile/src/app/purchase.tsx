@@ -1,18 +1,25 @@
-import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
+import TextRecognition from '@react-native-ml-kit/text-recognition';
+import { Camera, CameraView } from 'expo-camera';
+import { SymbolView } from 'expo-symbols';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Modal,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -21,6 +28,8 @@ const PLACE_ORDER_KEY = 'pharmacy-place-order-list-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const PRODUCT_SELECT = 'id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price';
 const PRODUCT_PAGE_SIZE = 1000;
+const SCAN_FRAME_INTERVAL_MS = 100;
+const SCAN_TIMEOUT_MS = 1000;
 
 type PurchaseRow = {
   id: string;
@@ -113,6 +122,8 @@ type FormState = {
   packSize: string;
 };
 type ListType = 'place' | 'receive';
+type ScannerMode = 'product' | 'batch';
+type ScannedBatchDetails = Pick<FormState, 'batchNumber' | 'mfgDate' | 'expDate'>;
 
 const emptyForm: FormState = {
   supplier: '',
@@ -250,7 +261,84 @@ function formatMonthYearInput(value: string, currentValue: string) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
+function getBrandWords(value: string) {
+  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
+}
+
+function getBrandMatchScore(brand: string, scannedText: string) {
+  const scannedWords = new Set(getBrandWords(scannedText));
+  return new Set(getBrandWords(brand).filter((word) => scannedWords.has(word))).size;
+}
+
+function formatScannedMonthYear(month: string, year: string) {
+  const monthNumber = Number(month);
+  if (monthNumber < 1 || monthNumber > 12) return null;
+  const yearDigits = year.length > 2 ? year.slice(-2) : year.padStart(2, '0');
+  return `${String(monthNumber).padStart(2, '0')}/${yearDigits}`;
+}
+
+const MONTH_NUMBERS: Record<string, string> = {
+  jan: '01',
+  feb: '02',
+  mar: '03',
+  apr: '04',
+  may: '05',
+  jun: '06',
+  jul: '07',
+  aug: '08',
+  sep: '09',
+  oct: '10',
+  nov: '11',
+  dec: '12',
+};
+
+function findScannedMonthYear(text: string) {
+  const normalized = text.normalize('NFKC').toLocaleLowerCase('en-US');
+  const namedMonthPattern = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[,\s./-]*(\d{2}|\d{4})\b|\b(\d{2}|\d{4})[,\s./-]*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.exec(normalized);
+  if (namedMonthPattern) {
+    const monthName = namedMonthPattern[1] ?? namedMonthPattern[4];
+    const year = namedMonthPattern[2] ?? namedMonthPattern[3];
+    const month = monthName ? MONTH_NUMBERS[monthName.slice(0, 3)] : null;
+    return month && year ? formatScannedMonthYear(month, year) : null;
+  }
+
+  const match = /(?:\b([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(\d{2}|\d{4})\b|\b([01]?\d)\s*[./-]\s*(\d{2}|\d{4})\b|\b(20\d{2})\s*[./-]\s*([01]?\d)\b)/.exec(normalized);
+  if (!match) return null;
+  if (match[1]) {
+    const month = Number(match[1]) > 12 ? match[2] : match[1];
+    return formatScannedMonthYear(month, match[3]);
+  }
+  return match[4]
+    ? formatScannedMonthYear(match[4], match[5])
+    : formatScannedMonthYear(match[7], match[6]);
+}
+
+function extractScannedBatchDetails(text: string): ScannedBatchDetails {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const batchNumber = lines
+    .map((line) => /(?:\bbatch\b|\blot\b|\bb\.?\s*no\.?)\s*(?:no\.?|number|#)?\s*[:#.-]?\s*([a-z0-9][a-z0-9/-]{1,})/i.exec(line)?.[1])
+    .find(Boolean)
+    ?.toLocaleUpperCase('en-US') ?? '';
+  const monthName = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const datePattern = `(?:[0-3]?\\d\\s*[./-]\\s*[01]?\\d\\s*[./-]\\s*\\d{2,4}|[01]?\\d\\s*[./-]\\s*\\d{2,4}|20\\d{2}\\s*[./-]\\s*[01]?\\d|${monthName}[,\\s./-]*\\d{2,4}|\\d{2,4}[,\\s./-]*${monthName})`;
+  const mfgMatch = new RegExp(`(?:\\bmfg\\b|\\bmfd\\b|\\bmanufactured\\b|\\bmanufacturing\\b)[^\\d]{0,20}(${datePattern})`, 'i').exec(text);
+  const expMatch = new RegExp(`(?:\\bexp\\b|\\bexpiry\\b|\\bexpires\\b|\\buse\\s*by\\b|\\bbest\\s*before\\b)[^\\d]{0,20}(${datePattern})`, 'i').exec(text);
+  const mfgDate = mfgMatch ? findScannedMonthYear(mfgMatch[1]) : null;
+  const expDate = expMatch ? findScannedMonthYear(expMatch[1]) : null;
+  const unlabeledDates = lines
+    .filter((line) => !/\b(?:mfg|mfd|manufactured|manufacturing|exp|expiry|expires|use\s*by|best\s*before)\b/i.test(line))
+    .map(findScannedMonthYear)
+    .filter((date): date is string => Boolean(date));
+
+  return {
+    batchNumber,
+    mfgDate: mfgDate ?? unlabeledDates[0] ?? '',
+    expDate: expDate ?? unlabeledDates[1] ?? '',
+  };
+}
+
 export default function PurchaseScreen() {
+  const alert = useLocalizedAlert();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
   const [listType, setListType] = useState<ListType>('place');
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
@@ -282,6 +370,13 @@ export default function PurchaseScreen() {
   const [focusedSupplierField, setFocusedSupplierField] = useState<SupplierField | null>(null);
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [scannerMode, setScannerMode] = useState<ScannerMode>('product');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
+  const [scannerMessage, setScannerMessage] = useState('');
+  const [scannedProductMatches, setScannedProductMatches] = useState<Product[]>([]);
+  const cameraRef = useRef<CameraView | null>(null);
   const expDateInputRef = useRef<TextInput>(null);
   const batchInputRefs = useRef<Record<BatchField, TextInput | null>>({
     batchNumber: null,
@@ -493,6 +588,121 @@ export default function PurchaseScreen() {
           .some((value) => value.toLocaleLowerCase().includes(query)));
     }).slice(0, 12);
   }, [form.brandName, form.productId, form.supplier, products, receiveItems]);
+
+  useEffect(() => {
+    if (!isScannerOpen || !isCameraReady) return;
+    let active = true;
+    let complete = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let bestBatchDetails: ScannedBatchDetails = { batchNumber: '', mfgDate: '', expDate: '' };
+    const scanStartedAt = Date.now();
+
+    function finishBatchScan(message: string) {
+      setForm((current) => ({
+        ...current,
+        batchNumber: bestBatchDetails.batchNumber || current.batchNumber,
+        mfgDate: bestBatchDetails.mfgDate || current.mfgDate,
+        expDate: bestBatchDetails.expDate || current.expDate,
+      }));
+      setScannerMessage(message);
+      setIsScannerOpen(false);
+    }
+
+    async function scanFrame() {
+      if (!active || complete) return;
+      let frameUri: string | undefined;
+      setIsRecognizingFrame(true);
+      try {
+        const frame = await cameraRef.current?.takePictureAsync({
+          quality: 0.4,
+          shutterSound: false,
+        });
+        if (!frame) throw new Error('The camera could not provide a scan frame.');
+        frameUri = frame.uri;
+        const recognized = await TextRecognition.recognize(frameUri);
+        if (!active) return;
+
+        if (scannerMode === 'product') {
+          const matches = products
+            .map((product) => ({
+              product,
+              score: getBrandMatchScore(product.brand.trim() || product.medicine_name, recognized.text),
+            }))
+            .filter(({ score }) => score > 0)
+            .sort((left, right) => right.score - left.score)
+            .filter(({ score }, _index, allMatches) => score === allMatches[0]?.score)
+            .map(({ product }) => product);
+          if (matches.length > 0) {
+            complete = true;
+            setScannedProductMatches(matches.slice(0, 10));
+            selectScannedProduct(matches[0]);
+            setScannerMessage('');
+            setIsScannerOpen(false);
+          } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+            complete = true;
+            setScannedProductMatches([]);
+            setScannerMessage('Not Found');
+            setIsScannerOpen(false);
+          }
+        } else {
+          const detected = extractScannedBatchDetails(recognized.text);
+          bestBatchDetails = {
+            batchNumber: detected.batchNumber || bestBatchDetails.batchNumber,
+            mfgDate: detected.mfgDate || bestBatchDetails.mfgDate,
+            expDate: detected.expDate || bestBatchDetails.expDate,
+          };
+          if (bestBatchDetails.batchNumber && bestBatchDetails.mfgDate && bestBatchDetails.expDate) {
+            complete = true;
+            finishBatchScan('');
+          } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+            complete = true;
+            const foundAnyDetail = Object.values(bestBatchDetails).some(Boolean);
+            finishBatchScan(foundAnyDetail
+              ? 'Some batch details were not recognized. Review the fields and scan again if needed.'
+              : 'Batch details not found. Try scanning again.');
+          }
+        }
+      } catch (scanError) {
+        complete = true;
+        if (active) {
+          alert.alert(
+            'Camera scan failed',
+            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+          );
+          setIsScannerOpen(false);
+        }
+      } finally {
+        if (frameUri) {
+          try {
+            await FileSystem.deleteAsync(frameUri, { idempotent: true });
+          } catch (cleanupError) {
+            complete = true;
+            if (active) {
+              alert.alert(
+                'Scan cleanup failed',
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : 'Could not remove the temporary scan frame.',
+              );
+              setIsScannerOpen(false);
+            }
+          }
+        }
+        if (active) setIsRecognizingFrame(false);
+      }
+
+      if (active && !complete) {
+        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+      }
+    }
+
+    void scanFrame();
+    return () => {
+      active = false;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [alert, isCameraReady, isScannerOpen, products, scannerMode]);
+
   const matchingPlaceOrderRows = useMemo(() => {
     const company = form.supplier.trim().toLocaleLowerCase();
     const brand = form.brandName.trim().toLocaleLowerCase();
@@ -570,7 +780,7 @@ export default function PurchaseScreen() {
         };
       }
       if (field === 'batchNumber') {
-        return { ...current, batchNumber: value.replace(/\D/g, '') };
+        return { ...current, batchNumber: value.replace(/[^a-zA-Z0-9/-]/g, '') };
       }
       if (field === 'mfgDate' || field === 'expDate') {
         return { ...current, [field]: formatMonthYearInput(value, current[field]) };
@@ -598,7 +808,64 @@ export default function PurchaseScreen() {
       mrp: '',
     }));
     setSelectedSourceId('');
+    setScannedProductMatches([]);
+    setScannerMessage('');
     setSaveError('');
+  }
+
+  function selectScannedProduct(product: Product) {
+    const brandName = product.brand.trim() || product.medicine_name.trim();
+    const packPrice = product.pack_price.trim() === '-' ? '' : product.pack_price.trim();
+    setForm((current) => ({
+      ...current,
+      supplier: product.manufacturer.trim(),
+      productId: product.id,
+      brandName,
+      mrp: packPrice,
+      packSize: product.pack_size.trim(),
+      price: packPrice,
+      batchNumber: '',
+      mfgDate: '',
+      expDate: '',
+    }));
+    setSelectedSourceId('');
+    setScannerMessage('');
+    setSaveError('');
+  }
+
+  async function startCameraScan(mode: ScannerMode) {
+    if (Platform.OS === 'web') {
+      alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
+      return;
+    }
+    if (mode === 'product' && isCatalogLoading) {
+      alert.alert('Product list is loading', 'Wait for the Product Management list to finish loading, then scan again.');
+      return;
+    }
+    setScannerMode(mode);
+    setScannerMessage('');
+    if (mode === 'product') setScannedProductMatches([]);
+    setIsCameraReady(false);
+    try {
+      const permission = await Camera.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        alert.alert('Camera permission required', 'Allow camera access to scan medicine labels.');
+        return;
+      }
+      Keyboard.dismiss();
+      setIsScannerOpen(true);
+    } catch (permissionError) {
+      alert.alert(
+        'Camera permission failed',
+        permissionError instanceof Error ? permissionError.message : 'Could not request camera access.',
+      );
+    }
+  }
+
+  function closeCameraScanner() {
+    setIsScannerOpen(false);
+    setIsCameraReady(false);
+    setIsRecognizingFrame(false);
   }
 
   function updateOrderCompany(value: string) {
@@ -691,6 +958,8 @@ export default function PurchaseScreen() {
     setPaymentAmount('');
     setPaymentMethod('cash');
     setFocusedSupplierField(null);
+    setScannedProductMatches([]);
+    setScannerMessage('');
     setSaveError('');
   }
 
@@ -929,6 +1198,7 @@ export default function PurchaseScreen() {
       const sourceRow = item.sourceRowId
         ? placeRows.find((row) => row.id === item.sourceRowId)
         : undefined;
+      const inventoryUnitPrice = getInventoryUnitPrice(batch.mrp, batch.packSize);
       return {
         ...(sourceRow ?? {}),
         id: `${order}-${item.id}-${index}`,
@@ -946,7 +1216,7 @@ export default function PurchaseScreen() {
         expDate: batch.expDate,
         mrp: batch.mrp,
         packSize: batch.packSize,
-        unitPrice: product?.unit_price.trim() || sourceRow?.unitPrice || '-',
+        unitPrice: inventoryUnitPrice === null ? '-' : String(inventoryUnitPrice),
         packPrice: batch.price,
         productPackPrice: product?.pack_price.trim() || sourceRow?.productPackPrice || '-',
         quantity: batch.quantity,
@@ -1248,12 +1518,48 @@ export default function PurchaseScreen() {
                     </Pressable>
                   </View>
                 ) : null}
-                <Field
-                  label="Company Name"
-                  value={form.supplier}
-                  onChangeText={updateReceiveCompany}
-                  placeholder="Type or select a company"
-                />
+                <View style={styles.scannerFieldRow}>
+                  <Field
+                    label="Company Name"
+                    value={form.supplier}
+                    onChangeText={updateReceiveCompany}
+                    placeholder="Type or scan a brand"
+                    style={styles.scannerField}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Scan brand name"
+                    onPress={() => void startCameraScan('product')}
+                    style={styles.scanButton}>
+                    <SymbolView
+                      name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                      size={20}
+                      tintColor="#17664f"
+                    />
+                  </Pressable>
+                </View>
+                {scannerMessage === 'Not Found' ? (
+                  <View style={styles.scanMessageRow}>
+                    <Text style={styles.scanNotFound}>Not Found</Text>
+                    <Pressable onPress={() => void startCameraScan('product')}>
+                      <Text style={styles.retryText}>New Search</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                {scannedProductMatches.length > 1 ? (
+                  <View style={styles.productOptions}>
+                    {scannedProductMatches.map((product) => (
+                      <Pressable
+                        key={product.id}
+                        onPress={() => selectScannedProduct(product)}
+                        style={styles.productOption}>
+                        <Text style={styles.productOptionName}>
+                          {productName(product)} · {product.manufacturer}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
                 {receiveCompanySuggestions.length > 0 ? (
                   <View style={styles.productOptions}>
                     {receiveCompanySuggestions.map((company) => (
@@ -1313,9 +1619,25 @@ export default function PurchaseScreen() {
                 ) : null}
                 {form.brandName.trim() ? (
                   <>
-                    <Text style={styles.sectionLabel}>Add Batch Details</Text>
+                    <View style={styles.batchScanHeader}>
+                      <Text style={styles.sectionLabel}>Add Batch Details</Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Scan batch number and dates"
+                        onPress={() => void startCameraScan('batch')}
+                        style={styles.scanButton}>
+                        <SymbolView
+                          name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                          size={20}
+                          tintColor="#17664f"
+                        />
+                      </Pressable>
+                    </View>
+                    {scannerMessage && scannerMessage !== 'Not Found' ? (
+                      <Text style={styles.scanMessage}>{scannerMessage}</Text>
+                    ) : null}
                 <View style={styles.rowFields}>
-                  <Field ref={(node) => { batchInputRefs.current.batchNumber = node; }} label="Batch Number" value={form.batchNumber} onChangeText={(value) => updateForm('batchNumber', value)} onSubmitEditing={() => focusNextBatchField('batchNumber')} returnKeyType="next" placeholder="Numbers only" keyboardType="default" style={styles.halfField} />
+                  <Field ref={(node) => { batchInputRefs.current.batchNumber = node; }} label="Batch Number" value={form.batchNumber} onChangeText={(value) => updateForm('batchNumber', value)} onSubmitEditing={() => focusNextBatchField('batchNumber')} returnKeyType="next" placeholder="Batch/lot number" keyboardType="default" style={styles.halfField} />
                   <Field ref={(node) => { batchInputRefs.current.packSize = node; }} label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} onSubmitEditing={() => focusNextBatchField('packSize')} returnKeyType="next" placeholder="e.g. 10" style={styles.halfField} />
                 </View>
                 <View style={styles.rowFields}>
@@ -1612,6 +1934,50 @@ export default function PurchaseScreen() {
           ) : null}
         </SafeAreaView>
       </Modal>
+      <Modal
+        visible={isScannerOpen}
+        animationType="slide"
+        onRequestClose={closeCameraScanner}
+        statusBarTranslucent>
+        <View style={styles.scannerModal}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            onCameraReady={() => setIsCameraReady(true)}
+            onMountError={(event) => {
+              alert.alert('Camera unavailable', event.message);
+              closeCameraScanner();
+            }}
+            animateShutter={false}
+          />
+          <View pointerEvents="box-none" style={styles.scannerOverlay}>
+            <View style={styles.scannerHeader}>
+              <Text style={styles.scannerTitle}>
+                {scannerMode === 'product' ? 'Scan product brand' : 'Scan batch details'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close scanner"
+                onPress={closeCameraScanner}
+                style={styles.scannerCloseButton}>
+                <Text style={styles.scannerCloseText}>Close</Text>
+              </Pressable>
+            </View>
+            <View style={styles.scannerGuide}>
+              <View style={styles.scannerTarget} />
+              <View style={styles.scannerHint}>
+                {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
+                <Text style={styles.scannerHintText}>
+                  {scannerMode === 'product'
+                    ? 'Point the camera at the brand name'
+                    : 'Frame the batch number, MFG date and EXP date'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1741,6 +2107,23 @@ const styles = StyleSheet.create({
   field: { gap: 5 },
   fieldLabel: { color: '#40564a', fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, paddingHorizontal: 11, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 9, backgroundColor: '#fff', color: '#24382e', fontSize: 13 },
+  scannerFieldRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  scannerField: { flex: 1 },
+  scanButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 9, backgroundColor: '#eef8f2' },
+  scanMessageRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  scanNotFound: { color: '#a63e34', fontSize: 12, fontWeight: '700' },
+  scanMessage: { color: '#78847d', fontSize: 11, lineHeight: 16 },
+  batchScanHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  scannerModal: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
+  scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  scannerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  scannerCloseButton: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scannerCloseText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  scannerGuide: { flex: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 24 },
+  scannerTarget: { width: '100%', height: 180, borderWidth: 2, borderColor: '#42e6a3', borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.08)' },
+  scannerHint: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
+  scannerHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sectionLabel: { marginTop: 4, color: '#193c30', fontSize: 14, fontWeight: '800' },
   productOptions: { borderWidth: 1, borderColor: '#e2e9e2', borderRadius: 10, backgroundColor: '#fff' },
   companyOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },

@@ -6,7 +6,9 @@ import DashboardSectionPage, { type SectionData } from "../DashboardSectionPage"
 import ExcelExportButton from "../components/ExcelExportButton";
 import PurchaseCreateAction from "./PurchaseCreateAction";
 import {
+  calculateInventoryUnitPrice,
   calculateUnitPurchasePrice,
+  getInventoryPackPrice,
   emptyPurchaseListSnapshot,
   getOrderTotal,
   getPurchaseListSnapshot,
@@ -331,7 +333,7 @@ export default function PurchasePage() {
                         row.mrp ?? "-",
                         row.quantity ?? "-",
                         row.packSize,
-                        row.unitPrice,
+                        calculateInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize),
                         row.packPrice,
                         row.totalPrice ? `৳${Number(row.totalPrice).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-",
                         calculateUnitPurchasePrice(row.packSize, row.totalPrice ?? "", row.quantity ?? "") === "-"

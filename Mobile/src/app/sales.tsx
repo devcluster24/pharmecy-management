@@ -1,12 +1,13 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
-import * as ImagePicker from 'expo-image-picker';
+import { Camera, CameraView } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
+  Modal,
   Pressable,
   Platform,
   ScrollView,
@@ -22,6 +23,7 @@ import * as Sharing from 'expo-sharing';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
+import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import {
   loadInvoiceTemplateSettings,
   type InvoiceFieldKey,
@@ -34,6 +36,8 @@ const SALES_KEY = 'pharmacy-sales-list-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const VAT_SETTINGS_KEY = 'pharmacy-vat-tax-settings-v1';
 const SEARCH_RESULT_LIMIT = 30;
+const SCAN_FRAME_INTERVAL_MS = 100;
+const SCAN_TIMEOUT_MS = 1000;
 const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
 type InventoryRow = {
@@ -316,9 +320,8 @@ function getAvailableQuantity(row: InventoryRow) {
   return Number((quantity * multiplier).toFixed(4));
 }
 
-function getUnitPrice(value: string) {
-  const amount = Number.parseFloat(value.replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+function getSaleUnitPrice(row: InventoryRow) {
+  return getInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize) ?? 0;
 }
 
 function isExpired(row: InventoryRow, now: Date) {
@@ -338,44 +341,13 @@ function roundCurrency(amount: number) {
   return Number(amount.toFixed(2));
 }
 
-function normalizeBrandName(value: string) {
-  return value.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^a-z0-9]/g, '');
+function getBrandWords(value: string) {
+  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
 }
 
-function getStringSimilarity(left: string, right: string) {
-  if (left === right) return 1;
-  if (!left || !right) return 0;
-
-  const distances = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    let previousDiagonal = distances[0];
-    distances[0] = leftIndex;
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const previousAbove = distances[rightIndex];
-      distances[rightIndex] = Math.min(
-        distances[rightIndex] + 1,
-        distances[rightIndex - 1] + 1,
-        previousDiagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
-      );
-      previousDiagonal = previousAbove;
-    }
-  }
-  return 1 - distances[right.length] / Math.max(left.length, right.length);
-}
-
-function getBrandMatchScore(brand: string, scannedText: string) {
-  const normalizedBrand = normalizeBrandName(brand);
-  const normalizedText = normalizeBrandName(scannedText);
-  if (!normalizedBrand || !normalizedText) return 0;
-  if (normalizedText.includes(normalizedBrand)) return 1;
-
-  const brandWords = brand.toLocaleLowerCase('en-US').match(/[a-z0-9]+/g) ?? [];
-  const scannedWords = scannedText.toLocaleLowerCase('en-US').match(/[a-z0-9]+/g) ?? [];
-  return Math.max(0, ...brandWords
-    .filter((word) => word.length >= 3)
-    .flatMap((word) => scannedWords
-      .filter((scannedWord) => scannedWord.length >= 3)
-      .map((scannedWord) => getStringSimilarity(word, scannedWord))));
+function hasBrandWordMatch(brand: string, scannedText: string) {
+  const scannedWords = new Set(getBrandWords(scannedText));
+  return getBrandWords(brand).some((word) => scannedWords.has(word));
 }
 
 export default function SalesScreen() {
@@ -398,6 +370,9 @@ export default function SalesScreen() {
   const [savedInvoice, setSavedInvoice] = useState<SaleInvoice | null>(null);
   const [searchValue, setSearchValue] = useState('');
   const [scanResult, setScanResult] = useState<MedicineScanResult | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
   const [customerName, setCustomerName] = useState(WALK_IN_CUSTOMER);
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -413,6 +388,7 @@ export default function SalesScreen() {
   const [retryKey, setRetryKey] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const salesScrollRef = useRef<ScrollView>(null);
+  const cameraRef = useRef<CameraView | null>(null);
   const inputRefs = useRef(new Map<string, TextInput>());
   const focusedInputRef = useRef<TextInput | null>(null);
   const scrollOffsetRef = useRef(0);
@@ -573,41 +549,17 @@ export default function SalesScreen() {
     }
 
     setIsScanning(true);
-    setScanResult(null);
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      const permission = await Camera.requestCameraPermissionsAsync();
       if (!permission.granted) {
         alert.alert('Camera permission required', 'Allow camera access to scan a medicine label.');
         return;
       }
 
-      const capture = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
-        quality: 0.8,
-      });
-      if (capture.canceled || !capture.assets[0]) return;
-
-      const recognized = await TextRecognition.recognize(capture.assets[0].uri);
       setSearchValue('');
-      const brandGroups = new Map<string, string>();
-      for (const batch of availableInventory) {
-        const key = normalizeBrandName(batch.brand);
-        if (key && !brandGroups.has(key)) brandGroups.set(key, batch.brand);
-      }
-      const bestMatch = [...brandGroups.entries()]
-        .map(([key, brand]) => ({ key, score: getBrandMatchScore(brand, recognized.text) }))
-        .sort((left, right) => right.score - left.score)[0];
-
-      if (!bestMatch || bestMatch.score < 0.72) {
-        setScanResult({ status: 'notFound' });
-      } else {
-        setScanResult({
-          status: 'matched',
-          batches: availableInventory
-            .filter((batch) => normalizeBrandName(batch.brand) === bestMatch.key)
-            .slice(0, SEARCH_RESULT_LIMIT),
-        });
-      }
+      setScanResult(null);
+      setIsCameraReady(false);
+      setIsCameraOpen(true);
       Keyboard.dismiss();
     } catch (scanError) {
       alert.alert(
@@ -618,6 +570,82 @@ export default function SalesScreen() {
       setIsScanning(false);
     }
   }
+
+  useEffect(() => {
+    if (!isCameraOpen || !isCameraReady) return;
+    let active = true;
+    let complete = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const scanStartedAt = Date.now();
+
+    async function scanFrame() {
+      if (!active || complete) return;
+      let frameUri: string | undefined;
+      setIsRecognizingFrame(true);
+      try {
+        const frame = await cameraRef.current?.takePictureAsync({
+          quality: 0.4,
+          shutterSound: false,
+        });
+        if (!frame) throw new Error('The camera could not provide a scan frame.');
+        frameUri = frame.uri;
+        const recognized = await TextRecognition.recognize(frameUri);
+        const matchingBatches = availableInventory.filter((batch) =>
+          hasBrandWordMatch(batch.brand, recognized.text),
+        );
+
+        if (matchingBatches.length > 0) {
+          complete = true;
+          setScanResult({
+            status: 'matched',
+            batches: matchingBatches.slice(0, SEARCH_RESULT_LIMIT),
+          });
+          setIsCameraOpen(false);
+        } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+          complete = true;
+          setScanResult({ status: 'notFound' });
+          setIsCameraOpen(false);
+        }
+      } catch (scanError) {
+        complete = true;
+        if (active) {
+          alert.alert(
+            'Medicine scan failed',
+            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+          );
+          setIsCameraOpen(false);
+        }
+      } finally {
+        if (frameUri) {
+          try {
+            await FileSystem.deleteAsync(frameUri, { idempotent: true });
+          } catch (cleanupError) {
+            complete = true;
+            if (active) {
+              alert.alert(
+                'Scan cleanup failed',
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : 'Could not remove the temporary scan frame.',
+              );
+              setIsCameraOpen(false);
+            }
+          }
+        }
+        if (active) setIsRecognizingFrame(false);
+      }
+
+      if (active && !complete) {
+        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+      }
+    }
+
+    void scanFrame();
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [alert, availableInventory, isCameraOpen, isCameraReady]);
 
   const selectedRows = lines.map((line) => ({
     line,
@@ -630,7 +658,7 @@ export default function SalesScreen() {
   );
   const totalPrice = selectedRows.reduce((total, selected) => {
     if (!selected.batch || !Number.isFinite(selected.quantity) || selected.quantity <= 0) return total;
-    return total + roundCurrency(selected.quantity * getUnitPrice(selected.batch.unitPrice));
+    return total + roundCurrency(selected.quantity * getSaleUnitPrice(selected.batch));
   }, 0);
   const parsedDiscount = discountValue.trim() ? Number(discountValue) : 0;
   const validDiscount = Number.isFinite(parsedDiscount)
@@ -681,7 +709,7 @@ export default function SalesScreen() {
             Batch {batch.batchNumber} · Stock {getAvailableQuantity(batch) ?? '—'}
           </Text>
         </View>
-        <Text style={styles.productPrice}>{formatCurrency(getUnitPrice(batch.unitPrice))}</Text>
+        <Text style={styles.productPrice}>{formatCurrency(getSaleUnitPrice(batch))}</Text>
       </Pressable>
     );
   }
@@ -746,7 +774,7 @@ export default function SalesScreen() {
         ...(multiplier ? { quantity: String(Number((nextAvailable / multiplier).toFixed(4))) } : {}),
         updatedAt: now.toISOString(),
       };
-      const unitPrice = getUnitPrice(batch.unitPrice);
+      const unitPrice = getSaleUnitPrice(batch);
       const purchasePrice = batch.unitPurchasePrice?.trim()
         ? Number(batch.unitPurchasePrice)
         : Number.NaN;
@@ -881,6 +909,12 @@ export default function SalesScreen() {
     setPaymentMethod('cash');
     setError('');
     setSalesScrollPositionToTop();
+  }
+
+  function closeMedicineScanner() {
+    setIsCameraOpen(false);
+    setIsCameraReady(false);
+    setIsRecognizingFrame(false);
   }
 
   function setSalesScrollPositionToTop() {
@@ -1163,7 +1197,7 @@ export default function SalesScreen() {
                       {batch?.strength ? ` · ${batch.strength}` : ''}
                     </Text>
                     <Text style={styles.productDetails}>
-                      Unit price {formatCurrency(batch ? getUnitPrice(batch.unitPrice) : 0)}
+                      Unit price {formatCurrency(batch ? getSaleUnitPrice(batch) : 0)}
                       {' · '}Available {batch ? getAvailableQuantity(batch) ?? '—' : '—'}
                     </Text>
                   </View>
@@ -1206,7 +1240,7 @@ export default function SalesScreen() {
                   <Text style={styles.lineTotal}>
                     {formatCurrency(
                       (Number.parseInt(line.quantity, 10) || 0)
-                      * (batch ? getUnitPrice(batch.unitPrice) : 0),
+                      * (batch ? getSaleUnitPrice(batch) : 0),
                     )}
                   </Text>
                 </View>
@@ -1412,6 +1446,46 @@ export default function SalesScreen() {
           </Pressable>
         </View>
       ) : null}
+      <Modal
+        visible={isCameraOpen}
+        animationType="slide"
+        onRequestClose={closeMedicineScanner}
+        statusBarTranslucent>
+        <View style={styles.scannerModal}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            onCameraReady={() => setIsCameraReady(true)}
+            onMountError={(event) => {
+              alert.alert('Camera unavailable', event.message);
+              closeMedicineScanner();
+            }}
+            animateShutter={false}
+          />
+          <View pointerEvents="box-none" style={styles.scannerOverlay}>
+            <View style={styles.scannerHeader}>
+              <Text style={styles.scannerTitle}>Scan medicine brand</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close scanner"
+                onPress={closeMedicineScanner}
+                style={styles.scannerCloseButton}>
+                <Text style={styles.scannerCloseText}>Close</Text>
+              </Pressable>
+            </View>
+            <View style={styles.scannerGuide}>
+              <View style={styles.scannerTarget} />
+              <View style={styles.scannerHint}>
+                {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
+                <Text style={styles.scannerHintText}>
+                  Point the camera at the brand name
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1527,6 +1601,16 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchInput: { flex: 1, minHeight: 46, paddingHorizontal: 13, borderWidth: 1, borderColor: '#dce5df', borderRadius: 10, backgroundColor: '#fff', color: '#203128', fontSize: 13 },
   scanButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 10, backgroundColor: '#eef8f2' },
+  scannerModal: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
+  scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  scannerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  scannerCloseButton: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scannerCloseText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  scannerGuide: { flex: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 24 },
+  scannerTarget: { width: '100%', height: 180, borderWidth: 2, borderColor: '#42e6a3', borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.08)' },
+  scannerHint: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
+  scannerHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   searchResults: { marginTop: 6, overflow: 'hidden', borderWidth: 1, borderColor: '#e3e9e4', borderRadius: 10, backgroundColor: '#fff' },
   newSearchButton: { alignItems: 'center', justifyContent: 'center', minHeight: 42, borderTopWidth: 1, borderTopColor: '#edf0ed', backgroundColor: '#f7fbf8' },
   newSearchButtonText: { color: '#17664f', fontSize: 12, fontWeight: '800' },

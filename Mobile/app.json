@@ -37,6 +37,13 @@
       ],
       "expo-sharing",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Pharmacy Cluster to scan medicine labels for New Sale.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow Pharmacy Cluster to select a profile photo.",

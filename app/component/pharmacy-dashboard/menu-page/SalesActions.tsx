@@ -18,6 +18,8 @@ import {
   emptyPurchaseListSnapshot,
   getAvailablePurchaseQuantity,
   getPurchaseListSnapshot,
+  calculateInventoryUnitPrice,
+  getInventoryPackPrice,
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
@@ -82,8 +84,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function mapInventoryRow(row: PurchaseListRow): SaleProduct {
-  const boxPrice = [row.mrp, row.productPackPrice, row.packPrice]
-    .find((price) => Boolean(price?.trim() && price.trim() !== "-"));
+  const packPrice = getInventoryPackPrice(row.mrp);
   const unitPurchasePrice = row.unitPurchasePrice?.trim() && row.unitPurchasePrice.trim() !== "-"
     ? Number(row.unitPurchasePrice)
     : Number.NaN;
@@ -95,8 +96,8 @@ function mapInventoryRow(row: PurchaseListRow): SaleProduct {
     strength: row.strength,
     unit: row.dosageForm,
     packSize: row.packSize,
-    boxPrice: boxPrice || "0",
-    unitPrice: row.unitPrice,
+    boxPrice: packPrice,
+    unitPrice: calculateInventoryUnitPrice(packPrice, row.packSize),
     batchNumber: row.batchNumber,
     expDate: row.expDate,
     isExpired: isInventoryItemExpired(row.expDate),

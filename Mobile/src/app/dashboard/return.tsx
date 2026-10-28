@@ -1,14 +1,21 @@
-import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import TextRecognition from '@react-native-ml-kit/text-recognition';
+import { Camera, CameraView } from 'expo-camera';
+import { SymbolView } from 'expo-symbols';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  Modal,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
@@ -20,6 +27,8 @@ const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const RETURNS_KEY = 'pharmacy-return-records-v1';
 const RETURN_DEDUCTION_SETTINGS_KEY = 'pharmacy-return-deduction-settings-v1';
 const WALK_IN_CUSTOMER = 'Walk-in customer';
+const SCAN_FRAME_INTERVAL_MS = 100;
+const SCAN_TIMEOUT_MS = 1000;
 
 type SaleLine = {
   brand: string;
@@ -176,6 +185,15 @@ function returnKey(invoice: SaleInvoice, line: SaleLine, index: number) {
   return `${invoice.id}-${line.batchNumber}-${index}`;
 }
 
+function getBrandWords(value: string) {
+  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
+}
+
+function getBrandMatchScore(brand: string, scannedText: string) {
+  const scannedWords = new Set(getBrandWords(scannedText));
+  return new Set(getBrandWords(brand).filter((word) => scannedWords.has(word))).size;
+}
+
 async function persistPayload(
   client: NonNullable<typeof supabase>,
   ownerId: string,
@@ -204,6 +222,7 @@ async function persistPayload(
 }
 
 export default function ReturnScreen() {
+  const alert = useLocalizedAlert();
   const { dashboardRole, isLoading: authLoading, profileLoading, session } = useAuth();
   const [screen, setScreen] = useState<Screen>('list');
   const [invoices, setInvoices] = useState<SaleInvoice[]>([]);
@@ -218,6 +237,11 @@ export default function ReturnScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
+  const [scanNotFound, setScanNotFound] = useState(false);
+  const cameraRef = useRef<CameraView | null>(null);
 
   const quantitiesAlreadyReturned = (invoice: string, line: SaleLine) => returns
     .filter((record) => record.invoice === invoice
@@ -304,6 +328,119 @@ export default function ReturnScreen() {
       return [{ key, invoice, line, index }];
     })).slice(0, 20);
   }, [invoices, query, returns, selectedItems]);
+
+  useEffect(() => {
+    if (!isScannerOpen || !isCameraReady) return;
+    let active = true;
+    let complete = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const scanStartedAt = Date.now();
+    const brands = [...new Set([
+      ...returns.map((record) => record.brand),
+      ...invoices.flatMap((invoice) => invoice.lines.map((line) => line.brand)),
+    ].map((brand) => brand.trim()).filter(Boolean))];
+
+    async function scanFrame() {
+      if (!active || complete) return;
+      let frameUri: string | undefined;
+      setIsRecognizingFrame(true);
+      try {
+        const frame = await cameraRef.current?.takePictureAsync({
+          quality: 0.4,
+          shutterSound: false,
+        });
+        if (!frame) throw new Error('The camera could not provide a scan frame.');
+        frameUri = frame.uri;
+        const recognized = await TextRecognition.recognize(frameUri);
+        if (!active) return;
+
+        const matches = brands
+          .map((brand) => ({ brand, score: getBrandMatchScore(brand, recognized.text) }))
+          .filter(({ score }) => score > 0)
+          .sort((left, right) => right.score - left.score);
+        const bestScore = matches[0]?.score ?? 0;
+        if (bestScore > 0) {
+          complete = true;
+          setSearchValue(matches[0].brand);
+          setScanNotFound(false);
+          setError('');
+          setIsScannerOpen(false);
+          Keyboard.dismiss();
+        } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+          complete = true;
+          setScanNotFound(true);
+          setIsScannerOpen(false);
+        }
+      } catch (scanError) {
+        complete = true;
+        if (active) {
+          alert.alert(
+            'Camera scan failed',
+            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+          );
+          setIsScannerOpen(false);
+        }
+      } finally {
+        if (frameUri) {
+          try {
+            await FileSystem.deleteAsync(frameUri, { idempotent: true });
+          } catch (cleanupError) {
+            complete = true;
+            if (active) {
+              alert.alert(
+                'Scan cleanup failed',
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : 'Could not remove the temporary scan frame.',
+              );
+              setIsScannerOpen(false);
+            }
+          }
+        }
+        if (active) setIsRecognizingFrame(false);
+      }
+
+      if (active && !complete) {
+        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+      }
+    }
+
+    void scanFrame();
+    return () => {
+      active = false;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [alert, invoices, isCameraReady, isScannerOpen, returns]);
+
+  async function startCameraScan() {
+    if (Platform.OS === 'web') {
+      alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
+      return;
+    }
+    setSearchValue('');
+    setScanNotFound(false);
+    setIsCameraReady(false);
+    try {
+      const permission = await Camera.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        alert.alert('Camera permission required', 'Allow camera access to scan a medicine brand.');
+        return;
+      }
+      Keyboard.dismiss();
+      setIsScannerOpen(true);
+    } catch (permissionError) {
+      alert.alert(
+        'Camera permission failed',
+        permissionError instanceof Error ? permissionError.message : 'Could not request camera access.',
+      );
+    }
+  }
+
+  function closeCameraScanner() {
+    setIsScannerOpen(false);
+    setIsCameraReady(false);
+    setIsRecognizingFrame(false);
+  }
 
   const returnTotal = selectedItems.reduce(
     (total, item) => total + item.line.unitPrice * (Number(item.quantity) || 0),
@@ -519,14 +656,38 @@ export default function ReturnScreen() {
                 <Text style={styles.primaryButtonText}>Record Return</Text>
               </Pressable>
             </View>
-            <TextInput
-              accessibilityLabel="Search returns"
-              value={searchValue}
-              onChangeText={setSearchValue}
-              placeholder="Search return ID, invoice, brand or batch"
-              placeholderTextColor="#87928d"
-              style={styles.search}
-            />
+            <View style={styles.searchRow}>
+              <TextInput
+                accessibilityLabel="Search returns"
+                value={searchValue}
+                onChangeText={(value) => {
+                  setSearchValue(value);
+                  setScanNotFound(false);
+                }}
+                placeholder="Search return ID, invoice, brand or batch"
+                placeholderTextColor="#87928d"
+                style={styles.search}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Scan product brand"
+                onPress={() => void startCameraScan()}
+                style={styles.scanButton}>
+                <SymbolView
+                  name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                  size={20}
+                  tintColor="#17664f"
+                />
+              </Pressable>
+            </View>
+            {scanNotFound ? (
+              <View style={styles.scanMessageRow}>
+                <Text style={styles.scanNotFound}>Not Found</Text>
+                <Pressable onPress={() => void startCameraScan()}>
+                  <Text style={styles.link}>New Search</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {error ? (
               <View style={styles.errorCard}>
                 <Text style={styles.error}>{error}</Text>
@@ -573,18 +734,40 @@ export default function ReturnScreen() {
           <>
             <Text style={styles.title}>Record Return</Text>
             <Text style={styles.subtitle}>Search only products sold on saved invoices.</Text>
-            <TextInput
-              accessibilityLabel="Search invoice products by invoice number or brand name"
-              autoCapitalize="none"
-              value={searchValue}
-              onChangeText={(value) => {
-                setSearchValue(value);
-                setError('');
-              }}
-              placeholder="Invoice number or brand name"
-              placeholderTextColor="#87928d"
-              style={styles.search}
-            />
+            <View style={styles.searchRow}>
+              <TextInput
+                accessibilityLabel="Search invoice products by invoice number or brand name"
+                autoCapitalize="none"
+                value={searchValue}
+                onChangeText={(value) => {
+                  setSearchValue(value);
+                  setScanNotFound(false);
+                  setError('');
+                }}
+                placeholder="Invoice number or brand name"
+                placeholderTextColor="#87928d"
+                style={styles.search}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Scan product brand"
+                onPress={() => void startCameraScan()}
+                style={styles.scanButton}>
+                <SymbolView
+                  name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                  size={20}
+                  tintColor="#17664f"
+                />
+              </Pressable>
+            </View>
+            {scanNotFound ? (
+              <View style={styles.scanMessageRow}>
+                <Text style={styles.scanNotFound}>Not Found</Text>
+                <Pressable onPress={() => void startCameraScan()}>
+                  <Text style={styles.link}>New Search</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {matchingItems.map(({ key, invoice, line, index }) => (
               <Pressable key={key} onPress={() => addItem(invoice, line, index)} style={styles.card}>
                 <Text style={styles.cardTitle}>{line.brand}</Text>
@@ -704,6 +887,44 @@ export default function ReturnScreen() {
           </>
         ) : null}
       </ScrollView>
+      <Modal
+        visible={isScannerOpen}
+        animationType="slide"
+        onRequestClose={closeCameraScanner}
+        statusBarTranslucent>
+        <View style={styles.scannerModal}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            onCameraReady={() => setIsCameraReady(true)}
+            onMountError={(event) => {
+              alert.alert('Camera unavailable', event.message);
+              closeCameraScanner();
+            }}
+            animateShutter={false}
+          />
+          <View pointerEvents="box-none" style={styles.scannerOverlay}>
+            <View style={styles.scannerHeader}>
+              <Text style={styles.scannerTitle}>Scan product brand</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close scanner"
+                onPress={closeCameraScanner}
+                style={styles.scannerCloseButton}>
+                <Text style={styles.scannerCloseText}>Close</Text>
+              </Pressable>
+            </View>
+            <View style={styles.scannerGuide}>
+              <View style={styles.scannerTarget} />
+              <View style={styles.scannerHint}>
+                {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
+                <Text style={styles.scannerHintText}>Point the camera at the brand name</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -719,7 +940,21 @@ const styles = StyleSheet.create({
   subtitle: { color: '#728078', fontSize: 12, lineHeight: 17 },
   primaryButton: { minHeight: 44, paddingHorizontal: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#17664f' },
   primaryButtonText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  search: { minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 10, backgroundColor: '#fff', color: '#20342a', fontSize: 13 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  search: { flex: 1, minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 10, backgroundColor: '#fff', color: '#20342a', fontSize: 13 },
+  scanButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 10, backgroundColor: '#eef8f2' },
+  scanMessageRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  scanNotFound: { color: '#a63e34', fontSize: 12, fontWeight: '700' },
+  scannerModal: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
+  scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  scannerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  scannerCloseButton: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scannerCloseText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  scannerGuide: { flex: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 24 },
+  scannerTarget: { width: '100%', height: 180, borderWidth: 2, borderColor: '#42e6a3', borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.08)' },
+  scannerHint: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
+  scannerHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   inlineLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 },
   errorCard: { padding: 12, gap: 8, borderRadius: 10, backgroundColor: '#fff0ed' },
   error: { color: '#a63e34', fontSize: 12, lineHeight: 18 },

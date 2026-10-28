@@ -11,6 +11,8 @@ import {
   persistPlaceOrderListRows,
   persistPurchaseListRows,
   calculateTotalQuantity,
+  calculateInventoryUnitPrice,
+  getInventoryPackPrice,
   calculateUnitPurchasePrice,
   emptyPurchaseListSnapshot,
   getPlaceOrderListSnapshot,
@@ -152,12 +154,6 @@ const fieldStyle = {
 
 function displayValue(value: string | undefined) {
   return value?.trim() || "-";
-}
-
-function getUnitPrice(unitPrice: string | undefined, mrp: string | undefined, packSize: string) {
-  const savedUnitPrice = unitPrice?.trim();
-  if (savedUnitPrice && savedUnitPrice !== "-") return savedUnitPrice;
-  return calculateUnitPurchasePrice(packSize, mrp ?? "", "1");
 }
 
 function formatMonthYear(value: string) {
@@ -593,7 +589,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
           packPrice: batch.purchasePrice,
           productPackPrice: product?.pack_price,
           unitPurchasePrice: calculateUnitPurchasePrice(batch.packSize, batch.totalPrice, batch.quantity),
-          unitPrice: getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+          unitPrice: calculateInventoryUnitPrice(batch.mrp, batch.packSize),
           orderPaidAmount: formatOrderPrice(receivePaidAmount),
           orderDueAmount: formatOrderPrice(receiveDueAmount),
           productId: product?.id,
@@ -1022,7 +1018,10 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         expDate: batch.expDate,
         mrp: batch.mrp,
         packSize: batch.packSize,
-        unitPrice: getUnitPrice(sourceRow.unitPrice, batch.mrp, batch.packSize),
+        unitPrice: calculateInventoryUnitPrice(
+          getInventoryPackPrice(batch.mrp),
+          batch.packSize,
+        ),
         quantity: batch.quantity || sourceRow.quantity || "",
         totalPrice: batch.totalPrice || sourceRow.totalPrice || "",
         unitPurchasePrice: calculateUnitPurchasePrice(
@@ -1196,7 +1195,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         `${formatMonthYear(batch.mfgDate)}\n${formatMonthYear(batch.expDate)}`,
         batch.mrp,
         batch.packSize,
-        getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+        calculateInventoryUnitPrice(batch.mrp, batch.packSize),
         batch.quantity,
         batch.totalPrice,
         <div key={`selected-action-${companySelection.id}-${selection.id}-${batchIndex}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1227,7 +1226,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
       `${formatMonthYear(row.mfgDate)}\n${formatMonthYear(row.expDate)}`,
       row.mrp ?? "",
       row.packSize,
-      getUnitPrice(row.unitPrice, row.mrp, row.packSize),
+      calculateInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize),
       row.quantity ?? "",
       row.totalPrice ?? "",
       <div key={`received-action-${row.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1654,7 +1653,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                             `${formatMonthYear(batch.mfgDate)}\n${formatMonthYear(batch.expDate)}`,
                             batch.mrp,
                             batch.packSize,
-                            getUnitPrice(product?.unit_price, batch.mrp, batch.packSize),
+                            calculateInventoryUnitPrice(batch.mrp, batch.packSize),
                             batch.quantity,
                             batch.totalPrice,
                             null,
@@ -1723,7 +1722,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                             `${formatMonthYear(row.mfgDate)}\n${formatMonthYear(row.expDate)}`,
                             row.mrp ?? "",
                             row.packSize,
-                            getUnitPrice(row.unitPrice, row.mrp, row.packSize),
+                            calculateInventoryUnitPrice(getInventoryPackPrice(row.mrp), row.packSize),
                             row.quantity ?? "",
                             row.totalPrice ?? "",
                             null,

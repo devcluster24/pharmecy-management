@@ -737,7 +737,7 @@ export function useTranslate() {
 
 export function useLocalizedAlert() {
   const { language, currency } = useLanguage();
-  return {
+  return useMemo(() => ({
     alert: (...args: Parameters<typeof NativeAlert.alert>) => {
       const [title, message, buttons, options] = args;
       NativeAlert.alert(
@@ -750,7 +750,7 @@ export function useLocalizedAlert() {
         options,
       );
     },
-  };
+  }), [currency, language]);
 }
 
 export const Text = forwardRef<NativeText, TextProps>(function LocalizedText(
