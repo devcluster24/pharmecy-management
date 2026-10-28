@@ -98,6 +98,10 @@ type SaleInvoice = {
 
 type PaymentMethodOption = { id: string; label: string };
 
+type MedicineScanResult =
+  | { status: 'notFound' }
+  | { status: 'matched'; batches: InventoryRow[] };
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -334,6 +338,46 @@ function roundCurrency(amount: number) {
   return Number(amount.toFixed(2));
 }
 
+function normalizeBrandName(value: string) {
+  return value.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[^a-z0-9]/g, '');
+}
+
+function getStringSimilarity(left: string, right: string) {
+  if (left === right) return 1;
+  if (!left || !right) return 0;
+
+  const distances = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let previousDiagonal = distances[0];
+    distances[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const previousAbove = distances[rightIndex];
+      distances[rightIndex] = Math.min(
+        distances[rightIndex] + 1,
+        distances[rightIndex - 1] + 1,
+        previousDiagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+      previousDiagonal = previousAbove;
+    }
+  }
+  return 1 - distances[right.length] / Math.max(left.length, right.length);
+}
+
+function getBrandMatchScore(brand: string, scannedText: string) {
+  const normalizedBrand = normalizeBrandName(brand);
+  const normalizedText = normalizeBrandName(scannedText);
+  if (!normalizedBrand || !normalizedText) return 0;
+  if (normalizedText.includes(normalizedBrand)) return 1;
+
+  const brandWords = brand.toLocaleLowerCase('en-US').match(/[a-z0-9]+/g) ?? [];
+  const scannedWords = scannedText.toLocaleLowerCase('en-US').match(/[a-z0-9]+/g) ?? [];
+  return Math.max(0, ...brandWords
+    .filter((word) => word.length >= 3)
+    .flatMap((word) => scannedWords
+      .filter((scannedWord) => scannedWord.length >= 3)
+      .map((scannedWord) => getStringSimilarity(word, scannedWord))));
+}
+
 export default function SalesScreen() {
   const alert = useLocalizedAlert();
   const {
@@ -353,6 +397,7 @@ export default function SalesScreen() {
   const [isBillSummaryOpen, setIsBillSummaryOpen] = useState(false);
   const [savedInvoice, setSavedInvoice] = useState<SaleInvoice | null>(null);
   const [searchValue, setSearchValue] = useState('');
+  const [scanResult, setScanResult] = useState<MedicineScanResult | null>(null);
   const [customerName, setCustomerName] = useState(WALK_IN_CUSTOMER);
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -528,6 +573,7 @@ export default function SalesScreen() {
     }
 
     setIsScanning(true);
+    setScanResult(null);
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
@@ -542,41 +588,26 @@ export default function SalesScreen() {
       if (capture.canceled || !capture.assets[0]) return;
 
       const recognized = await TextRecognition.recognize(capture.assets[0].uri);
-      const terms = [...new Set(
-        recognized.text.toLocaleLowerCase().match(/[a-z0-9]+/g) ?? [],
-      )].filter((term) => term.length >= 3);
-      if (!terms.length) {
-        alert.alert('No medicine text found', 'Try scanning the medicine name or generic name more clearly.');
-        return;
+      setSearchValue('');
+      const brandGroups = new Map<string, string>();
+      for (const batch of availableInventory) {
+        const key = normalizeBrandName(batch.brand);
+        if (key && !brandGroups.has(key)) brandGroups.set(key, batch.brand);
       }
+      const bestMatch = [...brandGroups.entries()]
+        .map(([key, brand]) => ({ key, score: getBrandMatchScore(brand, recognized.text) }))
+        .sort((left, right) => right.score - left.score)[0];
 
-      const matches = availableInventory
-        .map((batch) => {
-          const brand = batch.brand.toLocaleLowerCase();
-          const generic = batch.genericName.toLocaleLowerCase();
-          const details = [batch.strength, batch.dosageForm, batch.packSize]
-            .join(' ')
-            .toLocaleLowerCase();
-          const score = terms.reduce((total, term) => total
-            + (brand.includes(term) ? 3 : 0)
-            + (generic.includes(term) ? 2 : 0)
-            + (details.includes(term) ? 1 : 0), 0);
-          return { batch, score };
-        })
-        .filter((match) => match.score > 0)
-        .sort((left, right) => right.score - left.score);
-
-      if (!matches.length) {
-        setSearchValue(terms.join(' '));
-        alert.alert(
-          'No matching stock found',
-          'The scanned text did not match available inventory. Check the search results or enter the medicine name manually.',
-        );
-        return;
+      if (!bestMatch || bestMatch.score < 0.72) {
+        setScanResult({ status: 'notFound' });
+      } else {
+        setScanResult({
+          status: 'matched',
+          batches: availableInventory
+            .filter((batch) => normalizeBrandName(batch.brand) === bestMatch.key)
+            .slice(0, SEARCH_RESULT_LIMIT),
+        });
       }
-
-      setSearchValue(matches[0].batch.brand || matches[0].batch.genericName);
-      setError('');
       Keyboard.dismiss();
     } catch (scanError) {
       alert.alert(
@@ -628,7 +659,31 @@ export default function SalesScreen() {
   function addBatchToSale(batch: InventoryRow) {
     setLines((current) => [...current, { batchId: batch.id, quantity: '1' }]);
     setSearchValue('');
+    setScanResult(null);
     setError('');
+  }
+
+  function renderInventoryResult(batch: InventoryRow) {
+    return (
+      <Pressable
+        key={batch.id}
+        accessibilityRole="button"
+        onPress={() => addBatchToSale(batch)}
+        style={styles.productResult}>
+        <View style={styles.productResultInfo}>
+          <Text style={styles.productName}>{batch.brand}</Text>
+          <Text style={styles.productDetails}>
+            {[batch.genericName, batch.strength, batch.dosageForm, batch.packSize]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+          <Text style={styles.productDetails}>
+            Batch {batch.batchNumber} · Stock {getAvailableQuantity(batch) ?? '—'}
+          </Text>
+        </View>
+        <Text style={styles.productPrice}>{formatCurrency(getUnitPrice(batch.unitPrice))}</Text>
+      </Pressable>
+    );
   }
 
   async function saveSale() {
@@ -796,6 +851,7 @@ export default function SalesScreen() {
       setLines([]);
       setIsBillSummaryOpen(false);
       setSearchValue('');
+      setScanResult(null);
       setCustomerName(WALK_IN_CUSTOMER);
       setCustomerPhone('');
       setPaymentAmount('');
@@ -815,6 +871,7 @@ export default function SalesScreen() {
     setLines([]);
     setIsBillSummaryOpen(false);
     setSearchValue('');
+    setScanResult(null);
     setCustomerName(WALK_IN_CUSTOMER);
     setCustomerPhone('');
     setPaymentAmount('');
@@ -1041,7 +1098,10 @@ export default function SalesScreen() {
                     }}
                     accessibilityLabel="Search inventory brand or generic name"
                     autoCapitalize="none"
-                    onChangeText={setSearchValue}
+                    onChangeText={(value) => {
+                      setSearchValue(value);
+                      setScanResult(null);
+                    }}
                     placeholder={`Search ${availableInventory.length} inventory batches`}
                     placeholderTextColor="#87928d"
                     onFocus={() => focusSaleInput('inventorySearch')}
@@ -1069,28 +1129,26 @@ export default function SalesScreen() {
                 </View>
             {searchValue.trim() ? (
               <View style={styles.searchResults}>
-                {filteredInventory.length > 0 ? filteredInventory.map((batch) => (
-                  <Pressable
-                    key={batch.id}
-                    accessibilityRole="button"
-                    onPress={() => addBatchToSale(batch)}
-                    style={styles.productResult}>
-                    <View style={styles.productResultInfo}>
-                      <Text style={styles.productName}>{batch.brand}</Text>
-                      <Text style={styles.productDetails}>
-                        {[batch.genericName, batch.strength, batch.dosageForm, batch.packSize]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Text>
-                      <Text style={styles.productDetails}>
-                        Batch {batch.batchNumber} · Stock {getAvailableQuantity(batch) ?? '—'}
-                      </Text>
-                    </View>
-                    <Text style={styles.productPrice}>{formatCurrency(getUnitPrice(batch.unitPrice))}</Text>
-                  </Pressable>
-                )) : (
+                {filteredInventory.length > 0 ? filteredInventory.map(renderInventoryResult) : (
                   <Text style={styles.noResults}>No available inventory batches found.</Text>
                 )}
+              </View>
+            ) : null}
+            {scanResult ? (
+              <View style={styles.searchResults}>
+                {scanResult.status === 'matched' ? (
+                  scanResult.batches.map(renderInventoryResult)
+                ) : (
+                  <Text style={styles.noResults}>Not Found</Text>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: isScanning }}
+                  disabled={isScanning}
+                  onPress={() => void scanMedicine()}
+                  style={styles.newSearchButton}>
+                  <Text style={styles.newSearchButtonText}>New Search</Text>
+                </Pressable>
               </View>
             ) : null}
 
@@ -1470,6 +1528,8 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, minHeight: 46, paddingHorizontal: 13, borderWidth: 1, borderColor: '#dce5df', borderRadius: 10, backgroundColor: '#fff', color: '#203128', fontSize: 13 },
   scanButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 10, backgroundColor: '#eef8f2' },
   searchResults: { marginTop: 6, overflow: 'hidden', borderWidth: 1, borderColor: '#e3e9e4', borderRadius: 10, backgroundColor: '#fff' },
+  newSearchButton: { alignItems: 'center', justifyContent: 'center', minHeight: 42, borderTopWidth: 1, borderTopColor: '#edf0ed', backgroundColor: '#f7fbf8' },
+  newSearchButtonText: { color: '#17664f', fontSize: 12, fontWeight: '800' },
   productResult: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, borderBottomWidth: 1, borderBottomColor: '#edf0ed' },
   productResultInfo: { flex: 1 },
   productName: { color: '#26352f', fontSize: 13, fontWeight: '800' },
