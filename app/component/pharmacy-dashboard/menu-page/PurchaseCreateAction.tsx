@@ -1334,6 +1334,21 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                     const rightBrand = right.brand.trim() || right.medicine_name.trim();
                     return leftBrand.localeCompare(rightBrand) || left.strength.localeCompare(right.strength);
                   });
+                const getBrandSuggestions = (selection: BrandSelection) => {
+                  const query = selection.brandDraft.trim().toLocaleLowerCase();
+                  if (!query) return [];
+                  return companyProducts.filter((product) => {
+                    const alreadySelected = companySelection.brands.some((other) =>
+                      other.id !== selection.id && other.productId === product.id,
+                    );
+                    return !alreadySelected && [
+                      product.brand,
+                      product.medicine_name,
+                      product.generic_name,
+                      product.strength,
+                    ].some((value) => value.toLocaleLowerCase().includes(query));
+                  }).slice(0, 8);
+                };
                 const savedSupplierContacts = getSavedSupplierContacts();
                 const activeSupplierField = focusedSupplierInput?.selectionId === companySelection.id
                   ? focusedSupplierInput.field
@@ -1510,61 +1525,56 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                       <span style={{ color: "#526158", fontSize: 12, fontWeight: 600 }}>Brand Name</span>
                       {companySelection.brands
                         .filter((selection) => (!selection.productId && !selection.customBrand) || selection.isAddingBrand)
-                        .map((selection, brandIndex) => (
+                        .map((selection, brandIndex) => {
+                        const brandSuggestions = getBrandSuggestions(selection);
+                        return (
                         <div key={selection.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {selection.isAddingBrand ? (
+                          <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                             <input
-                              aria-label={`New brand name ${brandIndex + 1}`}
-                              autoFocus
-                              value={selection.brandDraft}
-                              onChange={(event) => updateBrandSelection(companySelection.id, selection.id, { brandDraft: event.target.value })}
-                              placeholder="Enter new brand name"
-                              disabled={companySelection.isAddingCompany}
-                              style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
-                            />
-                          ) : (
-                            <select
                               aria-label={`Brand Name ${brandIndex + 1}`}
-                              value={selection.productId}
-                              disabled={companySelection.isAddingCompany || (isLoading && companyProducts.length === 0) || companyProducts.length === 0}
-                              onChange={(event) => {
-                                const productId = event.target.value;
-                                if (!productId) return;
-                                openBatchEntry(companySelection.id, selection.id, {
-                                  productId,
-                                  customBrand: "",
-                                  brandDraft: "",
-                                });
-                              }}
-                              style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
-                            >
-                              <option value="">{companyProducts.length
-                                ? "Select brand"
-                                : companySelection.company ? "No brands for this company" : "No products available"}</option>
-                              {companyProducts.map((product) => {
-                                const brandName = product.brand.trim() || product.medicine_name.trim();
-                                const duplicateBrand = companyProducts.some((other) =>
-                                  other.id !== product.id &&
-                                  (other.brand.trim() || other.medicine_name.trim()).toLocaleLowerCase() === brandName.toLocaleLowerCase(),
-                                );
-                                const suffix = companySelection.company
-                                  ? duplicateBrand
-                                    ? [product.strength, product.dosage_form].filter((value) => value && value !== "-").join(" · ")
-                                    : ""
-                                  : [product.manufacturer, product.strength, product.dosage_form]
-                                    .filter((value) => value && value !== "-")
-                                    .join(" · ");
-                                const alreadySelected = companySelection.brands.some((other) =>
-                                  other.id !== selection.id && other.productId === product.id,
-                                );
-                                return (
-                                  <option key={product.id} value={product.id} disabled={alreadySelected}>
-                                    {suffix ? `${brandName} — ${suffix}` : brandName}
-                                  </option>
-                                );
+                              autoComplete="off"
+                              value={selection.brandDraft}
+                              onChange={(event) => updateBrandSelection(companySelection.id, selection.id, {
+                                productId: "",
+                                customBrand: "",
+                                brandDraft: event.currentTarget.value,
+                                isAddingBrand: true,
                               })}
-                            </select>
-                          )}
+                              placeholder="Search or type a brand name"
+                              disabled={companySelection.isAddingCompany}
+                              style={{ ...fieldStyle, minWidth: 0 }}
+                            />
+                            {brandSuggestions.length > 0 && (
+                              <div role="listbox" aria-label="Brand suggestions" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 25, display: "grid", maxHeight: 220, overflowY: "auto", padding: 4, border: "1px solid #dce5df", borderRadius: 6, background: "#fff", boxShadow: "0 8px 22px rgba(20, 35, 27, 0.14)" }}>
+                                {brandSuggestions.map((product) => {
+                                  const brandName = product.brand.trim() || product.medicine_name.trim();
+                                  const suffix = [
+                                    ...(!companySelection.company ? [product.manufacturer] : []),
+                                    product.strength,
+                                    product.dosage_form,
+                                  ].filter((value) => value && value !== "-").join(" · ");
+                                  return (
+                                    <button
+                                      key={product.id}
+                                      type="button"
+                                      role="option"
+                                      aria-selected="false"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => openBatchEntry(companySelection.id, selection.id, {
+                                        productId: product.id,
+                                        customBrand: "",
+                                        brandDraft: "",
+                                      })}
+                                      style={{ display: "grid", gap: 3, border: 0, borderBottom: "1px solid #f0f2f0", background: "#fff", color: "#34453b", padding: "8px 9px", textAlign: "left", cursor: "pointer" }}
+                                    >
+                                      <span style={{ fontSize: 12 }}>{brandName}</span>
+                                      {suffix && <span style={{ color: "#77857d", fontSize: 10 }}>{suffix}</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                           {selection.isAddingBrand ? (
                             <>
                               <button
@@ -1604,7 +1614,8 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                             </>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 );
