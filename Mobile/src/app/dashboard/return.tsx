@@ -19,6 +19,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
+import {
+  cachePharmacySearchData,
+  clearCachedPharmacySearchData,
+  getCachedPharmacySearchData,
+  loadPharmacySearchPayloads,
+  readCachedPharmacySearchData,
+} from '@/lib/pharmacy-search-cache';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -26,6 +33,7 @@ const SALES_KEY = 'pharmacy-sales-list-v1';
 const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const RETURNS_KEY = 'pharmacy-return-records-v1';
 const RETURN_DEDUCTION_SETTINGS_KEY = 'pharmacy-return-deduction-settings-v1';
+const RETURN_SEARCH_CACHE = 'return-search-data';
 const WALK_IN_CUSTOMER = 'Walk-in customer';
 const SCAN_FRAME_INTERVAL_MS = 100;
 const SCAN_TIMEOUT_MS = 1000;
@@ -234,6 +242,7 @@ export default function ReturnScreen() {
   const [defaultReturnDeductionRate, setDefaultReturnDeductionRate] = useState(0);
   const [returnDeductionRate, setReturnDeductionRate] = useState('0');
   const [loading, setLoading] = useState(true);
+  const [isReturnDataFresh, setIsReturnDataFresh] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -254,52 +263,97 @@ export default function ReturnScreen() {
   useEffect(() => {
     if (authLoading || profileLoading || dashboardRole !== 'owner' || !session || !supabase) return;
     let active = true;
-    const client = supabase;
     const ownerId = session.user.id;
+    let hasCachedData = false;
+
+    function applyReturnData(cached: unknown, isFresh = false) {
+      if (!isRecord(cached)) throw new Error('Cached return data has an invalid format.');
+      const nextInvoices = parseInvoices(cached.sales ?? []);
+      const nextReturns = parseReturns(cached.returns ?? []);
+      const nextPurchaseRows = cached.purchaseRows ?? [];
+      const deductionSettings = cached.deductionSettings;
+      let nextDeductionRate = 0;
+      if (deductionSettings !== undefined && deductionSettings !== null) {
+        if (!isRecord(deductionSettings)
+          || typeof deductionSettings.defaultRate !== 'number'
+          || !Number.isFinite(deductionSettings.defaultRate)
+          || deductionSettings.defaultRate < 0
+          || deductionSettings.defaultRate > 100) {
+          throw new Error('Saved return deduction settings are invalid. Update the rate in Pharmacy Setup.');
+        }
+        nextDeductionRate = deductionSettings.defaultRate;
+      }
+      if (!Array.isArray(nextPurchaseRows) || nextPurchaseRows.some((row) =>
+        !isRecord(row)
+        || typeof row.id !== 'string'
+        || typeof row.brand !== 'string'
+        || typeof row.batchNumber !== 'string'
+        || typeof row.packSize !== 'string'
+        || typeof row.status !== 'string'
+      )) throw new Error('Saved purchase inventory has an invalid format.');
+      if (active) {
+        setInvoices(nextInvoices);
+        setReturns(nextReturns);
+        setPurchaseRows(nextPurchaseRows as PurchaseRow[]);
+        setDefaultReturnDeductionRate(nextDeductionRate);
+        hasCachedData = true;
+        setIsReturnDataFresh(isFresh);
+        setLoading(false);
+      }
+    }
+
+    const cachedInMemory = getCachedPharmacySearchData<unknown>(ownerId, RETURN_SEARCH_CACHE);
+    if (cachedInMemory !== undefined) {
+      try {
+        applyReturnData(cachedInMemory);
+      } catch (cacheError) {
+        console.warn('Ignoring invalid cached Return data.', cacheError);
+        void clearCachedPharmacySearchData(ownerId, RETURN_SEARCH_CACHE);
+      }
+    }
 
     async function loadData() {
-      setLoading(true);
+      if (!hasCachedData) setLoading(true);
       setError('');
       try {
-        const result = await client.from('pharmacy_app_data')
-          .select('data_key, payload')
-          .eq('owner_user_id', ownerId)
-          .in('data_key', [SALES_KEY, PURCHASE_KEY, RETURNS_KEY, RETURN_DEDUCTION_SETTINGS_KEY]);
-        if (result.error) throw result.error;
-        const payloads = new Map((result.data ?? []).map((row) => [row.data_key, row.payload]));
-        const nextInvoices = parseInvoices(payloads.get(SALES_KEY) ?? []);
-        const nextReturns = parseReturns(payloads.get(RETURNS_KEY) ?? []);
-        const nextPurchaseRows = payloads.get(PURCHASE_KEY) ?? [];
-        const deductionSettings = payloads.get(RETURN_DEDUCTION_SETTINGS_KEY);
-        let nextDeductionRate = 0;
-        if (deductionSettings !== undefined && deductionSettings !== null) {
-          if (!isRecord(deductionSettings)
-            || typeof deductionSettings.defaultRate !== 'number'
-            || !Number.isFinite(deductionSettings.defaultRate)
-            || deductionSettings.defaultRate < 0
-            || deductionSettings.defaultRate > 100) {
-            throw new Error('Saved return deduction settings are invalid. Update the rate in Pharmacy Setup.');
+        if (!hasCachedData) {
+          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(ownerId, RETURN_SEARCH_CACHE);
+          if (cachedOnDisk !== undefined) {
+            try {
+              applyReturnData(cachedOnDisk);
+            } catch (cacheError) {
+              console.warn('Ignoring invalid cached Return data.', cacheError);
+              await clearCachedPharmacySearchData(ownerId, RETURN_SEARCH_CACHE);
+            }
           }
-          nextDeductionRate = deductionSettings.defaultRate;
         }
-        if (!Array.isArray(nextPurchaseRows) || nextPurchaseRows.some((row) =>
-          !isRecord(row)
-          || typeof row.id !== 'string'
-          || typeof row.brand !== 'string'
-          || typeof row.batchNumber !== 'string'
-          || typeof row.packSize !== 'string'
-          || typeof row.status !== 'string'
-        )) throw new Error('Saved purchase inventory has an invalid format.');
+        if (!hasCachedData) setLoading(true);
+        const payloads = await loadPharmacySearchPayloads(ownerId, [
+          SALES_KEY,
+          PURCHASE_KEY,
+          RETURNS_KEY,
+          RETURN_DEDUCTION_SETTINGS_KEY,
+        ]);
+        const nextData = {
+          sales: payloads.get(SALES_KEY) ?? [],
+          returns: payloads.get(RETURNS_KEY) ?? [],
+          purchaseRows: payloads.get(PURCHASE_KEY) ?? [],
+          deductionSettings: payloads.get(RETURN_DEDUCTION_SETTINGS_KEY),
+        };
+        applyReturnData(nextData, true);
         if (active) {
-          setInvoices(nextInvoices);
-          setReturns(nextReturns);
-          setPurchaseRows(nextPurchaseRows as PurchaseRow[]);
-          setDefaultReturnDeductionRate(nextDeductionRate);
+          void cachePharmacySearchData(ownerId, RETURN_SEARCH_CACHE, nextData);
         }
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load return data.');
+        if (active) {
+          if (hasCachedData) {
+            console.error('Could not refresh Return data; showing the saved search cache.', loadError);
+          } else {
+            setError(loadError instanceof Error ? loadError.message : 'Could not load return data.');
+          }
+        }
       } finally {
-        if (active) setLoading(false);
+        if (active && !hasCachedData) setLoading(false);
       }
     }
     void loadData();
@@ -311,17 +365,18 @@ export default function ReturnScreen() {
   const query = searchValue.trim().toLocaleLowerCase();
   const matchingItems = useMemo(() => {
     if (!query) return [];
-    const invoiceMatches = invoices.filter((invoice) => invoice.invoice.toLocaleLowerCase().includes(query));
+    const returnedQuantities = new Map<string, number>();
+    for (const record of returns) {
+      const key = `${record.invoice}\u0000${record.brand.toLocaleLowerCase()}\u0000${record.batchNumber}`;
+      returnedQuantities.set(key, (returnedQuantities.get(key) ?? 0) + record.quantity);
+    }
     const selectedKeys = new Set(selectedItems.map((item) => item.key));
     return invoices.flatMap((invoice) => (invoice.lines ?? []).flatMap((line, index) => {
       const key = returnKey(invoice, line, index);
-      const matchesInvoice = invoiceMatches.some((match) => match.id === invoice.id);
+      const matchesInvoice = invoice.invoice.toLocaleLowerCase().includes(query);
       const matchesBrand = `${line.brand} ${line.details}`.toLocaleLowerCase().includes(query);
-      const alreadyReturned = returns
-        .filter((record) => record.invoice === invoice.invoice
-          && record.brand.toLocaleLowerCase() === line.brand.toLocaleLowerCase()
-          && record.batchNumber === line.batchNumber)
-        .reduce((total, record) => total + record.quantity, 0);
+      const returnedKey = `${invoice.invoice}\u0000${line.brand.toLocaleLowerCase()}\u0000${line.batchNumber}`;
+      const alreadyReturned = returnedQuantities.get(returnedKey) ?? 0;
       if ((!matchesInvoice && !matchesBrand)
         || selectedKeys.has(key)
         || line.quantity - alreadyReturned < 1) return [];
@@ -517,6 +572,10 @@ export default function ReturnScreen() {
   }
 
   async function recordReturn() {
+    if (!isReturnDataFresh) {
+      setError('Updating return and inventory data. Please wait a moment and try again.');
+      return;
+    }
     if (!supabase || !session) {
       setError('Return data is unavailable. Check your account connection.');
       return;
@@ -605,6 +664,12 @@ export default function ReturnScreen() {
       }
       setReturns(nextReturns);
       setPurchaseRows(nextPurchase);
+      const cachedReturnData = getCachedPharmacySearchData<unknown>(ownerId, RETURN_SEARCH_CACHE);
+      void cachePharmacySearchData(ownerId, RETURN_SEARCH_CACHE, {
+        ...(isRecord(cachedReturnData) ? cachedReturnData : {}),
+        returns: nextReturns,
+        purchaseRows: nextPurchase,
+      });
       setScreen('list');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save this return.');

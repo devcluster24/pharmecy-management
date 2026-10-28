@@ -25,6 +25,13 @@ import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
 import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import {
+  cachePharmacySearchData,
+  clearCachedPharmacySearchData,
+  getCachedPharmacySearchData,
+  loadPharmacySearchPayloads,
+  readCachedPharmacySearchData,
+} from '@/lib/pharmacy-search-cache';
+import {
   loadInvoiceTemplateSettings,
   type InvoiceFieldKey,
   type InvoiceTemplateItem,
@@ -39,6 +46,7 @@ const SEARCH_RESULT_LIMIT = 30;
 const SCAN_FRAME_INTERVAL_MS = 100;
 const SCAN_TIMEOUT_MS = 1000;
 const WALK_IN_CUSTOMER = 'Walk-in Customer';
+const SALE_SEARCH_CACHE = 'new-sale-search';
 
 type InventoryRow = {
   id: string;
@@ -383,6 +391,7 @@ export default function SalesScreen() {
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaleDataFresh, setIsSaleDataFresh] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -466,55 +475,95 @@ export default function SalesScreen() {
       return;
     }
     let active = true;
+    const ownerId = session?.user.id;
+    let hasCachedData = false;
+    function applySaleData(cached: unknown, isFresh = false) {
+      if (!isRecord(cached)) throw new Error('Cached sales data has an invalid format.');
+      const nextInventory = parseInventory(cached.inventory ?? []);
+      const rawSales = cached.sales ?? [];
+      if (!Array.isArray(rawSales) || rawSales.some((sale) => !isRecord(sale))) {
+        throw new Error('Saved sales data has an invalid format.');
+      }
+      const methods = parsePaymentMethods(cached.paymentMethods);
+      const vatValue = cached.vat;
+      let rate = 0;
+      if (vatValue !== undefined && vatValue !== null) {
+        if (
+          !isRecord(vatValue)
+          || typeof vatValue.defaultRate !== 'number'
+          || !Number.isFinite(vatValue.defaultRate)
+          || vatValue.defaultRate < 0
+          || vatValue.defaultRate > 100
+        ) {
+          throw new Error('Saved VAT/TAX settings are invalid.');
+        }
+        rate = vatValue.defaultRate;
+      }
+      if (active) {
+        setInventory(nextInventory);
+        setSalesPayload(rawSales as Record<string, unknown>[]);
+        setPaymentMethods([{ id: 'cash', label: 'Cash' }, ...methods]);
+        setDefaultTaxRate(rate);
+        setTaxRate(String(rate));
+        hasCachedData = true;
+        setIsSaleDataFresh(isFresh);
+        setIsLoading(false);
+      }
+    }
+
     async function loadSaleData() {
       if (!supabase || !session) {
         setLoadError('Sales data is unavailable. Check your account connection.');
         setIsLoading(false);
         return;
       }
-      setIsLoading(true);
+      const cachedInMemory = getCachedPharmacySearchData<unknown>(session.user.id, SALE_SEARCH_CACHE);
+      if (cachedInMemory !== undefined) {
+        try {
+          applySaleData(cachedInMemory);
+        } catch (cacheError) {
+          console.warn('Ignoring invalid cached New Sale data.', cacheError);
+          await clearCachedPharmacySearchData(session.user.id, SALE_SEARCH_CACHE);
+        }
+      }
+      if (!hasCachedData) setIsLoading(true);
       setLoadError('');
       try {
-        const result = await supabase
-          .from('pharmacy_app_data')
-          .select('data_key, payload')
-          .eq('owner_user_id', session.user.id)
-          .in('data_key', [PURCHASE_KEY, SALES_KEY, PAYMENT_METHODS_KEY, VAT_SETTINGS_KEY]);
-        if (result.error) throw result.error;
-        const payloads = new Map((result.data ?? []).map((row) => [row.data_key, row.payload]));
-        const nextInventory = parseInventory(payloads.get(PURCHASE_KEY) ?? []);
-        const rawSales = payloads.get(SALES_KEY) ?? [];
-        if (
-          !Array.isArray(rawSales)
-          || rawSales.some((sale) => !isRecord(sale))
-        ) {
-          throw new Error('Saved sales data has an invalid format.');
-        }
-        const methods = parsePaymentMethods(payloads.get(PAYMENT_METHODS_KEY));
-        const vatValue = payloads.get(VAT_SETTINGS_KEY);
-        let rate = 0;
-        if (vatValue !== undefined && vatValue !== null) {
-          if (
-            !isRecord(vatValue)
-            || typeof vatValue.defaultRate !== 'number'
-            || !Number.isFinite(vatValue.defaultRate)
-            || vatValue.defaultRate < 0
-            || vatValue.defaultRate > 100
-          ) {
-            throw new Error('Saved VAT/TAX settings are invalid.');
+        if (!hasCachedData) {
+          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(session.user.id, SALE_SEARCH_CACHE);
+          if (cachedOnDisk !== undefined) {
+            try {
+              applySaleData(cachedOnDisk);
+            } catch (cacheError) {
+              console.warn('Ignoring invalid cached New Sale data.', cacheError);
+              await clearCachedPharmacySearchData(session.user.id, SALE_SEARCH_CACHE);
+            }
           }
-          rate = vatValue.defaultRate;
         }
+        if (!hasCachedData) setIsLoading(true);
+        const payloads = await loadPharmacySearchPayloads(session.user.id, [
+          PURCHASE_KEY,
+          SALES_KEY,
+          PAYMENT_METHODS_KEY,
+          VAT_SETTINGS_KEY,
+        ]);
+        const nextData = {
+          inventory: payloads.get(PURCHASE_KEY) ?? [],
+          sales: payloads.get(SALES_KEY) ?? [],
+          paymentMethods: payloads.get(PAYMENT_METHODS_KEY),
+          vat: payloads.get(VAT_SETTINGS_KEY),
+        };
+        applySaleData(nextData, true);
         if (active) {
-          setInventory(nextInventory);
-          setSalesPayload(rawSales as Record<string, unknown>[]);
-          setPaymentMethods([{ id: 'cash', label: 'Cash' }, ...methods]);
-          setDefaultTaxRate(rate);
-          setTaxRate(String(rate));
+          if (ownerId) void cachePharmacySearchData(ownerId, SALE_SEARCH_CACHE, nextData);
         }
       } catch (loadIssue) {
         if (active) {
-          setLoadError(loadIssue instanceof Error ? loadIssue.message : 'Could not load sales data.');
+          if (hasCachedData) {
+            console.error('Could not refresh New Sale data; showing the saved search cache.', loadIssue);
+          } else {
+            setLoadError(loadIssue instanceof Error ? loadIssue.message : 'Could not load sales data.');
+          }
         }
       } finally {
         if (active) setIsLoading(false);
@@ -716,6 +765,10 @@ export default function SalesScreen() {
 
   async function saveSale() {
     setError('');
+    if (!isSaleDataFresh) {
+      setError('Updating inventory data. Please wait a moment and try again.');
+      return;
+    }
     if (!customerName.trim()) {
       setError('Customer Name is required.');
       return;
@@ -875,6 +928,12 @@ export default function SalesScreen() {
 
       setInventory(nextInventory);
       setSalesPayload(updatedSales);
+      const cachedSaleData = getCachedPharmacySearchData<unknown>(ownerId, SALE_SEARCH_CACHE);
+      void cachePharmacySearchData(ownerId, SALE_SEARCH_CACHE, {
+        ...(isRecord(cachedSaleData) ? cachedSaleData : {}),
+        inventory: nextInventory,
+        sales: updatedSales,
+      });
       setSavedInvoice(invoice);
       setLines([]);
       setIsBillSummaryOpen(false);

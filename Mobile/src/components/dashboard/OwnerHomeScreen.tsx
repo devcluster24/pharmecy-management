@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { supabase } from '@/lib/supabase';
 import { getCurrencySymbol } from '@/lib/currency';
+import { prefetchPharmacySearchData } from '@/lib/pharmacy-search-cache';
 import { useAuth } from '@/providers/AuthProvider';
 
 type PharmacyNotification = {
@@ -357,6 +358,11 @@ export default function OwnerHomeScreen() {
     }, 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (dashboardRole !== 'owner' || !session) return;
+    void prefetchPharmacySearchData(session.user.id);
+  }, [dashboardRole, session]);
 
   const loadNotifications = useCallback(async () => {
     if (!supabase || !session) {

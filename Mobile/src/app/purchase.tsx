@@ -20,16 +20,25 @@ import * as FileSystem from 'expo-file-system/legacy';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
 import { getInventoryUnitPrice } from '@/lib/inventory-pricing';
+import {
+  cachePharmacySearchData,
+  clearCachedPharmacySearchData,
+  getCachedPharmacySearchData,
+  loadPharmacyProductCatalog,
+  loadPharmacySearchPayloads,
+  readCachedPharmacySearchData,
+} from '@/lib/pharmacy-search-cache';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
 const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const PLACE_ORDER_KEY = 'pharmacy-place-order-list-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
-const PRODUCT_SELECT = 'id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price';
-const PRODUCT_PAGE_SIZE = 1000;
+const PURCHASE_SEARCH_CACHE = 'purchase-search-data';
+const PRODUCT_SEARCH_CACHE = 'purchase-product-catalog';
 const SCAN_FRAME_INTERVAL_MS = 100;
 const SCAN_TIMEOUT_MS = 1000;
+const BATCH_SCAN_TIMEOUT_MS = 8000;
 
 type PurchaseRow = {
   id: string;
@@ -232,25 +241,6 @@ function productName(product: Product | undefined, fallback = 'Medicine') {
   return `${name}${product.strength.trim() ? ` · ${product.strength.trim()}` : ''}`;
 }
 
-async function loadPharmacyProducts(
-  client: NonNullable<typeof supabase>,
-  ownerUserId: string,
-  onPage: (products: Product[]) => void,
-) {
-  for (let offset = 0; ; offset += PRODUCT_PAGE_SIZE) {
-    const { data, error } = await client
-      .from('pharmacy_catalog_products')
-      .select(PRODUCT_SELECT)
-      .eq('owner_user_id', ownerUserId)
-      .order('id', { ascending: true })
-      .range(offset, offset + PRODUCT_PAGE_SIZE - 1);
-    if (error) throw error;
-    const page = (data ?? []) as Product[];
-    onPage(page);
-    if (page.length < PRODUCT_PAGE_SIZE) return;
-  }
-}
-
 function formatMonthYearInput(value: string, currentValue: string) {
   let digits = value.replace(/\D/g, '').slice(0, 4);
   const currentDigits = currentValue.replace(/\D/g, '');
@@ -350,6 +340,8 @@ export default function PurchaseScreen() {
   const [catalogRetry, setCatalogRetry] = useState(0);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPurchaseDataFresh, setIsPurchaseDataFresh] = useState(false);
+  const [isCatalogFresh, setIsCatalogFresh] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState('');
@@ -400,47 +392,90 @@ export default function PurchaseScreen() {
     const purchaseClient = client;
     const purchaseSession = currentSession;
     let active = true;
+    let hasCachedData = false;
+
+    function applyPurchaseData(cached: unknown, isFresh = false) {
+      if (!isRecord(cached)) throw new Error('Cached purchase data has an invalid format.');
+      const nextPurchaseRows = parseRows(cached.purchaseRows ?? [], 'purchase');
+      const nextPlaceRows = parseRows(cached.placeRows ?? [], 'place order');
+      const savedMethods = cached.paymentMethods;
+      if (savedMethods !== undefined && savedMethods !== null && !Array.isArray(savedMethods)) {
+        throw new Error('Saved payment methods have an invalid format.');
+      }
+      const nextPaymentMethods = (savedMethods ?? []).map((method: unknown): PaymentMethodOption => {
+        if (
+          !isRecord(method)
+          || typeof method.id !== 'string'
+          || (method.type !== 'mobile' && method.type !== 'bank')
+          || (method.type === 'mobile' && typeof method.name !== 'string')
+          || (method.type === 'bank' && typeof method.bankName !== 'string')
+        ) {
+          throw new Error('Saved payment methods contain an invalid entry.');
+        }
+        return {
+          id: `${method.type}:${method.id}`,
+          label: method.type === 'mobile' ? method.name as string : method.bankName as string,
+        };
+      });
+      if (active) {
+        setPurchaseRows(nextPurchaseRows);
+        setPlaceRows(nextPlaceRows);
+        setPaymentMethods(nextPaymentMethods);
+        hasCachedData = true;
+        setIsPurchaseDataFresh(isFresh);
+        setIsLoading(false);
+      }
+    }
 
     async function loadPurchaseData() {
-      setIsLoading(true);
+      const cachedInMemory = getCachedPharmacySearchData<unknown>(purchaseSession.user.id, PURCHASE_SEARCH_CACHE);
+      if (cachedInMemory !== undefined) {
+        try {
+          applyPurchaseData(cachedInMemory);
+        } catch (cacheError) {
+          console.warn('Ignoring invalid cached Purchase data.', cacheError);
+          await clearCachedPharmacySearchData(purchaseSession.user.id, PURCHASE_SEARCH_CACHE);
+        }
+      }
+      if (!hasCachedData) setIsLoading(true);
       setError('');
       try {
-        const savedData = await purchaseClient.from('pharmacy_app_data')
-          .select('data_key, payload')
-          .eq('owner_user_id', purchaseSession.user.id)
-          .in('data_key', [PURCHASE_KEY, PLACE_ORDER_KEY, PAYMENT_METHODS_KEY]);
-        if (savedData.error) throw savedData.error;
-        const payloads = new Map((savedData.data ?? []).map((row) => [row.data_key, row.payload]));
-        const nextPurchaseRows = parseRows(payloads.get(PURCHASE_KEY) ?? [], 'purchase');
-        const nextPlaceRows = parseRows(payloads.get(PLACE_ORDER_KEY) ?? [], 'place order');
-        const savedMethods = payloads.get(PAYMENT_METHODS_KEY);
-        if (savedMethods !== undefined && savedMethods !== null && !Array.isArray(savedMethods)) {
-          throw new Error('Saved payment methods have an invalid format.');
-        }
-        const nextPaymentMethods = (savedMethods ?? []).map((method: unknown): PaymentMethodOption => {
-          if (
-            !isRecord(method)
-            || typeof method.id !== 'string'
-            || (method.type !== 'mobile' && method.type !== 'bank')
-            || (method.type === 'mobile' && typeof method.name !== 'string')
-            || (method.type === 'bank' && typeof method.bankName !== 'string')
-          ) {
-            throw new Error('Saved payment methods contain an invalid entry.');
+        if (!hasCachedData) {
+          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(purchaseSession.user.id, PURCHASE_SEARCH_CACHE);
+          if (cachedOnDisk !== undefined) {
+            try {
+              applyPurchaseData(cachedOnDisk);
+            } catch (cacheError) {
+              console.warn('Ignoring invalid cached Purchase data.', cacheError);
+              await clearCachedPharmacySearchData(purchaseSession.user.id, PURCHASE_SEARCH_CACHE);
+            }
           }
-          return {
-            id: `${method.type}:${method.id}`,
-            label: method.type === 'mobile' ? method.name as string : method.bankName as string,
-          };
-        });
+        }
+        if (!hasCachedData) setIsLoading(true);
+        const payloads = await loadPharmacySearchPayloads(purchaseSession.user.id, [
+          PURCHASE_KEY,
+          PLACE_ORDER_KEY,
+          PAYMENT_METHODS_KEY,
+        ]);
+        const nextData = {
+          purchaseRows: payloads.get(PURCHASE_KEY) ?? [],
+          placeRows: payloads.get(PLACE_ORDER_KEY) ?? [],
+          paymentMethods: payloads.get(PAYMENT_METHODS_KEY),
+        };
+        applyPurchaseData(nextData, true);
         if (active) {
-          setPurchaseRows(nextPurchaseRows);
-          setPlaceRows(nextPlaceRows);
-          setPaymentMethods(nextPaymentMethods);
+          void cachePharmacySearchData(purchaseSession.user.id, PURCHASE_SEARCH_CACHE, nextData);
         }
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load purchase data.');
+        if (active) {
+          if (hasCachedData) {
+            console.error('Could not refresh Purchase data; showing the saved search cache.', loadError);
+          } else {
+            setError(loadError instanceof Error ? loadError.message : 'Could not load purchase data.');
+          }
+        }
       } finally {
-        if (active) setIsLoading(false);
+        if (active && !hasCachedData) setIsLoading(false);
       }
     }
     void loadPurchaseData();
@@ -469,30 +504,75 @@ export default function PurchaseScreen() {
     const client = supabase;
     const currentSession = session;
     if (!client || !currentSession) return;
-    const catalogClient = client;
     const catalogSession = currentSession;
     let active = true;
-    const companyNames = new Set<string>();
+    let hasCachedCatalog = false;
+
+    function applyCatalogData(cached: unknown, isFresh = false) {
+      if (!isRecord(cached) || !Array.isArray(cached.products)) {
+        throw new Error('Cached product catalog has an invalid format.');
+      }
+      const nextProducts = cached.products.map((value): Product => {
+        if (
+          !isRecord(value)
+          || ['id', 'brand', 'medicine_name', 'generic_name', 'manufacturer', 'strength', 'dosage_form', 'pack_size', 'unit_price', 'pack_price']
+            .some((field) => typeof value[field] !== 'string')
+        ) {
+          throw new Error('Cached product catalog contains an invalid product.');
+        }
+        return value as Product;
+      });
+      const companyNames = new Set(nextProducts
+        .map(({ manufacturer }) => manufacturer.trim())
+        .filter((name) => name && name !== '-'));
+      if (active) {
+        setProducts(nextProducts);
+        setCompanyNames([...companyNames].sort((left, right) => left.localeCompare(right)));
+        hasCachedCatalog = true;
+        setIsCatalogFresh(isFresh);
+        setIsCatalogLoading(false);
+      }
+    }
+
+    const cachedInMemory = getCachedPharmacySearchData<unknown>(catalogSession.user.id, PRODUCT_SEARCH_CACHE);
+    if (cachedInMemory !== undefined) {
+      try {
+        applyCatalogData(cachedInMemory);
+      } catch (cacheError) {
+        console.warn('Ignoring invalid cached Purchase product catalog.', cacheError);
+        void clearCachedPharmacySearchData(catalogSession.user.id, PRODUCT_SEARCH_CACHE);
+      }
+    }
 
     async function loadCatalog() {
-      setIsCatalogLoading(true);
+      if (!hasCachedCatalog) setIsCatalogLoading(true);
       setCatalogError('');
-      setProducts([]);
-      setCompanyNames([]);
       try {
-        await loadPharmacyProducts(catalogClient, catalogSession.user.id, (page) => {
-          if (!active) return;
-          setProducts((current) => [...current, ...page]);
-          page.forEach(({ manufacturer }) => {
-            const companyName = manufacturer.trim();
-            if (companyName && companyName !== '-') companyNames.add(companyName);
-          });
-          setCompanyNames([...companyNames].sort((left, right) => left.localeCompare(right)));
-        });
+        if (!hasCachedCatalog) {
+          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(catalogSession.user.id, PRODUCT_SEARCH_CACHE);
+          if (cachedOnDisk !== undefined) {
+            try {
+              applyCatalogData(cachedOnDisk);
+            } catch (cacheError) {
+              console.warn('Ignoring invalid cached Purchase product catalog.', cacheError);
+              await clearCachedPharmacySearchData(catalogSession.user.id, PRODUCT_SEARCH_CACHE);
+            }
+          }
+        }
+        if (!hasCachedCatalog) setIsCatalogLoading(true);
+        const nextProducts = await loadPharmacyProductCatalog(catalogSession.user.id);
+        if (!active) return;
+        applyCatalogData({ products: nextProducts }, true);
       } catch (loadError) {
-        if (active) setCatalogError(loadError instanceof Error ? loadError.message : 'Could not load the product list.');
+        if (active) {
+          if (hasCachedCatalog) {
+            console.error('Could not refresh the Purchase product catalog; showing the saved search cache.', loadError);
+          } else {
+            setCatalogError(loadError instanceof Error ? loadError.message : 'Could not load the product list.');
+          }
+        }
       } finally {
-        if (active) setIsCatalogLoading(false);
+        if (active && !hasCachedCatalog) setIsCatalogLoading(false);
       }
     }
     void loadCatalog();
@@ -596,6 +676,7 @@ export default function PurchaseScreen() {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let bestBatchDetails: ScannedBatchDetails = { batchNumber: '', mfgDate: '', expDate: '' };
     const scanStartedAt = Date.now();
+    const scanTimeoutMs = scannerMode === 'batch' ? BATCH_SCAN_TIMEOUT_MS : SCAN_TIMEOUT_MS;
 
     function finishBatchScan(message: string) {
       setForm((current) => ({
@@ -638,7 +719,7 @@ export default function PurchaseScreen() {
             selectScannedProduct(matches[0]);
             setScannerMessage('');
             setIsScannerOpen(false);
-          } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+          } else if (Date.now() - scanStartedAt >= scanTimeoutMs) {
             complete = true;
             setScannedProductMatches([]);
             setScannerMessage('Not Found');
@@ -654,7 +735,7 @@ export default function PurchaseScreen() {
           if (bestBatchDetails.batchNumber && bestBatchDetails.mfgDate && bestBatchDetails.expDate) {
             complete = true;
             finishBatchScan('');
-          } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
+          } else if (Date.now() - scanStartedAt >= scanTimeoutMs) {
             complete = true;
             const foundAnyDetail = Object.values(bestBatchDetails).some(Boolean);
             finishBatchScan(foundAnyDetail
@@ -1025,9 +1106,20 @@ export default function PurchaseScreen() {
         .maybeSingle();
     if (result.error) throw result.error;
     if (!result.data) throw new Error('Could not save the purchase order. Please try again.');
+    const cachedData = getCachedPharmacySearchData<unknown>(ownerId, PURCHASE_SEARCH_CACHE);
+    if (isRecord(cachedData)) {
+      void cachePharmacySearchData(ownerId, PURCHASE_SEARCH_CACHE, {
+        ...cachedData,
+        [key === PURCHASE_KEY ? 'purchaseRows' : 'placeRows']: rows,
+      });
+    }
   }
 
   async function savePlaceOrder() {
+    if (!isPurchaseDataFresh || !isCatalogFresh) {
+      setSaveError('Updating purchase and product data. Please wait a moment and try again.');
+      return;
+    }
     const supplier = form.supplier.trim();
     if (!supplier || orderLines.length === 0) {
       setSaveError('Select a company and add at least one brand to the order list.');
@@ -1168,6 +1260,10 @@ export default function PurchaseScreen() {
   }
 
   async function saveReceiveOrder() {
+    if (!isPurchaseDataFresh) {
+      setSaveError('Updating purchase data. Please wait a moment and try again.');
+      return;
+    }
     if (receiveItems.length === 0) {
       setSaveError('Add at least one batch to the Receive List before continuing.');
       return;
