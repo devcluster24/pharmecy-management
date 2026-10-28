@@ -117,6 +117,7 @@ type PendingOrderReceipt = {
 
 const PAGE_SIZE = 1000;
 const PRODUCT_PAGE_CONCURRENCY = 5;
+const productCatalogCache = new Map<string, PurchaseProduct[]>();
 
 function createBrandSelection(id: number): BrandSelection {
   return {
@@ -333,13 +334,12 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   }
 
   const selectedProductDetails = companySelections.flatMap((companySelection) => {
-    const companyProducts = products.filter((product) => product.manufacturer.trim() === companySelection.company);
     return companySelection.brands
       .filter((selection) => selection.productId || selection.customBrand)
       .map((selection) => ({
         companySelection,
         selection,
-        product: companyProducts.find((product) => product.id === selection.productId),
+        product: products.find((product) => product.id === selection.productId),
       }));
   });
   const selectedBatchDetails = selectedProductDetails.flatMap(({ companySelection, selection, product }) =>
@@ -348,7 +348,12 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const pendingOrderReceiptRows = pendingOrderReceipts.flatMap((receipt) => receipt.rows);
   const pendingOrderReceiptIds = new Set(pendingOrderReceipts.map((receipt) => receipt.sourceRowId));
   const hasReceiveInvoiceRows = selectedBatchDetails.length > 0 || pendingOrderReceiptRows.length > 0;
-  const canReceivePurchase = hasReceiveInvoiceRows && !isLoading;
+  const hasMissingSupplierName = selectedProductDetails.some(({ companySelection, selection }) =>
+    selection.batches.length > 0
+    && !companySelection.company.trim()
+    && !companySelection.supplierContactName.trim(),
+  );
+  const canReceivePurchase = hasReceiveInvoiceRows && !isLoading && !hasMissingSupplierName;
   const activeCompanyName = companySelections.find((selection) => selection.id === activeCompanySelectionId)?.company;
   const ongoingOrderRows = activeCompanyName
     ? placeOrderListSnapshot.rows.filter((row) =>
@@ -447,6 +452,13 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         if (authError) throw authError;
         if (!user) throw new Error("Sign in to create a purchase.");
         const pharmacyOwnerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
+        const cachedProducts = productCatalogCache.get(pharmacyOwnerId);
+        if (cachedProducts) {
+          setProducts(cachedProducts);
+          setCompanyNames([...new Set(
+            cachedProducts.map((product) => product.manufacturer.trim()).filter((name) => name && name !== "-"),
+          )].sort((left, right) => left.localeCompare(right)));
+        }
 
         const firstPageResult = await supabase
           .from("pharmacy_catalog_products")
@@ -454,6 +466,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
           .eq("owner_user_id", pharmacyOwnerId)
           .order("manufacturer", { ascending: true })
           .order("brand", { ascending: true })
+          .order("id", { ascending: true })
           .range(0, PAGE_SIZE - 1);
         if (firstPageResult.error) throw firstPageResult.error;
         const firstPage = (firstPageResult.data ?? []) as PurchaseProduct[];
@@ -480,6 +493,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
             .eq("owner_user_id", pharmacyOwnerId)
             .order("manufacturer", { ascending: true })
             .order("brand", { ascending: true })
+            .order("id", { ascending: true })
             .range(offset, offset + PAGE_SIZE - 1);
           if (error) throw error;
           return (data ?? []) as PurchaseProduct[];
@@ -495,6 +509,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
           setCompanyNames(getCompanyNames(rows));
         }
 
+        productCatalogCache.set(pharmacyOwnerId, rows);
         if (!active) return;
         setProducts(rows);
         setCompanySelections([createCompanySelection(0, 0)]);
@@ -536,7 +551,11 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   }, [router, standalone]);
 
   function receivePurchase() {
-    if (!canReceivePurchase) return;
+    if (!hasReceiveInvoiceRows || isLoading) return;
+    if (hasMissingSupplierName) {
+      setPurchaseSaveError("Enter a Supplier Name for every received brand without a Company Name.");
+      return;
+    }
     if (!validReceiveDiscount) {
       setPurchaseSaveError("Enter a valid discount amount.");
       return;
@@ -1295,7 +1314,7 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                 <div className="receive-order-title-row">
                   <h2 id="create-purchase-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Receive Order</h2>
                 </div>
-                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Select a company, then choose one of its products.</p>
+                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Choose a company to filter products, or select a brand without one.</p>
               </div>
               <button type="button" aria-label={standalone ? "Back to purchase" : "Close"} onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>{standalone ? "←" : "×"}</button>
             </div>
@@ -1307,7 +1326,9 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                 .filter((selection) => selection.id === activeCompanySelectionId)
                 .map((companySelection) => {
                 const companyProducts = products
-                  .filter((product) => product.manufacturer.trim() === companySelection.company)
+                  .filter((product) =>
+                    !companySelection.company || product.manufacturer.trim() === companySelection.company,
+                  )
                   .sort((left, right) => {
                     const leftBrand = left.brand.trim() || left.medicine_name.trim();
                     const rightBrand = right.brand.trim() || right.medicine_name.trim();
@@ -1452,7 +1473,9 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                                 current?.selectionId === companySelection.id && current.field === "name" ? null : current,
                               );
                             }}
-                            placeholder={`${companySelection.company || "Company"} Distributor`}
+                            placeholder={companySelection.company
+                              ? `${companySelection.company} Distributor`
+                              : "Type or select supplier name"}
                             style={{ ...fieldStyle, height: 34, padding: "7px 9px", fontSize: 12, fontWeight: 400 }}
                           />
                           {renderSupplierSuggestions("name")}
@@ -1496,14 +1519,14 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                               value={selection.brandDraft}
                               onChange={(event) => updateBrandSelection(companySelection.id, selection.id, { brandDraft: event.target.value })}
                               placeholder="Enter new brand name"
-                              disabled={!companySelection.company}
+                              disabled={companySelection.isAddingCompany}
                               style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
                             />
                           ) : (
                             <select
                               aria-label={`Brand Name ${brandIndex + 1}`}
                               value={selection.productId}
-                              disabled={!companySelection.company || companySelection.isAddingCompany || isLoading || companyProducts.length === 0}
+                              disabled={companySelection.isAddingCompany || (isLoading && companyProducts.length === 0) || companyProducts.length === 0}
                               onChange={(event) => {
                                 const productId = event.target.value;
                                 if (!productId) return;
@@ -1515,16 +1538,22 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                               }}
                               style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
                             >
-                              <option value="">{!companySelection.company ? "Select company first" : companyProducts.length ? "Select brand" : "No brands for this company"}</option>
+                              <option value="">{companyProducts.length
+                                ? "Select brand"
+                                : companySelection.company ? "No brands for this company" : "No products available"}</option>
                               {companyProducts.map((product) => {
                                 const brandName = product.brand.trim() || product.medicine_name.trim();
                                 const duplicateBrand = companyProducts.some((other) =>
                                   other.id !== product.id &&
                                   (other.brand.trim() || other.medicine_name.trim()).toLocaleLowerCase() === brandName.toLocaleLowerCase(),
                                 );
-                                const suffix = duplicateBrand
-                                  ? [product.strength, product.dosage_form].filter((value) => value && value !== "-").join(" · ")
-                                  : "";
+                                const suffix = companySelection.company
+                                  ? duplicateBrand
+                                    ? [product.strength, product.dosage_form].filter((value) => value && value !== "-").join(" · ")
+                                    : ""
+                                  : [product.manufacturer, product.strength, product.dosage_form]
+                                    .filter((value) => value && value !== "-")
+                                    .join(" · ");
                                 const alreadySelected = companySelection.brands.some((other) =>
                                   other.id !== selection.id && other.productId === product.id,
                                 );
@@ -1556,9 +1585,9 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                                 type="button"
                                 aria-label={`Add custom brand ${brandIndex + 1}`}
                                 title="Add new brand"
-                                disabled={!companySelection.company || companySelection.isAddingCompany}
+                                disabled={companySelection.isAddingCompany}
                                 onClick={() => updateBrandSelection(companySelection.id, selection.id, { brandDraft: "", isAddingBrand: true })}
-                                style={{ flex: "0 0 36px", width: 36, height: 36, border: "1px solid #179c70", borderRadius: 6, background: "#fff", color: "#16845f", fontSize: 20, lineHeight: 1, cursor: companySelection.company ? "pointer" : "not-allowed", opacity: companySelection.company ? 1 : 0.5 }}
+                                style={{ flex: "0 0 36px", width: 36, height: 36, border: "1px solid #179c70", borderRadius: 6, background: "#fff", color: "#16845f", fontSize: 20, lineHeight: 1, cursor: companySelection.isAddingCompany ? "not-allowed" : "pointer", opacity: companySelection.isAddingCompany ? 0.5 : 1 }}
                               >+</button>
                               {companySelection.brands.length > 1 && (
                                 <button
@@ -1990,8 +2019,14 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                   type="button"
                   onClick={receivePurchase}
                   disabled={!canReceivePurchase}
+                  title={hasMissingSupplierName ? "Add a Supplier Name for brands without a Company Name." : undefined}
                   style={{ width: "100%", border: 0, borderRadius: 6, background: canReceivePurchase ? "#179c70" : "#aab7af", color: "#fff", padding: "10px 16px", fontSize: 12, fontWeight: 650, cursor: canReceivePurchase ? "pointer" : "not-allowed" }}
                 >Received</button>
+                {hasMissingSupplierName && (
+                  <span role="status" style={{ color: "#77857d", fontSize: 10 }}>
+                    Add a Supplier Name to receive brands without a Company Name.
+                  </span>
+                )}
               </aside>
             </div>
 

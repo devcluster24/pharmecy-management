@@ -651,21 +651,24 @@ export default function PurchaseScreen() {
   }, [form.brandName, form.productId, form.supplier, orderLines, products]);
   const receiveCompanySuggestions = useMemo(() => {
     const query = form.supplier.trim().toLocaleLowerCase();
-    if (!query) return [];
+    const hasBrandQuery = form.brandName.trim().length > 0;
+    if (!query || hasBrandQuery) return [];
     return companyNames.filter((company) => company.toLocaleLowerCase().includes(query)).slice(0, 8);
-  }, [companyNames, form.supplier]);
+  }, [companyNames, form.brandName, form.supplier]);
   const receiveBrandProducts = useMemo(() => {
     if (form.productId) return [];
     const company = form.supplier.trim().toLocaleLowerCase();
     const query = form.brandName.trim().toLocaleLowerCase();
     const addedBrands = new Set(receiveItems.map((item) =>
-      `${item.company.toLocaleLowerCase()}\u0000${item.brand.toLocaleLowerCase()}`));
+      `${(item.product?.manufacturer.trim() || item.company).toLocaleLowerCase()}\u0000${item.brand.toLocaleLowerCase()}`));
     return products.filter((product) => {
       const brand = product.brand.trim() || product.medicine_name.trim();
-      return product.manufacturer.trim().toLocaleLowerCase() === company
-        && !addedBrands.has(`${company}\u0000${brand.toLocaleLowerCase()}`)
-        && (!query || [product.brand, product.medicine_name, product.generic_name, product.strength]
-          .some((value) => value.toLocaleLowerCase().includes(query)));
+      const manufacturer = product.manufacturer.trim().toLocaleLowerCase();
+      const matchesCompany = !company || manufacturer === company;
+      const matchesBrandQuery = !query || [product.brand, product.medicine_name, product.generic_name, product.strength]
+        .some((value) => value.toLocaleLowerCase().includes(query));
+      const addedKey = `${manufacturer}\u0000${brand.toLocaleLowerCase()}`;
+      return matchesCompany && !addedBrands.has(addedKey) && matchesBrandQuery;
     }).slice(0, 12);
   }, [form.brandName, form.productId, form.supplier, products, receiveItems]);
 
@@ -817,7 +820,11 @@ export default function PurchaseScreen() {
       ? contact.phone.replace(/\D/g, '').includes(supplierQuery)
       : contact.name.toLocaleLowerCase().includes(supplierQuery))
     : [];
-  const defaultSupplierContactName = `${form.supplier.trim() || 'Supplier'} Distributor`;
+  const defaultSupplierContactName = form.supplier.trim()
+    ? `${form.supplier.trim()} Distributor`
+    : '';
+  const isReceiveSupplierMissing = receiveItems.some((item) => !item.company.trim())
+    && !form.contact.trim();
   const batchTotal = receiveItems.reduce(
     (total, item) => total + (Number(item.batch.quantity) * Number(item.batch.price)),
     0,
@@ -899,7 +906,6 @@ export default function PurchaseScreen() {
     const packPrice = product.pack_price.trim() === '-' ? '' : product.pack_price.trim();
     setForm((current) => ({
       ...current,
-      supplier: product.manufacturer.trim(),
       productId: product.id,
       brandName,
       mrp: packPrice,
@@ -1198,7 +1204,7 @@ export default function PurchaseScreen() {
     const price = Number(form.price);
     const monthDate = (value: RegExpExecArray) => `${2000 + Number(value[2])}-${value[1]}`;
     if (
-      (!form.supplier.trim() || !form.brandName.trim())
+      !form.brandName.trim()
       || !batchNumber || !mfg || !exp || !form.mrp.trim()
       || !form.packSize.trim() || !form.quantity.trim() || !form.price.trim()
     ) {
@@ -1268,6 +1274,10 @@ export default function PurchaseScreen() {
       setSaveError('Add at least one batch to the Receive List before continuing.');
       return;
     }
+    if (isReceiveSupplierMissing) {
+      setSaveError('Enter a Supplier Name before receiving brands without a Company Name.');
+      return;
+    }
     if (!validDiscount) {
       setSaveError('Enter a valid discount amount.');
       return;
@@ -1300,7 +1310,7 @@ export default function PurchaseScreen() {
         id: `${order}-${item.id}-${index}`,
         order,
         supplier: item.company,
-        supplierContactName: form.contact.trim() || `${item.company} Distributor`,
+        supplierContactName: form.contact.trim() || (item.company.trim() ? `${item.company} Distributor` : ''),
         supplierPhone: form.phone.trim(),
         orderDate,
         brand: item.brand,
@@ -1557,6 +1567,9 @@ export default function PurchaseScreen() {
                       <Field label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} placeholder="e.g. 10" style={styles.halfField} />
                       <Field label="Purchase Price (Box)" value={form.price} onChangeText={(value) => updateForm('price', value)} placeholder="0.00" keyboardType="decimal-pad" style={styles.halfField} />
                     </View>
+                    {isReceiveSupplierMissing ? (
+                      <Text style={styles.formError}>Add a Supplier Name to receive brands without a Company Name.</Text>
+                    ) : null}
                     <Pressable onPress={addOrderLine} style={styles.addLineButton}><Text style={styles.addLineText}>Add</Text></Pressable>
                   </>
                 ) : null}
@@ -1616,10 +1629,10 @@ export default function PurchaseScreen() {
                 ) : null}
                 <View style={styles.scannerFieldRow}>
                   <Field
-                    label="Company Name"
+                    label="Company Name (Optional)"
                     value={form.supplier}
                     onChangeText={updateReceiveCompany}
-                    placeholder="Type or scan a brand"
+                    placeholder="Optional; filter products by company"
                     style={styles.scannerField}
                   />
                   <Pressable
@@ -1665,35 +1678,35 @@ export default function PurchaseScreen() {
                     ))}
                   </View>
                 ) : null}
+                <Field
+                  label="Brand Name"
+                  value={form.brandName}
+                  onChangeText={(value) => {
+                    updateForm('brandName', value);
+                    setSelectedSourceId('');
+                  }}
+                  placeholder={form.supplier.trim() ? 'Search, select, or type a brand' : 'Type or scan a brand name'}
+                />
+                {receiveBrandProducts.length > 0 ? (
+                  <View style={styles.productOptions}>
+                    {receiveBrandProducts.map((product) => (
+                      <Pressable key={product.id} onPress={() => {
+                        setForm((current) => ({
+                          ...current,
+                          brandName: product.brand.trim() || product.medicine_name.trim(),
+                          productId: product.id,
+                          mrp: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
+                          packSize: product.pack_size.trim(),
+                          price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
+                        }));
+                      }} style={styles.productOption}>
+                        <Text style={styles.productOptionName}>{productName(product)}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
                 {form.supplier.trim() ? (
                   <>
-                    <Field
-                      label="Brand Name"
-                      value={form.brandName}
-                      onChangeText={(value) => {
-                        updateForm('brandName', value);
-                        setSelectedSourceId('');
-                      }}
-                      placeholder="Search, select, or type a brand"
-                    />
-                    {receiveBrandProducts.length > 0 ? (
-                      <View style={styles.productOptions}>
-                        {receiveBrandProducts.map((product) => (
-                          <Pressable key={product.id} onPress={() => {
-                            setForm((current) => ({
-                              ...current,
-                              brandName: product.brand.trim() || product.medicine_name.trim(),
-                              productId: product.id,
-                              mrp: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
-                              packSize: product.pack_size.trim(),
-                              price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
-                            }));
-                          }} style={styles.productOption}>
-                            <Text style={styles.productOptionName}>{productName(product)}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : null}
                     <Text style={styles.sectionLabel}>Place Order List</Text>
                     {matchingPlaceOrderRows.length > 0 ? (
                       <View style={styles.productOptions}>
@@ -1824,7 +1837,7 @@ export default function PurchaseScreen() {
                   <Text style={styles.contactLine}>{form.contact || 'Supplier'} · {form.phone || 'No phone number'}</Text>
                 </View>
                 <View style={styles.billSummary}>
-                  <SummaryRow label="Total Company" value={String(new Set(receiveItems.map((item) => item.company.toLocaleLowerCase())).size)} />
+                  <SummaryRow label="Total Company" value={String(new Set(receiveItems.map((item) => item.company.trim().toLocaleLowerCase()).filter(Boolean)).size)} />
                   <SummaryRow label="Brands" value={String(new Set(receiveItems.map((item) => `${item.company.toLocaleLowerCase()}\u0000${item.brand.toLocaleLowerCase()}`)).size)} />
                   <SummaryRow
                     label="Box Quantity"
@@ -1985,9 +1998,9 @@ export default function PurchaseScreen() {
                 ))}
                 {saveError ? <Text style={styles.formError}>{saveError}</Text> : null}
                 <Pressable
-                  disabled={isSaving || receiveItems.length === 0}
+                  disabled={isSaving || receiveItems.length === 0 || isReceiveSupplierMissing}
                   onPress={() => void saveReceiveOrder()}
-                  style={[styles.submitButton, (isSaving || receiveItems.length === 0) && styles.disabledButton]}>
+                  style={[styles.submitButton, (isSaving || receiveItems.length === 0 || isReceiveSupplierMissing) && styles.disabledButton]}>
                   {isSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Received</Text>}
                 </Pressable>
               </>

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 
 const CACHE_PREFIX = '@pharmacy-search-cache-v1:';
 const PRODUCT_PAGE_SIZE = 1000;
+const PRODUCT_PAGE_CONCURRENCY = 5;
 const PRODUCT_SELECT = 'id, brand, medicine_name, generic_name, manufacturer, strength, dosage_form, pack_size, unit_price, pack_price';
 const ALL_SEARCH_DATA_KEYS = [
   'pharmacy-purchase-list-v1',
@@ -101,18 +102,32 @@ export function loadPharmacyProductCatalog(ownerId: string) {
 
   const client = supabase;
   const load = (async () => {
-    const products: Record<string, unknown>[] = [];
-    for (let offset = 0; ; offset += PRODUCT_PAGE_SIZE) {
-      const { data, error } = await client
-        .from('pharmacy_catalog_products')
-        .select(PRODUCT_SELECT)
-        .eq('owner_user_id', ownerId)
-        .order('id', { ascending: true })
-        .range(offset, offset + PRODUCT_PAGE_SIZE - 1);
-      if (error) throw error;
-      const page = data ?? [];
-      products.push(...page);
-      if (page.length < PRODUCT_PAGE_SIZE) break;
+    const firstPageResult = await client
+      .from('pharmacy_catalog_products')
+      .select(PRODUCT_SELECT, { count: 'exact' })
+      .eq('owner_user_id', ownerId)
+      .order('id', { ascending: true })
+      .range(0, PRODUCT_PAGE_SIZE - 1);
+    if (firstPageResult.error) throw firstPageResult.error;
+
+    const products = [...(firstPageResult.data ?? [])] as Record<string, unknown>[];
+    const totalRows = firstPageResult.count ?? products.length;
+    const offsets = Array.from(
+      { length: Math.max(0, Math.ceil(totalRows / PRODUCT_PAGE_SIZE) - 1) },
+      (_, index) => (index + 1) * PRODUCT_PAGE_SIZE,
+    );
+    for (let index = 0; index < offsets.length; index += PRODUCT_PAGE_CONCURRENCY) {
+      const pages = await Promise.all(offsets.slice(index, index + PRODUCT_PAGE_CONCURRENCY).map(async (offset) => {
+        const { data, error } = await client
+          .from('pharmacy_catalog_products')
+          .select(PRODUCT_SELECT)
+          .eq('owner_user_id', ownerId)
+          .order('id', { ascending: true })
+          .range(offset, offset + PRODUCT_PAGE_SIZE - 1);
+        if (error) throw error;
+        return data ?? [];
+      }));
+      pages.forEach((page) => products.push(...page));
     }
     await cachePharmacySearchData(ownerId, 'purchase-product-catalog', { products });
     return products;
