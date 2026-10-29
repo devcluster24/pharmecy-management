@@ -281,15 +281,21 @@ export default function ExpensesScreen() {
     setMessage('');
     const parsedAmount = Number(amount);
     if (!isValidDate(date)) {
-      setFormError('Enter a valid date in YYYY-MM-DD format.');
+      const message = 'Enter a valid date in YYYY-MM-DD format.';
+      setFormError(message);
+      alert('Check your input', message);
       return;
     }
     if (!description.trim() || description.trim().length > 160) {
-      setFormError('Enter a description up to 160 characters.');
+      const message = 'Enter a description up to 160 characters.';
+      setFormError(message);
+      alert('Check your input', message);
       return;
     }
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setFormError('Enter an amount greater than zero.');
+      const message = 'Enter an amount greater than zero.';
+      setFormError(message);
+      alert('Check your input', message);
       return;
     }
     if (isSaving) return;
@@ -313,8 +319,11 @@ export default function ExpensesScreen() {
       setPaymentMethod('cash');
       setCurrentPage(1);
       setMessage('Expense saved.');
+      alert('Success', 'Expense saved.');
     } catch (saveError) {
-      setFormError(saveError instanceof Error ? saveError.message : 'Could not save this expense.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save this expense.';
+      setFormError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -344,8 +353,11 @@ export default function ExpensesScreen() {
     try {
       await persistExpenses(expenses.filter((row) => row.id !== expense.id));
       setMessage('Expense deleted.');
+      alert('Success', 'Expense deleted.');
     } catch (deleteError) {
-      setActionError(deleteError instanceof Error ? deleteError.message : 'Could not delete this expense.');
+      const message = deleteError instanceof Error ? deleteError.message : 'Could not delete this expense.';
+      setActionError(message);
+      alert('Error', message);
     } finally {
       setDeletingId('');
     }
@@ -375,8 +387,11 @@ export default function ExpensesScreen() {
         dialogTitle: t('Export expenses'),
         UTI: 'public.comma-separated-values-text',
       });
+      alert('Success', 'Expense export is ready to share.');
     } catch (exportError) {
-      setActionError(exportError instanceof Error ? exportError.message : 'Could not export expenses.');
+      const message = exportError instanceof Error ? exportError.message : 'Could not export expenses.';
+      setActionError(message);
+      alert('Error', message);
     } finally {
       setIsExporting(false);
     }

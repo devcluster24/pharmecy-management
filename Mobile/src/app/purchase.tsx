@@ -1,6 +1,5 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { Camera, CameraView } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { getCurrencySymbol } from '@/lib/currency';
 import { getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import {
@@ -37,8 +37,13 @@ const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const PURCHASE_SEARCH_CACHE = 'purchase-search-data';
 const PRODUCT_SEARCH_CACHE = 'purchase-product-catalog';
 const SCAN_FRAME_INTERVAL_MS = 100;
-const SCAN_TIMEOUT_MS = 1000;
-const BATCH_SCAN_TIMEOUT_MS = 8000;
+const SCAN_TIMEOUT_MS = 2000;
+
+type ScannedBatchDetails = {
+  batchNumber?: string;
+  mfgDate?: string;
+  expDate?: string;
+};
 
 type PurchaseRow = {
   id: string;
@@ -131,8 +136,6 @@ type FormState = {
   packSize: string;
 };
 type ListType = 'place' | 'receive';
-type ScannerMode = 'product' | 'batch';
-type ScannedBatchDetails = Pick<FormState, 'batchNumber' | 'mfgDate' | 'expDate'>;
 
 const emptyForm: FormState = {
   supplier: '',
@@ -235,10 +238,14 @@ function availableQuantity(packSize: string, quantity: number) {
   return String(Number((quantity * sizes.reduce((total, size) => total * size, 1)).toFixed(4)));
 }
 
-function productName(product: Product | undefined, fallback = 'Medicine') {
-  if (!product) return fallback;
-  const name = product.brand.trim() || product.medicine_name.trim();
-  return `${name}${product.strength.trim() ? ` · ${product.strength.trim()}` : ''}`;
+function productDetails(product: Product | undefined) {
+  if (!product) return '';
+  return [
+    product.generic_name.trim(),
+    product.strength.trim(),
+    product.dosage_form.trim(),
+    product.pack_size.trim(),
+  ].filter((value) => value && value !== '-').join(' · ');
 }
 
 function formatMonthYearInput(value: string, currentValue: string) {
@@ -251,79 +258,82 @@ function formatMonthYearInput(value: string, currentValue: string) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
-function getBrandWords(value: string) {
-  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
-}
-
-function getBrandMatchScore(brand: string, scannedText: string) {
-  const scannedWords = new Set(getBrandWords(scannedText));
-  return new Set(getBrandWords(brand).filter((word) => scannedWords.has(word))).size;
-}
-
-function formatScannedMonthYear(month: string, year: string) {
-  const monthNumber = Number(month);
-  if (monthNumber < 1 || monthNumber > 12) return null;
-  const yearDigits = year.length > 2 ? year.slice(-2) : year.padStart(2, '0');
-  return `${String(monthNumber).padStart(2, '0')}/${yearDigits}`;
-}
-
-const MONTH_NUMBERS: Record<string, string> = {
-  jan: '01',
-  feb: '02',
-  mar: '03',
-  apr: '04',
-  may: '05',
-  jun: '06',
-  jul: '07',
-  aug: '08',
-  sep: '09',
-  oct: '10',
-  nov: '11',
-  dec: '12',
-};
-
-function findScannedMonthYear(text: string) {
-  const normalized = text.normalize('NFKC').toLocaleLowerCase('en-US');
-  const namedMonthPattern = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[,\s./-]*(\d{2}|\d{4})\b|\b(\d{2}|\d{4})[,\s./-]*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.exec(normalized);
-  if (namedMonthPattern) {
-    const monthName = namedMonthPattern[1] ?? namedMonthPattern[4];
-    const year = namedMonthPattern[2] ?? namedMonthPattern[3];
-    const month = monthName ? MONTH_NUMBERS[monthName.slice(0, 3)] : null;
-    return month && year ? formatScannedMonthYear(month, year) : null;
+function parseOcrMonthYear(value: string) {
+  const datePattern = /\b(?:(\d{1,2})\s*[./\s-]\s*(\d{2}|\d{4})|([A-Za-z]{3,9})\.?\s*[./\s-]*\s*(\d{2}|\d{4}))\b/g;
+  const monthNames = [
+    'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+    'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+  ];
+  for (const match of value.matchAll(datePattern)) {
+    const numericMonth = match[1] ? Number(match[1]) : undefined;
+    const namedMonth = match[3]
+      ? monthNames.findIndex((month) => month === match[3].slice(0, 3).toLocaleLowerCase('en-US')) + 1
+      : undefined;
+    const month = numericMonth ?? namedMonth;
+    const year = match[2] ?? match[4];
+    if (!month || month > 12 || !year) continue;
+    return `${String(month).padStart(2, '0')}/${year.slice(-2)}`;
   }
-
-  const match = /(?:\b([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(\d{2}|\d{4})\b|\b([01]?\d)\s*[./-]\s*(\d{2}|\d{4})\b|\b(20\d{2})\s*[./-]\s*([01]?\d)\b)/.exec(normalized);
-  if (!match) return null;
-  if (match[1]) {
-    const month = Number(match[1]) > 12 ? match[2] : match[1];
-    return formatScannedMonthYear(month, match[3]);
-  }
-  return match[4]
-    ? formatScannedMonthYear(match[4], match[5])
-    : formatScannedMonthYear(match[7], match[6]);
+  return undefined;
 }
 
-function extractScannedBatchDetails(text: string): ScannedBatchDetails {
+function parseScannedBatchDetails(text: string): ScannedBatchDetails {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const batchNumber = lines
-    .map((line) => /(?:\bbatch\b|\blot\b|\bb\.?\s*no\.?)\s*(?:no\.?|number|#)?\s*[:#.-]?\s*([a-z0-9][a-z0-9/-]{1,})/i.exec(line)?.[1])
-    .find(Boolean)
-    ?.toLocaleUpperCase('en-US') ?? '';
-  const monthName = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
-  const datePattern = `(?:[0-3]?\\d\\s*[./-]\\s*[01]?\\d\\s*[./-]\\s*\\d{2,4}|[01]?\\d\\s*[./-]\\s*\\d{2,4}|20\\d{2}\\s*[./-]\\s*[01]?\\d|${monthName}[,\\s./-]*\\d{2,4}|\\d{2,4}[,\\s./-]*${monthName})`;
-  const mfgMatch = new RegExp(`(?:\\bmfg\\b|\\bmfd\\b|\\bmanufactured\\b|\\bmanufacturing\\b)[^\\d]{0,20}(${datePattern})`, 'i').exec(text);
-  const expMatch = new RegExp(`(?:\\bexp\\b|\\bexpiry\\b|\\bexpires\\b|\\buse\\s*by\\b|\\bbest\\s*before\\b)[^\\d]{0,20}(${datePattern})`, 'i').exec(text);
-  const mfgDate = mfgMatch ? findScannedMonthYear(mfgMatch[1]) : null;
-  const expDate = expMatch ? findScannedMonthYear(expMatch[1]) : null;
-  const unlabeledDates = lines
-    .filter((line) => !/\b(?:mfg|mfd|manufactured|manufacturing|exp|expiry|expires|use\s*by|best\s*before)\b/i.test(line))
-    .map(findScannedMonthYear)
-    .filter((date): date is string => Boolean(date));
-
+  const findLabelDate = (labelPattern: RegExp) => {
+    const labelIndex = lines.findIndex((line) => labelPattern.test(line));
+    if (labelIndex < 0) return undefined;
+    const labeledLine = lines[labelIndex];
+    const labelMatch = labelPattern.exec(labeledLine);
+    if (labelMatch) {
+      const afterLabel = labeledLine.slice(labelMatch.index + labelMatch[0].length);
+      const nextDateLabel = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?|exp|expiry|expires?|expiration|use\s*by)\b/i;
+      const nextLabelIndex = afterLabel.search(nextDateLabel);
+      const sameLineDate = parseOcrMonthYear(
+        nextLabelIndex >= 0 ? afterLabel.slice(0, nextLabelIndex) : afterLabel,
+      );
+      if (sameLineDate) return sameLineDate;
+    }
+    for (const lineIndex of [labelIndex + 1, labelIndex - 1]) {
+      if (lineIndex < 0 || lineIndex >= lines.length) continue;
+      const date = parseOcrMonthYear(lines[lineIndex]);
+      if (date) return date;
+    }
+    return undefined;
+  };
+  const mfgIndex = lines.findIndex((line) => /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i.test(line));
+  let batchNumber: string | undefined;
+  if (mfgIndex >= 0) {
+    const batchLabelPattern = /\b(?:batch|lot|b\.?\s*no\.?)\b/i;
+    const mfgLabelPattern = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i;
+    for (let index = mfgIndex; index >= Math.max(0, mfgIndex - 5); index -= 1) {
+      const line = lines[index];
+      if (!batchLabelPattern.test(line)) continue;
+      const mfgPosition = line.search(mfgLabelPattern);
+      const candidate = mfgPosition >= 0 ? line.slice(0, mfgPosition) : line;
+      const digits = candidate.replace(/\D/g, '');
+      if (digits) {
+        batchNumber = digits;
+        break;
+      }
+    }
+    if (!batchNumber) {
+      for (let index = mfgIndex - 1; index >= Math.max(0, mfgIndex - 5); index -= 1) {
+        const line = lines[index];
+        if (parseOcrMonthYear(line)) continue;
+        const digits = line.replace(/\D/g, '');
+        if (digits) {
+          batchNumber = digits;
+          break;
+        }
+      }
+    }
+  }
+  const mfgDate = findLabelDate(/\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i);
+  const expDate = findLabelDate(/\b(?:exp|expiry|expires?|expiration|use\s*by)\b/i);
   return {
-    batchNumber,
-    mfgDate: mfgDate ?? unlabeledDates[0] ?? '',
-    expDate: expDate ?? unlabeledDates[1] ?? '',
+    ...(batchNumber ? { batchNumber } : {}),
+    ...(mfgDate ? { mfgDate } : {}),
+    ...(expDate ? { expDate } : {}),
   };
 }
 
@@ -334,7 +344,6 @@ export default function PurchaseScreen() {
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
   const [placeRows, setPlaceRows] = useState<PurchaseRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
   const [catalogRetry, setCatalogRetry] = useState(0);
@@ -362,12 +371,10 @@ export default function PurchaseScreen() {
   const [focusedSupplierField, setFocusedSupplierField] = useState<SupplierField | null>(null);
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [scannerMode, setScannerMode] = useState<ScannerMode>('product');
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isBatchScannerOpen, setIsBatchScannerOpen] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
-  const [scannerMessage, setScannerMessage] = useState('');
-  const [scannedProductMatches, setScannedProductMatches] = useState<Product[]>([]);
+  const [batchScanMessage, setBatchScanMessage] = useState('');
   const cameraRef = useRef<CameraView | null>(null);
   const expDateInputRef = useRef<TextInput>(null);
   const batchInputRefs = useRef<Record<BatchField, TextInput | null>>({
@@ -522,12 +529,8 @@ export default function PurchaseScreen() {
         }
         return value as Product;
       });
-      const companyNames = new Set(nextProducts
-        .map(({ manufacturer }) => manufacturer.trim())
-        .filter((name) => name && name !== '-'));
       if (active) {
         setProducts(nextProducts);
-        setCompanyNames([...companyNames].sort((left, right) => left.localeCompare(right)));
         hasCachedCatalog = true;
         setIsCatalogFresh(isFresh);
         setIsCatalogLoading(false);
@@ -629,68 +632,63 @@ export default function PurchaseScreen() {
       ]),
     ].some((value) => value.toLocaleLowerCase().includes(query)));
   }, [groups, search]);
-  const companySuggestions = useMemo(() => {
-    const query = form.supplier.trim().toLocaleLowerCase();
-    if (!query) return [];
-    return companyNames.filter((company) => company.toLocaleLowerCase().includes(query)).slice(0, 8);
-  }, [companyNames, form.supplier]);
   const placeOrderProducts = useMemo(() => {
     if (form.productId) return [];
     const query = form.brandName.trim().toLocaleLowerCase();
-    const addedBrands = new Set(orderLines.map((line) => line.brand.trim().toLocaleLowerCase()));
+    const addedProducts = new Set(orderLines.map((line) => line.product?.id).filter(Boolean));
     return products.filter((product) => (
-      product.manufacturer.trim().toLocaleLowerCase() === form.supplier.trim().toLocaleLowerCase()
-      && !addedBrands.has((product.brand.trim() || product.medicine_name.trim()).toLocaleLowerCase())
+      !addedProducts.has(product.id)
       && (!query || [
         product.brand,
         product.medicine_name,
         product.generic_name,
         product.strength,
+        product.dosage_form,
       ].some((value) => value.toLocaleLowerCase().includes(query)))
-    ));
-  }, [form.brandName, form.productId, form.supplier, orderLines, products]);
-  const receiveCompanySuggestions = useMemo(() => {
-    const query = form.supplier.trim().toLocaleLowerCase();
-    const hasBrandQuery = form.brandName.trim().length > 0;
-    if (!query || hasBrandQuery) return [];
-    return companyNames.filter((company) => company.toLocaleLowerCase().includes(query)).slice(0, 8);
-  }, [companyNames, form.brandName, form.supplier]);
+    )).slice(0, 12);
+  }, [form.brandName, form.productId, orderLines, products]);
   const receiveBrandProducts = useMemo(() => {
     if (form.productId) return [];
-    const company = form.supplier.trim().toLocaleLowerCase();
     const query = form.brandName.trim().toLocaleLowerCase();
     const addedBrands = new Set(receiveItems.map((item) =>
       `${(item.product?.manufacturer.trim() || item.company).toLocaleLowerCase()}\u0000${item.brand.toLocaleLowerCase()}`));
     return products.filter((product) => {
       const brand = product.brand.trim() || product.medicine_name.trim();
       const manufacturer = product.manufacturer.trim().toLocaleLowerCase();
-      const matchesCompany = !company || manufacturer === company;
       const matchesBrandQuery = !query || [product.brand, product.medicine_name, product.generic_name, product.strength]
         .some((value) => value.toLocaleLowerCase().includes(query));
       const addedKey = `${manufacturer}\u0000${brand.toLocaleLowerCase()}`;
-      return matchesCompany && !addedBrands.has(addedKey) && matchesBrandQuery;
+      return !addedBrands.has(addedKey) && matchesBrandQuery;
     }).slice(0, 12);
-  }, [form.brandName, form.productId, form.supplier, products, receiveItems]);
-
+  }, [form.brandName, form.productId, products, receiveItems]);
   useEffect(() => {
-    if (!isScannerOpen || !isCameraReady) return;
+    if (!isBatchScannerOpen || !isCameraReady) return;
     let active = true;
     let complete = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let bestBatchDetails: ScannedBatchDetails = { batchNumber: '', mfgDate: '', expDate: '' };
-    const scanStartedAt = Date.now();
-    const scanTimeoutMs = scannerMode === 'batch' ? BATCH_SCAN_TIMEOUT_MS : SCAN_TIMEOUT_MS;
+    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
+    const bestScan: ScannedBatchDetails = {};
 
-    function finishBatchScan(message: string) {
+    function applyBatchDetails(details: ScannedBatchDetails) {
       setForm((current) => ({
         ...current,
-        batchNumber: bestBatchDetails.batchNumber || current.batchNumber,
-        mfgDate: bestBatchDetails.mfgDate || current.mfgDate,
-        expDate: bestBatchDetails.expDate || current.expDate,
+        ...(details.batchNumber ? { batchNumber: details.batchNumber } : {}),
+        ...(details.mfgDate ? { mfgDate: details.mfgDate } : {}),
+        ...(details.expDate ? { expDate: details.expDate } : {}),
       }));
-      setScannerMessage(message);
-      setIsScannerOpen(false);
     }
+
+    const scanTimeout = setTimeout(() => {
+      if (!active || complete) return;
+      complete = true;
+      applyBatchDetails(bestScan);
+      setIsRecognizingFrame(false);
+      setBatchScanMessage(
+        Object.keys(bestScan).length > 0
+          ? 'Some details were not recognized. Review the fields and enter any missing values.'
+          : 'No batch details recognized. Try again or fill the fields manually.',
+      );
+      setIsBatchScannerOpen(false);
+    }, SCAN_TIMEOUT_MS);
 
     async function scanFrame() {
       if (!active || complete) return;
@@ -703,58 +701,29 @@ export default function PurchaseScreen() {
         });
         if (!frame) throw new Error('The camera could not provide a scan frame.');
         frameUri = frame.uri;
-        const recognized = await TextRecognition.recognize(frameUri);
-        if (!active) return;
+        if (!active || complete) return;
 
-        if (scannerMode === 'product') {
-          const matches = products
-            .map((product) => ({
-              product,
-              score: getBrandMatchScore(product.brand.trim() || product.medicine_name, recognized.text),
-            }))
-            .filter(({ score }) => score > 0)
-            .sort((left, right) => right.score - left.score)
-            .filter(({ score }, _index, allMatches) => score === allMatches[0]?.score)
-            .map(({ product }) => product);
-          if (matches.length > 0) {
-            complete = true;
-            setScannedProductMatches(matches.slice(0, 10));
-            selectScannedProduct(matches[0]);
-            setScannerMessage('');
-            setIsScannerOpen(false);
-          } else if (Date.now() - scanStartedAt >= scanTimeoutMs) {
-            complete = true;
-            setScannedProductMatches([]);
-            setScannerMessage('Not Found');
-            setIsScannerOpen(false);
-          }
-        } else {
-          const detected = extractScannedBatchDetails(recognized.text);
-          bestBatchDetails = {
-            batchNumber: detected.batchNumber || bestBatchDetails.batchNumber,
-            mfgDate: detected.mfgDate || bestBatchDetails.mfgDate,
-            expDate: detected.expDate || bestBatchDetails.expDate,
-          };
-          if (bestBatchDetails.batchNumber && bestBatchDetails.mfgDate && bestBatchDetails.expDate) {
-            complete = true;
-            finishBatchScan('');
-          } else if (Date.now() - scanStartedAt >= scanTimeoutMs) {
-            complete = true;
-            const foundAnyDetail = Object.values(bestBatchDetails).some(Boolean);
-            finishBatchScan(foundAnyDetail
-              ? 'Some batch details were not recognized. Review the fields and scan again if needed.'
-              : 'Batch details not found. Try scanning again.');
-          }
+        const recognized = await recognizeText(frameUri);
+        if (!active || complete) return;
+        const details = parseScannedBatchDetails(recognized.text);
+        if (details.batchNumber) bestScan.batchNumber = details.batchNumber;
+        if (details.mfgDate) bestScan.mfgDate = details.mfgDate;
+        if (details.expDate) bestScan.expDate = details.expDate;
+
+        if (bestScan.batchNumber && bestScan.mfgDate && bestScan.expDate) {
+          complete = true;
+          applyBatchDetails(bestScan);
+          setBatchScanMessage('');
+          setIsBatchScannerOpen(false);
         }
       } catch (scanError) {
+        if (!active || complete) return;
         complete = true;
-        if (active) {
-          alert.alert(
-            'Camera scan failed',
-            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
-          );
-          setIsScannerOpen(false);
-        }
+        alert.alert(
+          'Batch scan failed',
+          scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+        );
+        setIsBatchScannerOpen(false);
       } finally {
         if (frameUri) {
           try {
@@ -768,7 +737,7 @@ export default function PurchaseScreen() {
                   ? cleanupError.message
                   : 'Could not remove the temporary scan frame.',
               );
-              setIsScannerOpen(false);
+              setIsBatchScannerOpen(false);
             }
           }
         }
@@ -776,28 +745,27 @@ export default function PurchaseScreen() {
       }
 
       if (active && !complete) {
-        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+        frameTimeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
       }
     }
 
     void scanFrame();
     return () => {
       active = false;
-      if (timeout) clearTimeout(timeout);
+      if (frameTimeout) clearTimeout(frameTimeout);
+      clearTimeout(scanTimeout);
     };
-  }, [alert, isCameraReady, isScannerOpen, products, scannerMode]);
+  }, [alert, isBatchScannerOpen, isCameraReady]);
 
   const matchingPlaceOrderRows = useMemo(() => {
-    const company = form.supplier.trim().toLocaleLowerCase();
     const brand = form.brandName.trim().toLocaleLowerCase();
-    if (!company) return [];
+    if (!brand) return [];
     const receivedSourceIds = new Set(receiveItems.map((item) => item.sourceRowId).filter(Boolean));
     return placeRows.filter((row) => row.status.toLocaleLowerCase() !== 'received'
       && row.id !== selectedSourceId
       && !receivedSourceIds.has(row.id)
-      && row.supplier.trim().toLocaleLowerCase() === company
-      && (!brand || row.brand.trim().toLocaleLowerCase().includes(brand))).slice(0, 8);
-  }, [form.brandName, form.supplier, placeRows, receiveItems, selectedSourceId]);
+      && row.brand.trim().toLocaleLowerCase().includes(brand)).slice(0, 8);
+  }, [form.brandName, placeRows, receiveItems, selectedSourceId]);
   const savedSupplierContacts = useMemo(() => {
     const seen = new Set<string>();
     return [...purchaseRows, ...placeRows]
@@ -854,12 +822,13 @@ export default function PurchaseScreen() {
   function updateForm(field: keyof FormState, value: string) {
     setForm((current) => {
       if (field === 'brandName') {
-        const match = products.find((product) =>
-          product.manufacturer.trim().toLocaleLowerCase() === current.supplier.trim().toLocaleLowerCase()
-          && (product.brand.trim() || product.medicine_name.trim()).toLocaleLowerCase() === value.trim().toLocaleLowerCase(),
+        const exactMatches = products.filter((product) =>
+          (product.brand.trim() || product.medicine_name.trim()).toLocaleLowerCase() === value.trim().toLocaleLowerCase(),
         );
+        const match = exactMatches.length === 1 ? exactMatches[0] : undefined;
         return {
           ...current,
+          supplier: match?.manufacturer.trim() ?? '',
           brandName: value,
           productId: match?.id ?? '',
           packPrice: match?.pack_price.trim() === '-' ? '' : match?.pack_price.trim() ?? '',
@@ -868,7 +837,7 @@ export default function PurchaseScreen() {
         };
       }
       if (field === 'batchNumber') {
-        return { ...current, batchNumber: value.replace(/[^a-zA-Z0-9/-]/g, '') };
+        return { ...current, batchNumber: value.replace(/\D/g, '') };
       }
       if (field === 'mfgDate' || field === 'expDate') {
         return { ...current, [field]: formatMonthYearInput(value, current[field]) };
@@ -878,69 +847,52 @@ export default function PurchaseScreen() {
     setSaveError('');
   }
 
-  function updateReceiveCompany(value: string) {
+  function selectOrderBrand(product: Product) {
     setForm((current) => ({
       ...current,
-      supplier: value,
-      contact: value.trim() === current.supplier.trim() ? current.contact : '',
-      phone: value.trim() === current.supplier.trim() ? current.phone : '',
-      productId: '',
-      brandName: '',
-      quantity: '',
-      price: '',
-      packPrice: '',
-      packSize: '',
-      batchNumber: '',
-      mfgDate: '',
-      expDate: '',
-      mrp: '',
-    }));
-    setSelectedSourceId('');
-    setScannedProductMatches([]);
-    setScannerMessage('');
-    setSaveError('');
-  }
-
-  function selectScannedProduct(product: Product) {
-    const brandName = product.brand.trim() || product.medicine_name.trim();
-    const packPrice = product.pack_price.trim() === '-' ? '' : product.pack_price.trim();
-    setForm((current) => ({
-      ...current,
+      supplier: product.manufacturer.trim(),
+      brandName: product.brand.trim() || product.medicine_name.trim(),
       productId: product.id,
-      brandName,
-      mrp: packPrice,
+      packPrice: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
       packSize: product.pack_size.trim(),
-      price: packPrice,
-      batchNumber: '',
-      mfgDate: '',
-      expDate: '',
     }));
-    setSelectedSourceId('');
-    setScannerMessage('');
     setSaveError('');
   }
 
-  async function startCameraScan(mode: ScannerMode) {
+  function selectReceiveProduct(product: Product) {
+    setForm((current) => ({
+      ...current,
+      supplier: product.manufacturer.trim(),
+      brandName: product.brand.trim() || product.medicine_name.trim(),
+      productId: product.id,
+      mrp: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
+      packSize: product.pack_size.trim(),
+      price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
+    }));
+    setBatchScanMessage('');
+  }
+
+  async function startBatchScan() {
+    if (!OCR_ENABLED) return;
     if (Platform.OS === 'web') {
       alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
       return;
     }
-    if (mode === 'product' && isCatalogLoading) {
-      alert.alert('Product list is loading', 'Wait for the Product Management list to finish loading, then scan again.');
+    if (!form.brandName.trim()) {
+      alert.alert('Brand name required', 'Set a brand name before scanning batch details.');
       return;
     }
-    setScannerMode(mode);
-    setScannerMessage('');
-    if (mode === 'product') setScannedProductMatches([]);
+
+    setBatchScanMessage('');
     setIsCameraReady(false);
     try {
       const permission = await Camera.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        alert.alert('Camera permission required', 'Allow camera access to scan medicine labels.');
+        alert.alert('Camera permission required', 'Allow camera access to scan batch details.');
         return;
       }
       Keyboard.dismiss();
-      setIsScannerOpen(true);
+      setIsBatchScannerOpen(true);
     } catch (permissionError) {
       alert.alert(
         'Camera permission failed',
@@ -949,36 +901,10 @@ export default function PurchaseScreen() {
     }
   }
 
-  function closeCameraScanner() {
-    setIsScannerOpen(false);
+  function closeBatchScanner() {
+    setIsBatchScannerOpen(false);
     setIsCameraReady(false);
     setIsRecognizingFrame(false);
-  }
-
-  function updateOrderCompany(value: string) {
-    setForm((current) => ({
-      ...current,
-      supplier: value,
-      productId: '',
-      brandName: '',
-      packPrice: '',
-      quantity: '',
-      price: '',
-      packSize: '',
-    }));
-    setOrderLines([]);
-    setSaveError('');
-  }
-
-  function selectOrderBrand(product: Product) {
-    setForm((current) => ({
-      ...current,
-      brandName: product.brand.trim() || product.medicine_name.trim(),
-      productId: product.id,
-      packPrice: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
-      packSize: product.pack_size.trim(),
-    }));
-    setSaveError('');
   }
 
   function focusSupplierField(field: SupplierField) {
@@ -1035,6 +961,8 @@ export default function PurchaseScreen() {
 
   function closeReceiveForm() {
     setIsReceiveModalOpen(false);
+    setIsBatchScannerOpen(false);
+    setBatchScanMessage('');
     setForm(emptyForm);
     setSelectedSourceId('');
     setReceiveItems([]);
@@ -1045,8 +973,6 @@ export default function PurchaseScreen() {
     setPaymentAmount('');
     setPaymentMethod('cash');
     setFocusedSupplierField(null);
-    setScannedProductMatches([]);
-    setScannerMessage('');
     setSaveError('');
   }
 
@@ -1054,14 +980,9 @@ export default function PurchaseScreen() {
     const product = products.find((item) => item.id === form.productId);
     const quantity = Number(form.quantity);
     const price = Number(form.price);
-    const supplier = form.supplier.trim();
     const brand = form.brandName.trim();
-    if (!supplier || !brand || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0) {
-      setSaveError('Enter a company and brand name, then enter a valid box quantity and purchase price.');
-      return;
-    }
-    if (product && product.manufacturer.trim().toLocaleLowerCase() !== supplier.toLocaleLowerCase()) {
-      setSaveError('Select a brand from the chosen company.');
+    if (!brand || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0) {
+      showPurchaseError('Enter a brand name, box quantity greater than zero, and a valid purchase price.');
       return;
     }
     setOrderLines((current) => [...current, {
@@ -1121,14 +1042,18 @@ export default function PurchaseScreen() {
     }
   }
 
+  function showPurchaseError(message: string) {
+    setSaveError(message);
+    alert.alert('Check your input', message);
+  }
+
   async function savePlaceOrder() {
     if (!isPurchaseDataFresh || !isCatalogFresh) {
-      setSaveError('Updating purchase and product data. Please wait a moment and try again.');
+      showPurchaseError('Updating purchase and product data. Please wait a moment and try again.');
       return;
     }
-    const supplier = form.supplier.trim();
-    if (!supplier || orderLines.length === 0) {
-      setSaveError('Select a company and add at least one brand to the order list.');
+    if (orderLines.length === 0) {
+      showPurchaseError('Add at least one brand to the order list.');
       return;
     }
     const nextNumber = placeRows.reduce((max, row) => {
@@ -1141,7 +1066,7 @@ export default function PurchaseScreen() {
     const rows = orderLines.map(({ product, brand, packPrice, packSize, quantity, price }, index): PurchaseRow => ({
       id: `${order}-${index}`,
       order,
-      supplier,
+      supplier: product?.manufacturer.trim() ?? '',
       orderDate,
       brand,
       genericName: product?.generic_name.trim() || '-',
@@ -1169,8 +1094,11 @@ export default function PurchaseScreen() {
       await persistRows(PLACE_ORDER_KEY, nextRows);
       setPlaceRows(nextRows);
       closePlaceForm();
+      alert.alert('Order placed', `${order} was saved successfully.`);
     } catch (saveIssue) {
-      setSaveError(saveIssue instanceof Error ? saveIssue.message : 'Could not place the order.');
+      const message = saveIssue instanceof Error ? saveIssue.message : 'Could not place the order.';
+      setSaveError(message);
+      alert.alert('Order failed', message);
     } finally {
       setIsSaving(false);
     }
@@ -1179,6 +1107,7 @@ export default function PurchaseScreen() {
   function selectSourceOrder(row: PurchaseRow) {
     setSelectedSourceId(row.id);
     setReceiveStep('batch');
+    setBatchScanMessage('');
     setForm((current) => ({
       ...current,
       supplier: row.supplier,
@@ -1208,7 +1137,7 @@ export default function PurchaseScreen() {
       || !batchNumber || !mfg || !exp || !form.mrp.trim()
       || !form.packSize.trim() || !form.quantity.trim() || !form.price.trim()
     ) {
-      setSaveError('Complete all batch fields, including Batch Number, Box MRP, quantity, and Mfg/Exp dates.');
+      showPurchaseError('Complete all batch fields, including Batch Number, Box MRP, quantity, and Mfg/Exp dates.');
       return;
     }
     if (
@@ -1218,7 +1147,7 @@ export default function PurchaseScreen() {
       || Number(exp[2]) < 18
       || monthDate(exp) <= monthDate(mfg)
     ) {
-      setSaveError('Enter valid Mfg/Exp dates and make sure Exp Date is after Mfg Date.');
+      showPurchaseError('Enter valid Mfg/Exp dates and make sure Exp Date is after Mfg Date.');
       return;
     }
     if (
@@ -1226,7 +1155,7 @@ export default function PurchaseScreen() {
       || !Number.isFinite(quantity) || quantity <= 0
       || !Number.isFinite(price) || price < 0
     ) {
-      setSaveError('Enter a valid Box MRP, a box quantity greater than zero, and a valid purchase price.');
+      showPurchaseError('Enter a valid Box MRP, a box quantity greater than zero, and a valid purchase price.');
       return;
     }
     const product = products.find((item) => item.id === form.productId);
@@ -1267,27 +1196,27 @@ export default function PurchaseScreen() {
 
   async function saveReceiveOrder() {
     if (!isPurchaseDataFresh) {
-      setSaveError('Updating purchase data. Please wait a moment and try again.');
+      showPurchaseError('Updating purchase data. Please wait a moment and try again.');
       return;
     }
     if (receiveItems.length === 0) {
-      setSaveError('Add at least one batch to the Receive List before continuing.');
+      showPurchaseError('Add at least one batch to the Receive List before continuing.');
       return;
     }
     if (isReceiveSupplierMissing) {
-      setSaveError('Enter a Supplier Name before receiving brands without a Company Name.');
+      showPurchaseError('Enter a Supplier Name for each brand without a catalog company.');
       return;
     }
     if (!validDiscount) {
-      setSaveError('Enter a valid discount amount.');
+      showPurchaseError('Enter a valid discount amount.');
       return;
     }
     if (!validTaxRate) {
-      setSaveError('Enter a VAT/Tax rate between 0 and 100.');
+      showPurchaseError('Enter a VAT/Tax rate between 0 and 100.');
       return;
     }
     if (!validPayment) {
-      setSaveError('Enter a payment amount between zero and the subtotal.');
+      showPurchaseError('Enter a payment amount between zero and the subtotal.');
       return;
     }
     const nextNumber = purchaseRows.reduce((max, row) => {
@@ -1368,8 +1297,11 @@ export default function PurchaseScreen() {
       setPurchaseRows(nextPurchaseRows);
       if (receivedSources.size > 0) setPlaceRows(nextPlaceRows);
       closeReceiveForm();
+      alert.alert('Order received', `${order} was added to inventory successfully.`);
     } catch (saveIssue) {
-      setSaveError(saveIssue instanceof Error ? saveIssue.message : 'Could not receive the order.');
+      const message = saveIssue instanceof Error ? saveIssue.message : 'Could not receive the order.';
+      setSaveError(message);
+      alert.alert('Order receive failed', message);
     } finally {
       setIsSaving(false);
     }
@@ -1515,8 +1447,8 @@ export default function PurchaseScreen() {
         <SafeAreaView style={styles.modalPage}>
           <ModalHeader title="Place Order" onClose={closePlaceForm} />
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.modalSubtitle}>Select a company and one or more brands to place an order.</Text>
-            {isCatalogLoading ? <Text style={styles.catalogStatus}>Loading company and brand suggestions…</Text> : null}
+            <Text style={styles.modalSubtitle}>Search the product list or type a brand name to create an order.</Text>
+            {isCatalogLoading ? <Text style={styles.catalogStatus}>Loading brand suggestions…</Text> : null}
             {catalogError ? (
               <View style={styles.errorBox}>
                 <Text style={styles.errorText}>{catalogError}</Text>
@@ -1526,59 +1458,44 @@ export default function PurchaseScreen() {
               </View>
             ) : null}
             <Field
-              label="Company Name"
-              value={form.supplier}
-              onChangeText={updateOrderCompany}
-              placeholder="Type or select a company"
+              label="Brand Name"
+              value={form.brandName}
+              onChangeText={(value) => {
+                updateForm('brandName', value);
+              }}
+              placeholder="Search or type a brand name"
             />
-            {companySuggestions.length > 0 ? (
+            {placeOrderProducts.length > 0 ? (
               <View style={styles.productOptions}>
-                {companySuggestions.map((company) => (
-                  <Pressable key={company} onPress={() => updateOrderCompany(company)} style={styles.productOption}>
-                    <Text style={styles.productOptionName}>{company}</Text>
+                {placeOrderProducts.map((product) => (
+                  <Pressable key={product.id} onPress={() => selectOrderBrand(product)} style={styles.productOption}>
+                    <Text style={styles.productOptionName}>{product.brand.trim() || product.medicine_name.trim()}</Text>
+                    <Text style={styles.productOptionMeta}>{productDetails(product)}</Text>
                   </Pressable>
                 ))}
               </View>
             ) : null}
-            {form.supplier ? (
+            {form.brandName.trim() ? (
               <>
-                <Field
-                  label="Brand Name"
-                  value={form.brandName}
-                  onChangeText={(value) => updateForm('brandName', value)}
-                  placeholder="Search or type a brand name"
-                />
-                {placeOrderProducts.length > 0 ? (
-                  <View style={styles.productOptions}>
-                    {placeOrderProducts.slice(0, 12).map((product) => (
-                      <Pressable key={product.id} onPress={() => selectOrderBrand(product)} style={styles.productOption}>
-                        <Text style={styles.productOptionName}>{productName(product)}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
+                {products.find((product) => product.id === form.productId) ? (
+                  <Text style={styles.productOptionMeta}>{productDetails(products.find((product) => product.id === form.productId))}</Text>
                 ) : null}
-                {form.brandName.trim() ? (
-                  <>
-                    <View style={styles.rowFields}>
-                      <Field label="Pack Price" value={form.packPrice} onChangeText={(value) => updateForm('packPrice', value)} placeholder="0.00" keyboardType="decimal-pad" style={styles.halfField} />
-                      <Field label="Box Quantity" value={form.quantity} onChangeText={(value) => updateForm('quantity', value)} placeholder="0" keyboardType="decimal-pad" style={styles.halfField} />
-                    </View>
-                    <View style={styles.rowFields}>
-                      <Field label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} placeholder="e.g. 10" style={styles.halfField} />
-                      <Field label="Purchase Price (Box)" value={form.price} onChangeText={(value) => updateForm('price', value)} placeholder="0.00" keyboardType="decimal-pad" style={styles.halfField} />
-                    </View>
-                    {isReceiveSupplierMissing ? (
-                      <Text style={styles.formError}>Add a Supplier Name to receive brands without a Company Name.</Text>
-                    ) : null}
-                    <Pressable onPress={addOrderLine} style={styles.addLineButton}><Text style={styles.addLineText}>Add</Text></Pressable>
-                  </>
-                ) : null}
+                <View style={styles.rowFields}>
+                  <Field label="Pack Price" value={form.packPrice} onChangeText={(value) => updateForm('packPrice', value)} placeholder="0.00" keyboardType="decimal-pad" style={styles.halfField} />
+                  <Field label="Box Quantity" value={form.quantity} onChangeText={(value) => updateForm('quantity', value)} placeholder="0" keyboardType="decimal-pad" style={styles.halfField} />
+                </View>
+                <View style={styles.rowFields}>
+                  <Field label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} placeholder="e.g. 10" style={styles.halfField} />
+                  <Field label="Purchase Price (Box)" value={form.price} onChangeText={(value) => updateForm('price', value)} placeholder="0.00" keyboardType="decimal-pad" style={styles.halfField} />
+                </View>
+                <Pressable onPress={addOrderLine} style={styles.addLineButton}><Text style={styles.addLineText}>Add</Text></Pressable>
               </>
             ) : null}
             {orderLines.map((line, index) => (
               <View key={`${line.product?.id ?? line.brand}-${index}`} style={styles.lineCard}>
                 <View style={styles.lineText}>
-                  <Text style={styles.lineName}>{line.brand}{line.product?.strength ? ` · ${line.product.strength}` : ''}</Text>
+                  <Text style={styles.lineName}>{line.brand}</Text>
+                  {productDetails(line.product) ? <Text style={styles.lineMeta}>{productDetails(line.product)}</Text> : null}
                   <Text style={styles.lineMeta}>Pack Price: {line.packPrice || '-'} · Pack Size: {line.packSize || '-'} · Box Qty: {line.quantity}</Text>
                   <Text style={styles.lineMeta}>Purchase Price (Box): {money(Number(line.price))} · Unit Purchase Price: {unitPurchasePrice(line.packSize, Number(line.quantity) * Number(line.price), Number(line.quantity))}</Text>
                 </View>
@@ -1599,9 +1516,9 @@ export default function PurchaseScreen() {
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
               <Pressable
-                disabled={isSaving || !form.supplier}
+                disabled={isSaving || orderLines.length === 0}
                 onPress={() => void savePlaceOrder()}
-                style={[styles.submitButton, styles.placeOrderSubmit, (isSaving || !form.supplier) && styles.disabledButton]}>
+                style={[styles.submitButton, styles.placeOrderSubmit, (isSaving || orderLines.length === 0) && styles.disabledButton]}>
                 {isSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Place Order</Text>}
               </Pressable>
             </View>
@@ -1618,7 +1535,7 @@ export default function PurchaseScreen() {
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
             {receiveStep === 'batch' ? (
               <>
-                {isCatalogLoading ? <Text style={styles.catalogStatus}>Loading company and brand suggestions…</Text> : null}
+                {isCatalogLoading ? <Text style={styles.catalogStatus}>Loading brand suggestions…</Text> : null}
                 {catalogError ? (
                   <View style={styles.errorBox}>
                     <Text style={styles.errorText}>{catalogError}</Text>
@@ -1627,126 +1544,70 @@ export default function PurchaseScreen() {
                     </Pressable>
                   </View>
                 ) : null}
-                <View style={styles.scannerFieldRow}>
-                  <Field
-                    label="Company Name (Optional)"
-                    value={form.supplier}
-                    onChangeText={updateReceiveCompany}
-                    placeholder="Optional; filter products by company"
-                    style={styles.scannerField}
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Scan brand name"
-                    onPress={() => void startCameraScan('product')}
-                    style={styles.scanButton}>
-                    <SymbolView
-                      name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                      size={20}
-                      tintColor="#17664f"
-                    />
-                  </Pressable>
-                </View>
-                {scannerMessage === 'Not Found' ? (
-                  <View style={styles.scanMessageRow}>
-                    <Text style={styles.scanNotFound}>Not Found</Text>
-                    <Pressable onPress={() => void startCameraScan('product')}>
-                      <Text style={styles.retryText}>New Search</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-                {scannedProductMatches.length > 1 ? (
-                  <View style={styles.productOptions}>
-                    {scannedProductMatches.map((product) => (
-                      <Pressable
-                        key={product.id}
-                        onPress={() => selectScannedProduct(product)}
-                        style={styles.productOption}>
-                        <Text style={styles.productOptionName}>
-                          {productName(product)} · {product.manufacturer}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
-                {receiveCompanySuggestions.length > 0 ? (
-                  <View style={styles.productOptions}>
-                    {receiveCompanySuggestions.map((company) => (
-                      <Pressable key={company} onPress={() => updateReceiveCompany(company)} style={styles.productOption}>
-                        <Text style={styles.productOptionName}>{company}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
                 <Field
                   label="Brand Name"
                   value={form.brandName}
                   onChangeText={(value) => {
                     updateForm('brandName', value);
                     setSelectedSourceId('');
+                    setBatchScanMessage('');
                   }}
-                  placeholder={form.supplier.trim() ? 'Search, select, or type a brand' : 'Type or scan a brand name'}
+                  placeholder="Search or type a brand name"
                 />
                 {receiveBrandProducts.length > 0 ? (
                   <View style={styles.productOptions}>
                     {receiveBrandProducts.map((product) => (
-                      <Pressable key={product.id} onPress={() => {
-                        setForm((current) => ({
-                          ...current,
-                          brandName: product.brand.trim() || product.medicine_name.trim(),
-                          productId: product.id,
-                          mrp: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
-                          packSize: product.pack_size.trim(),
-                          price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
-                        }));
-                      }} style={styles.productOption}>
-                        <Text style={styles.productOptionName}>{productName(product)}</Text>
+                      <Pressable key={product.id} onPress={() => selectReceiveProduct(product)} style={styles.productOption}>
+                        <Text style={styles.productOptionName}>{product.brand.trim() || product.medicine_name.trim()}</Text>
+                        <Text style={styles.productOptionMeta}>{productDetails(product)}</Text>
                       </Pressable>
                     ))}
                   </View>
                 ) : null}
-                {form.supplier.trim() ? (
+                {matchingPlaceOrderRows.length > 0 ? (
                   <>
                     <Text style={styles.sectionLabel}>Place Order List</Text>
-                    {matchingPlaceOrderRows.length > 0 ? (
-                      <View style={styles.productOptions}>
-                        {matchingPlaceOrderRows.map((row) => (
-                          <Pressable key={row.id} onPress={() => selectSourceOrder(row)} style={styles.productOption}>
-                            <Text style={styles.productOptionName}>{row.brand}</Text>
-                            <Text style={styles.productOptionMeta}>{row.order} · {row.quantity ?? '—'} box · {money(Number(row.totalPrice ?? 0))}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : (
-                      <Text style={styles.catalogStatus}>
-                        {form.brandName.trim()
-                          ? 'No matching placed brand. You can add this brand as a new receive.'
-                          : 'No pending placed brands for this company. Type a brand name to add a new receive.'}
-                      </Text>
-                    )}
+                    <View style={styles.productOptions}>
+                      {matchingPlaceOrderRows.map((row) => (
+                        <Pressable key={row.id} onPress={() => selectSourceOrder(row)} style={styles.productOption}>
+                          <Text style={styles.productOptionName}>{row.brand}</Text>
+                          <Text style={styles.productOptionMeta}>
+                            {[row.genericName, row.strength, row.dosageForm, row.packSize]
+                              .filter((value) => value && value !== '-')
+                              .join(' · ')}
+                          </Text>
+                          <Text style={styles.productOptionMeta}>{row.order} · {row.quantity ?? '—'} box · {money(Number(row.totalPrice ?? 0))}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </>
                 ) : null}
                 {form.brandName.trim() ? (
                   <>
-                    <View style={styles.batchScanHeader}>
+                    <View style={styles.batchSectionHeader}>
                       <Text style={styles.sectionLabel}>Add Batch Details</Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Scan batch number and dates"
-                        onPress={() => void startCameraScan('batch')}
-                        style={styles.scanButton}>
-                        <SymbolView
-                          name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                          size={20}
-                          tintColor="#17664f"
-                        />
-                      </Pressable>
+                      {OCR_ENABLED ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Scan batch number and dates"
+                          onPress={() => void startBatchScan()}
+                          style={styles.scanButton}>
+                          <SymbolView
+                            name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                            size={20}
+                            tintColor="#17664f"
+                          />
+                        </Pressable>
+                      ) : null}
                     </View>
-                    {scannerMessage && scannerMessage !== 'Not Found' ? (
-                      <Text style={styles.scanMessage}>{scannerMessage}</Text>
+                    {batchScanMessage ? <Text style={styles.formError}>{batchScanMessage}</Text> : null}
+                    {form.productId ? (
+                      <Text style={styles.productOptionMeta}>
+                        {productDetails(products.find((product) => product.id === form.productId))}
+                      </Text>
                     ) : null}
                 <View style={styles.rowFields}>
-                  <Field ref={(node) => { batchInputRefs.current.batchNumber = node; }} label="Batch Number" value={form.batchNumber} onChangeText={(value) => updateForm('batchNumber', value)} onSubmitEditing={() => focusNextBatchField('batchNumber')} returnKeyType="next" placeholder="Batch/lot number" keyboardType="default" style={styles.halfField} />
+                  <Field ref={(node) => { batchInputRefs.current.batchNumber = node; }} label="Batch Number" value={form.batchNumber} onChangeText={(value) => updateForm('batchNumber', value)} onSubmitEditing={() => focusNextBatchField('batchNumber')} returnKeyType="next" placeholder="Batch number" keyboardType="number-pad" style={styles.halfField} />
                   <Field ref={(node) => { batchInputRefs.current.packSize = node; }} label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} onSubmitEditing={() => focusNextBatchField('packSize')} returnKeyType="next" placeholder="e.g. 10" style={styles.halfField} />
                 </View>
                 <View style={styles.rowFields}>
@@ -1798,7 +1659,8 @@ export default function PurchaseScreen() {
                   <View key={item.id} style={styles.stagedBatch}>
                     <View style={styles.lineText}>
                       <Text style={styles.lineName}>{item.brand}</Text>
-                      <Text style={styles.lineMeta}>{item.company} · Batch {item.batch.batchNumber} · {item.batch.packSize}</Text>
+                      {productDetails(item.product) ? <Text style={styles.lineMeta}>{productDetails(item.product)}</Text> : null}
+                      <Text style={styles.lineMeta}>Batch {item.batch.batchNumber} · {item.batch.packSize}</Text>
                       <Text style={styles.lineMeta}>
                         Mfg {item.batch.mfgDate} · Exp {item.batch.expDate} · {item.batch.quantity} box
                       </Text>
@@ -1831,14 +1693,11 @@ export default function PurchaseScreen() {
             {receiveStep === 'summary' ? (
               <>
                 <View style={styles.detailSummary}>
-                  <Text style={styles.supplierName}>
-                    {[...new Set(receiveItems.map((item) => item.company))].join(', ')}
-                  </Text>
+                  <Text style={styles.supplierName}>Receive Summary</Text>
                   <Text style={styles.contactLine}>{form.contact || 'Supplier'} · {form.phone || 'No phone number'}</Text>
                 </View>
                 <View style={styles.billSummary}>
-                  <SummaryRow label="Total Company" value={String(new Set(receiveItems.map((item) => item.company.trim().toLocaleLowerCase()).filter(Boolean)).size)} />
-                  <SummaryRow label="Brands" value={String(new Set(receiveItems.map((item) => `${item.company.toLocaleLowerCase()}\u0000${item.brand.toLocaleLowerCase()}`)).size)} />
+                  <SummaryRow label="Brands" value={String(new Set(receiveItems.map((item) => item.brand.toLocaleLowerCase())).size)} />
                   <SummaryRow
                     label="Box Quantity"
                     value={String(receiveItems.reduce((total, item) => total + Number(item.batch.quantity), 0))}
@@ -1989,8 +1848,9 @@ export default function PurchaseScreen() {
                   <View key={item.id} style={styles.stagedBatch}>
                     <View style={styles.lineText}>
                       <Text style={styles.lineName}>{item.brand} · {item.batch.batchNumber}</Text>
+                      {productDetails(item.product) ? <Text style={styles.lineMeta}>{productDetails(item.product)}</Text> : null}
                       <Text style={styles.lineMeta}>
-                        {item.company} · {item.batch.packSize} · Mfg {item.batch.mfgDate} · Exp {item.batch.expDate} · {item.batch.quantity} box
+                        {item.batch.packSize} · Mfg {item.batch.mfgDate} · Exp {item.batch.expDate} · {item.batch.quantity} box
                       </Text>
                     </View>
                     <Text style={styles.lineAmount}>{money(Number(item.batch.quantity) * Number(item.batch.price))}</Text>
@@ -2024,7 +1884,11 @@ export default function PurchaseScreen() {
               {selectedGroup.rows.map((row) => (
                 <View key={row.id} style={styles.detailItem}>
                   <Text style={styles.lineName}>{row.brand}{row.strength && row.strength !== '-' ? ` · ${row.strength}` : ''}</Text>
-                  <Text style={styles.lineMeta}>{row.genericName} · {row.packSize} · {row.quantity ?? '—'} box</Text>
+                  <Text style={styles.lineMeta}>
+                    {[row.genericName, row.strength, row.dosageForm, row.packSize]
+                      .filter((value) => value && value !== '-')
+                      .join(' · ')} · {row.quantity ?? '—'} box
+                  </Text>
                   {listType === 'receive' ? (
                     <Text style={styles.lineMeta}>Batch {row.batchNumber} · Mfg {row.mfgDate || '—'} · Exp {row.expDate || '—'}</Text>
                   ) : null}
@@ -2044,9 +1908,9 @@ export default function PurchaseScreen() {
         </SafeAreaView>
       </Modal>
       <Modal
-        visible={isScannerOpen}
+        visible={isBatchScannerOpen}
         animationType="slide"
-        onRequestClose={closeCameraScanner}
+        onRequestClose={closeBatchScanner}
         statusBarTranslucent>
         <View style={styles.scannerModal}>
           <CameraView
@@ -2056,19 +1920,17 @@ export default function PurchaseScreen() {
             onCameraReady={() => setIsCameraReady(true)}
             onMountError={(event) => {
               alert.alert('Camera unavailable', event.message);
-              closeCameraScanner();
+              closeBatchScanner();
             }}
             animateShutter={false}
           />
           <View pointerEvents="box-none" style={styles.scannerOverlay}>
             <View style={styles.scannerHeader}>
-              <Text style={styles.scannerTitle}>
-                {scannerMode === 'product' ? 'Scan product brand' : 'Scan batch details'}
-              </Text>
+              <Text style={styles.scannerTitle}>Scan batch details</Text>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Close scanner"
-                onPress={closeCameraScanner}
+                onPress={closeBatchScanner}
                 style={styles.scannerCloseButton}>
                 <Text style={styles.scannerCloseText}>Close</Text>
               </Pressable>
@@ -2077,11 +1939,7 @@ export default function PurchaseScreen() {
               <View style={styles.scannerTarget} />
               <View style={styles.scannerHint}>
                 {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
-                <Text style={styles.scannerHintText}>
-                  {scannerMode === 'product'
-                    ? 'Point the camera at the brand name'
-                    : 'Frame the batch number, MFG date and EXP date'}
-                </Text>
+                <Text style={styles.scannerHintText}>Show the batch number, Mfg date, and Exp date</Text>
               </View>
             </View>
           </View>
@@ -2163,7 +2021,7 @@ function SummaryRow({
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#145642' },
+  page: { flex: 1, backgroundColor: '#f4f6f2' },
   pageContent: { flex: 1, backgroundColor: '#f4f6f2' },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f4f6f2' },
   content: { padding: 16, paddingBottom: 36, gap: 14 },
@@ -2216,13 +2074,8 @@ const styles = StyleSheet.create({
   field: { gap: 5 },
   fieldLabel: { color: '#40564a', fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, paddingHorizontal: 11, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 9, backgroundColor: '#fff', color: '#24382e', fontSize: 13 },
-  scannerFieldRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  scannerField: { flex: 1 },
   scanButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 9, backgroundColor: '#eef8f2' },
-  scanMessageRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  scanNotFound: { color: '#a63e34', fontSize: 12, fontWeight: '700' },
-  scanMessage: { color: '#78847d', fontSize: 11, lineHeight: 16 },
-  batchScanHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  batchSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   scannerModal: { flex: 1, backgroundColor: '#000' },
   scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
   scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },

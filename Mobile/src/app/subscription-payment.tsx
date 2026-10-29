@@ -1,4 +1,4 @@
-import { Text } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   type PharmacySubscriptionPlan,
 } from '@/lib/pharmacy-subscription';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -37,7 +38,8 @@ function formatFeeLabel(plan: PharmacySubscriptionPlan) {
 }
 
 export default function SubscriptionPaymentScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading } = useAuth();
+  const { alert } = useLocalizedAlert();
+  const { dashboardRole, isLoading: isAuthLoading, profileLoading, storeName } = useAuth();
   const { planId: planIdParam, billingCycles: billingCyclesParam } = useLocalSearchParams<{
     planId?: string | string[];
     billingCycles?: string | string[];
@@ -116,7 +118,9 @@ export default function SubscriptionPaymentScreen() {
 
   async function completePayment() {
     if (!selectedPlan || !supabase) {
-      setError('The selected plan or subscription service is unavailable.');
+      const message = 'The selected plan or subscription service is unavailable.';
+      setError(message);
+      alert('Error', message);
       return;
     }
     setIsSubmitting(true);
@@ -128,9 +132,18 @@ export default function SubscriptionPaymentScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (paymentError) throw paymentError;
-      router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } });
+      alert(
+        'Payment successful',
+        'Your subscription plan has been updated.',
+        [{
+          text: 'Continue',
+          onPress: () => router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } }),
+        }],
+      );
     } catch (paymentError) {
-      setError(paymentError instanceof Error ? paymentError.message : 'Could not complete subscription payment.');
+      const message = paymentError instanceof Error ? paymentError.message : 'Could not complete subscription payment.';
+      setError(message);
+      alert('Payment failed', message);
       setIsSubmitting(false);
     }
   }
@@ -150,7 +163,7 @@ export default function SubscriptionPaymentScreen() {
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.brand}>Pharmacy Cluster</Text>
+          <Text numberOfLines={1} style={styles.brand}>{getPharmacyDisplayName(storeName)}</Text>
           <Text style={styles.headerSubtitle}>Subscription payment</Text>
         </View>
         <Text style={styles.demoBadge}>DEMO</Text>

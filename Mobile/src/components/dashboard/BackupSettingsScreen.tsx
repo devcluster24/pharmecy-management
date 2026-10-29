@@ -1,4 +1,4 @@
-import { Text, useLanguage } from '@/providers/LanguageProvider';
+import { Text, useLanguage, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import { useLocalSearchParams } from 'expo-router';
@@ -58,6 +58,7 @@ async function getError(response: Response) {
 }
 
 export default function BackupSettingsScreen() {
+  const { alert: showAlert } = useLocalizedAlert();
   const { language } = useLanguage();
   const isBengali = language === 'bn';
   const query = useLocalSearchParams<{ backup_oauth?: string; backup_message?: string }>();
@@ -99,8 +100,16 @@ export default function BackupSettingsScreen() {
       void loadSettings()
         .then(() => {
           if (cancelled) return;
-          if (oauthStatus === 'connected') setMessage(isBengali ? 'Google Drive সংযুক্ত হয়েছে।' : 'Google Drive connected successfully.');
-          if (oauthStatus === 'error') setError(oauthMessage || (isBengali ? 'Google Drive সংযোগ করা যায়নি।' : 'Google Drive could not be connected.'));
+          if (oauthStatus === 'connected') {
+            const message = isBengali ? 'Google Drive সংযুক্ত হয়েছে।' : 'Google Drive connected successfully.';
+            setMessage(message);
+            showAlert('Success', message);
+          }
+          if (oauthStatus === 'error') {
+            const message = oauthMessage || (isBengali ? 'Google Drive সংযোগ করা যায়নি।' : 'Google Drive could not be connected.');
+            setError(message);
+            showAlert('Error', message);
+          }
         })
         .catch((loadError: unknown) => {
           if (cancelled) return;
@@ -114,7 +123,7 @@ export default function BackupSettingsScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [isBengali, loadSettings, query.backup_message, query.backup_oauth]);
+  }, [isBengali, loadSettings, query.backup_message, query.backup_oauth, showAlert]);
 
   async function connectGoogleDrive() {
     setIsConnecting(true);
@@ -144,10 +153,14 @@ export default function BackupSettingsScreen() {
           throw new Error(callbackError || 'Google Drive could not be connected.');
         }
         await loadSettings();
-        setMessage(isBengali ? 'Google Drive সংযুক্ত হয়েছে।' : 'Google Drive connected successfully.');
+        const message = isBengali ? 'Google Drive সংযুক্ত হয়েছে।' : 'Google Drive connected successfully.';
+        setMessage(message);
+        showAlert('Success', message);
       }
     } catch (connectError) {
-      setError(connectError instanceof Error ? connectError.message : 'Could not start Google Drive connection.');
+      const message = connectError instanceof Error ? connectError.message : 'Could not start Google Drive connection.';
+      setError(message);
+      showAlert('Error', message);
     } finally {
       setIsConnecting(false);
     }
@@ -181,11 +194,15 @@ export default function BackupSettingsScreen() {
       });
       if (!response.ok) throw new Error(await getError(response));
       setSettings((current) => ({ ...current, autoBackupEnabled: enabled, intervalDays }));
-      setMessage(enabled
+      const message = enabled
         ? (isBengali ? 'স্বয়ংক্রিয় ব্যাকআপ চালু হয়েছে।' : 'Auto Backup is enabled.')
-        : (isBengali ? 'স্বয়ংক্রিয় ব্যাকআপ বন্ধ হয়েছে।' : 'Auto Backup is disabled.'));
+        : (isBengali ? 'স্বয়ংক্রিয় ব্যাকআপ বন্ধ হয়েছে।' : 'Auto Backup is disabled.');
+      setMessage(message);
+      showAlert('Success', message);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save Auto Backup settings.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save Auto Backup settings.';
+      setError(message);
+      showAlert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -214,12 +231,16 @@ export default function BackupSettingsScreen() {
       if (!data || typeof data !== 'object') throw new Error('Backup service returned an invalid response.');
       const result = data as { status?: string; message?: string };
       if (result.status === 'Failed' || result.status === 'Skipped') throw new Error(result.message || 'Backup failed.');
-      setMessage(result.status === 'Partial'
+      const message = result.status === 'Partial'
         ? (isBengali ? 'কিছু ফাইল বাদ পড়েছে; ব্যাকআপ ইতিহাস দেখুন।' : 'Backup completed with some files missing; see the history.')
-        : (isBengali ? 'ব্যাকআপ Google Drive-এ সংরক্ষিত হয়েছে।' : 'Backup completed and saved to Google Drive.'));
+        : (isBengali ? 'ব্যাকআপ Google Drive-এ সংরক্ষিত হয়েছে।' : 'Backup completed and saved to Google Drive.');
+      setMessage(message);
+      showAlert(result.status === 'Partial' ? 'Backup completed with a warning' : 'Success', message);
       await loadSettings();
     } catch (backupError) {
-      setError(backupError instanceof Error ? backupError.message : 'Could not create the Drive backup.');
+      const message = backupError instanceof Error ? backupError.message : 'Could not create the Drive backup.';
+      setError(message);
+      showAlert('Error', message);
     } finally {
       setIsBackingUp(false);
     }

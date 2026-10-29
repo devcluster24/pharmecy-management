@@ -7,6 +7,7 @@ import {
   type TextInputProps,
   type TextProps,
 } from 'react-native';
+import { AppAlertHost, type AppAlertPayload } from '@/components/alerts/AppAlertHost';
 import {
   appCurrencyOptions,
   replaceCurrencySymbol,
@@ -38,6 +39,8 @@ const LanguageContext = createContext<LanguageContextValue>({
   setCurrency: async () => {},
   currencyError: '',
 });
+type LocalizedAlert = (...args: Parameters<typeof NativeAlert.alert>) => void;
+const AlertContext = createContext<LocalizedAlert>(() => {});
 
 const bengaliTranslations: Record<string, string> = {
   'Add': 'যোগ করুন',
@@ -146,6 +149,50 @@ const bengaliTranslations: Record<string, string> = {
   'Products with available stock at or below': 'যেসব পণ্যের মজুত',
   'units will appear in the Low Stock list.': 'ইউনিট বা তার কম, সেগুলো Low Stock তালিকায় দেখা যাবে।',
   'Enter and save a threshold greater than 0 to enable low stock monitoring.': 'কম স্টক পর্যবেক্ষণ চালু করতে ০-এর বেশি সীমা লিখে সংরক্ষণ করুন।',
+  'Success': 'সফল',
+  'Error': 'ত্রুটি',
+  'Check your input': 'আপনার তথ্য যাচাই করুন',
+  'Invalid details': 'ভুল তথ্য',
+  'Missing details': 'প্রয়োজনীয় তথ্য দিন',
+  'Invalid username': 'অকার্যকর ইউজারনেম',
+  'Invalid email': 'অকার্যকর ইমেইল',
+  'Password too short': 'পাসওয়ার্ড খুব ছোট',
+  'Sign up unavailable': 'সাইন আপ করা যাচ্ছে না',
+  'Sign in unavailable': 'সাইন ইন করা যাচ্ছে না',
+  'Account created': 'অ্যাকাউন্ট তৈরি হয়েছে',
+  'Account created with a warning': 'সতর্কতাসহ অ্যাকাউন্ট তৈরি হয়েছে',
+  'Sign up failed': 'সাইন আপ ব্যর্থ',
+  'Sign in failed': 'সাইন ইন ব্যর্থ',
+  'Signed in': 'সাইন ইন সফল',
+  'Signed in with a warning': 'সতর্কতাসহ সাইন ইন হয়েছে',
+  'Staff signup complete': 'স্টাফ সাইন আপ সম্পন্ন',
+  'Staff signup failed': 'স্টাফ সাইন আপ ব্যর্থ',
+  'Google signup failed': 'গুগল সাইন আপ ব্যর্থ',
+  'Staff application submitted': 'স্টাফ আবেদন জমা হয়েছে',
+  'Signup link created': 'সাইন আপ লিংক তৈরি হয়েছে',
+  'Staff details updated': 'স্টাফের তথ্য হালনাগাদ হয়েছে',
+  'Staff status updated': 'স্টাফের অবস্থা হালনাগাদ হয়েছে',
+  'Staff account deleted': 'স্টাফ অ্যাকাউন্ট মুছে ফেলা হয়েছে',
+  'Product saved': 'পণ্য সংরক্ষিত হয়েছে',
+  'Import complete': 'ইমপোর্ট সম্পন্ন',
+  'Import failed': 'ইমপোর্ট ব্যর্থ',
+  'Payment successful': 'পেমেন্ট সফল',
+  'Payment failed': 'পেমেন্ট ব্যর্থ',
+  'Subscription activated': 'সাবস্ক্রিপশন চালু হয়েছে',
+  'Extended access activated': 'বর্ধিত অ্যাক্সেস চালু হয়েছে',
+  'Sale completed': 'বিক্রয় সম্পন্ন',
+  'Sale failed': 'বিক্রয় ব্যর্থ',
+  'Order placed': 'অর্ডার দেওয়া হয়েছে',
+  'Order failed': 'অর্ডার ব্যর্থ',
+  'Order received': 'অর্ডার গ্রহণ করা হয়েছে',
+  'Order receive failed': 'অর্ডার গ্রহণ ব্যর্থ',
+  'Return recorded': 'ফেরত রেকর্ড হয়েছে',
+  'Return failed': 'ফেরত প্রক্রিয়া ব্যর্থ',
+  'Invoice downloaded': 'ইনভয়েস ডাউনলোড হয়েছে',
+  'Login activity was not saved': 'লগইন কার্যক্রম সংরক্ষণ হয়নি',
+  'Backup completed with a warning': 'সতর্কতাসহ ব্যাকআপ সম্পন্ন',
+  'Continue': 'চালিয়ে যান',
+  'OK': 'ঠিক আছে',
   'Saving…': 'সংরক্ষণ হচ্ছে…',
   'Save': 'সংরক্ষণ',
   'VAT/TAX settings are available to store owners.': 'ভ্যাট/ট্যাক্স সেটিং শুধু ফার্মেসির মালিকের জন্য।',
@@ -561,12 +608,10 @@ const bengaliTranslations: Record<string, string> = {
   'View total payment history': 'মোট পেমেন্টের ইতিহাস দেখুন',
   'Visits': 'ভিজিট',
   'e.g. 10': 'যেমন ১০',
-  'Invoice downloaded': 'ইনভয়েস ডাউনলোড হয়েছে',
   'Could not activate Extended Access': 'Extended Access চালু করা যায়নি',
   'Could not destroy batch': 'ব্যাচটি বাতিল করা যায়নি',
   'Destroy expired batch?': 'মেয়াদোত্তীর্ণ ব্যাচটি বাতিল করবেন?',
   'Destroy': 'বাতিল করুন',
-  'Login activity was not saved': 'লগইন কার্যকলাপ সংরক্ষণ করা যায়নি',
   'Logout activity was not saved': 'লগআউট কার্যকলাপ সংরক্ষণ করা যায়নি',
   'Could not record this login in the activity history.': 'কার্যকলাপের ইতিহাসে এই লগইন রেকর্ড করা যায়নি।',
   'Could not record this logout in the activity history.': 'কার্যকলাপের ইতিহাসে এই লগআউট রেকর্ড করা যায়নি।',
@@ -648,6 +693,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [languageError, setLanguageError] = useState('');
   const [currency, setCurrencyState] = useState<AppCurrency>('BDT');
   const [currencyError, setCurrencyError] = useState('');
+  const [activeAlert, setActiveAlert] = useState<AppAlertPayload | null>(null);
   const hasSelectedLanguage = useRef(false);
   const hasSelectedCurrency = useRef(false);
 
@@ -723,7 +769,26 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     [language, setLanguage, languageError, currency, setCurrency, currencyError],
   );
 
-  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+  const showAlert = useCallback<LocalizedAlert>((title, message, buttons, options) => {
+    setActiveAlert({
+      title: translate(title, language, currency),
+      message: message ? translate(message, language, currency) : message,
+      buttons: buttons?.map((button) => ({
+        ...button,
+        text: button.text ? translate(button.text, language, currency) : button.text,
+      })) ?? [{ text: translate('OK', language, currency) }],
+      options,
+    });
+  }, [currency, language]);
+
+  return (
+    <LanguageContext.Provider value={value}>
+      <AlertContext.Provider value={showAlert}>
+        {children}
+        <AppAlertHost alert={activeAlert} onClose={() => setActiveAlert(null)} />
+      </AlertContext.Provider>
+    </LanguageContext.Provider>
+  );
 }
 
 export function useLanguage() {
@@ -736,21 +801,8 @@ export function useTranslate() {
 }
 
 export function useLocalizedAlert() {
-  const { language, currency } = useLanguage();
-  return useMemo(() => ({
-    alert: (...args: Parameters<typeof NativeAlert.alert>) => {
-      const [title, message, buttons, options] = args;
-      NativeAlert.alert(
-        translate(title, language, currency),
-        message ? translate(message, language, currency) : message,
-        buttons?.map((button) => ({
-          ...button,
-          text: button.text ? translate(button.text, language, currency) : button.text,
-        })),
-        options,
-      );
-    },
-  }), [currency, language]);
+  const alert = useContext(AlertContext);
+  return useMemo(() => ({ alert }), [alert]);
 }
 
 export const Text = forwardRef<NativeText, TextProps>(function LocalizedText(

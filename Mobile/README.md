@@ -15,10 +15,12 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 3. Start the app
 
    ```bash
-   npx expo start
+   npm run start -- --go --lan
    ```
 
-In the output, you'll find options to open the app in a
+Open Expo Go on a phone connected to the same network and scan the QR code. The OCR scan controls are disabled by default because their native ML Kit dependency is not included in Expo Go; OCR source code and the dependency are retained. To restore OCR, set `EXPO_PUBLIC_ENABLE_OCR=true` in `.env.local` and use an EAS development build instead of Expo Go.
+
+The Expo server can also open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)
 - [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)

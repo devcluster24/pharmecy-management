@@ -1,5 +1,5 @@
 import { supabase, supabaseConfigError } from '@/lib/supabase';
-import { Text, TextInput, useTranslate } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { useEffect, useState } from 'react';
 import {
@@ -12,6 +12,7 @@ import {
 const LOW_STOCK_THRESHOLD_KEY = 'pharmacy-low-stock-threshold-v1';
 
 export default function InventorySettingsScreen() {
+  const { alert } = useLocalizedAlert();
   const t = useTranslate();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
   const [threshold, setThreshold] = useState('');
@@ -69,17 +70,22 @@ export default function InventorySettingsScreen() {
   async function saveThreshold() {
     const value = Number(threshold);
     if (threshold.trim() === '' || !Number.isInteger(value) || value < 0) {
-      setError(t('Enter a whole number equal to or greater than 0.'));
+      const message = t('Enter a whole number equal to or greater than 0.');
+      setError(message);
+      alert('Check your input', message);
       setMessage('');
       return;
     }
     if (dashboardRole !== 'owner' || !session) {
-      setError(t('Inventory settings are available to store owners.'));
+      const message = t('Inventory settings are available to store owners.');
+      setError(message);
+      alert('Error', message);
       setMessage('');
       return;
     }
     if (!supabase) {
       setError(supabaseConfigError);
+      alert('Error', supabaseConfigError);
       setMessage('');
       return;
     }
@@ -118,9 +124,13 @@ export default function InventorySettingsScreen() {
       if (!result.data) throw new Error('Could not save the low stock setting. Please try again.');
 
       setThreshold(String(value));
-      setMessage(t('Low stock threshold saved.'));
+      const message = t('Low stock threshold saved.');
+      setMessage(message);
+      alert('Success', message);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : t('Could not save the low stock setting.'));
+      const message = saveError instanceof Error ? saveError.message : t('Could not save the low stock setting.');
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }

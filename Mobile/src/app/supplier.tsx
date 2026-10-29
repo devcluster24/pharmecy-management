@@ -1,4 +1,4 @@
-import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -227,6 +227,7 @@ function buildSuppliers(
 }
 
 export default function SupplierScreen() {
+  const { alert } = useLocalizedAlert();
   const {
     dashboardRole,
     isLoading: isAuthLoading,
@@ -343,23 +344,31 @@ export default function SupplierScreen() {
     setPaymentError('');
     const amount = Number(paymentAmount);
     if (paymentAmount.trim() === '' || !Number.isFinite(amount) || amount < 0.01) {
-      setPaymentError('Enter an amount greater than 0.');
+      const message = 'Enter an amount greater than 0.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     if (!selectedDueSupplier) return;
     if (amount > selectedDueSupplier.dueAmount) {
-      setPaymentError('Payment amount cannot be greater than the current due.');
+      const message = 'Payment amount cannot be greater than the current due.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     const paymentMethod = paymentMethods.find(
       (method) => method.id === selectedPaymentMethod,
     )?.label;
     if (!paymentMethod) {
-      setPaymentError('Choose a valid payment method.');
+      const message = 'Choose a valid payment method.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     if (!supabase || !session) {
-      setPaymentError('Supplier data is unavailable. Check your account connection.');
+      const message = 'Supplier data is unavailable. Check your account connection.';
+      setPaymentError(message);
+      alert('Error', message);
       return;
     }
 
@@ -422,10 +431,13 @@ export default function SupplierScreen() {
         : current);
       setSelectedDueSupplier(null);
       setPaymentAmount('');
+      alert('Success', 'Supplier due payment was saved.');
     } catch (saveError) {
-      setPaymentError(saveError instanceof Error
+      const message = saveError instanceof Error
         ? saveError.message
-        : 'Supplier due adjustment could not be saved.');
+        : 'Supplier due adjustment could not be saved.';
+      setPaymentError(message);
+      alert('Error', message);
     } finally {
       setIsSavingPayment(false);
     }
@@ -806,7 +818,7 @@ function HistoryLine({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#145642' },
+  safeArea: { flex: 1, backgroundColor: '#f4f8f5' },
   pageContent: { flex: 1, backgroundColor: '#f4f8f5' },
   centered: {
     flex: 1,

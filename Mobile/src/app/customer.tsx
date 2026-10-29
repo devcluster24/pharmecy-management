@@ -1,4 +1,4 @@
-import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -125,6 +125,7 @@ function getCustomerKey(name: string, phone: string) {
 }
 
 export default function CustomerScreen() {
+  const { alert } = useLocalizedAlert();
   const {
     dashboardRole,
     isLoading: isAuthLoading,
@@ -218,7 +219,9 @@ export default function CustomerScreen() {
     setPaymentError('');
     const amount = Number(paymentAmount);
     if (paymentAmount.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
-      setPaymentError('Enter an amount greater than 0.');
+      const message = 'Enter an amount greater than 0.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     if (!selectedInvoice && !selectedDueCustomer) return;
@@ -227,11 +230,15 @@ export default function CustomerScreen() {
       (method) => method.id === selectedPaymentMethod,
     )?.label;
     if (!paymentMethodName) {
-      setPaymentError('Choose a valid payment method.');
+      const message = 'Choose a valid payment method.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     if (!supabase || !session) {
-      setPaymentError('Customer data is unavailable. Check your account connection.');
+      const message = 'Customer data is unavailable. Check your account connection.';
+      setPaymentError(message);
+      alert('Error', message);
       return;
     }
 
@@ -241,7 +248,9 @@ export default function CustomerScreen() {
       : selectedInvoice ? [selectedInvoice] : [];
     if (targetInvoices.length === 0 || targetInvoices.some((invoice) =>
       !invoices.some((current) => current.id === invoice.id))) {
-      setPaymentError('The selected customer invoices could not be found. Refresh and try again.');
+      const message = 'The selected customer invoices could not be found. Refresh and try again.';
+      setPaymentError(message);
+      alert('Error', message);
       return;
     }
     let remainingPayment = Number(amount.toFixed(2));
@@ -251,13 +260,17 @@ export default function CustomerScreen() {
       return { id: invoice.id, allocation };
     });
     if (!allocations.some(({ allocation }) => allocation > 0)) {
-      setPaymentError('The selected invoices have no outstanding due.');
+      const message = 'The selected invoices have no outstanding due.';
+      setPaymentError(message);
+      alert('Check your input', message);
       return;
     }
     if (remainingPayment > 0) {
       const firstDueAllocation = allocations.find(({ allocation }) => allocation > 0);
       if (!firstDueAllocation) {
-        setPaymentError('The payment could not be assigned to an invoice.');
+        const message = 'The payment could not be assigned to an invoice.';
+        setPaymentError(message);
+        alert('Error', message);
         return;
       }
       firstDueAllocation.allocation = Number(
@@ -270,13 +283,17 @@ export default function CustomerScreen() {
       if (allocation <= 0) continue;
       const invoice = invoices.find((current) => current.id === id);
       if (!invoice) {
-        setPaymentError('The selected invoice could not be found. Refresh and try again.');
+        const message = 'The selected invoice could not be found. Refresh and try again.';
+        setPaymentError(message);
+        alert('Error', message);
         return;
       }
       const paidAmount = invoice.paidAmount ?? invoice.amount;
       const nextPaidAmount = Number((paidAmount + allocation).toFixed(2));
       if (!Number.isFinite(nextPaidAmount)) {
-        setPaymentError('The payment amount is too large.');
+        const message = 'The payment amount is too large.';
+        setPaymentError(message);
+        alert('Check your input', message);
         return;
       }
       const nextDueAmount = Number(Math.max(0, getInvoiceDue(invoice) - allocation).toFixed(2));
@@ -343,8 +360,13 @@ export default function CustomerScreen() {
       setPaymentMessage(selectedDueCustomer
         ? 'Payment added to the customer invoices.'
         : 'Payment added to the invoice.');
+      alert('Success', selectedDueCustomer
+        ? 'Payment added to the customer invoices.'
+        : 'Payment added to the invoice.');
     } catch (saveError) {
-      setPaymentError(saveError instanceof Error ? saveError.message : 'Could not save this payment.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save this payment.';
+      setPaymentError(message);
+      alert('Error', message);
     } finally {
       setIsSavingPayment(false);
     }
@@ -881,7 +903,7 @@ function SummaryValue({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f4f8f5',
   },
   pageContent: {
     flex: 1,

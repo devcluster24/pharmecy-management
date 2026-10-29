@@ -75,7 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!supabase) {
+    const client = supabase;
+    if (!client) {
       setDashboardRole(null);
       setApprovalStatus('');
       setOwnerName('');
@@ -92,13 +93,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoreName('');
     setProfileError('');
     setProfileLoading(true);
+    const activeClient: NonNullable<typeof supabase> = client;
+    const activeSession: Session = session;
 
-    void supabase
-      .from('user_profiles')
-      .select('role, approval_status, full_name')
-      .eq('id', session.user.id)
-      .maybeSingle()
-      .then(async ({ data, error }) => {
+    async function loadProfile() {
+      try {
+        const { data, error } = await activeClient
+          .from('user_profiles')
+          .select('role, approval_status, full_name')
+          .eq('id', activeSession.user.id)
+          .maybeSingle();
         if (!active) return;
         if (error) {
           setProfileError(error.message);
@@ -113,10 +117,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (data.role === 'pharmacy_user') {
           setDashboardRole('owner');
-          const { data: pharmacy, error: pharmacyError } = await supabase
+          const { data: pharmacy, error: pharmacyError } = await activeClient
             .from('pharmacies')
             .select('store_name')
-            .eq('owner_user_id', session.user.id)
+            .eq('owner_user_id', activeSession.user.id)
             .maybeSingle();
           if (!active) return;
           if (pharmacyError) {
@@ -126,18 +130,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setStoreName(pharmacy?.store_name?.trim() ?? '');
         } else if (data.role === 'pharmacy_staff') {
           setDashboardRole('staff');
+          const { data: pharmacyContext, error: contextError } = await activeClient
+            .rpc('get_my_pharmacy_dashboard_context');
+          if (!active) return;
+          if (contextError) {
+            setProfileError(contextError.message);
+            return;
+          }
+          const pharmacy = pharmacyContext?.[0] as { store_name?: string } | undefined;
+          setStoreName(pharmacy?.store_name?.trim() ?? '');
         } else {
           setProfileError('This account does not have access to the pharmacy dashboard.');
         }
         setApprovalStatus(data.approval_status);
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (!active) return;
         setProfileError(error instanceof Error ? error.message : 'Could not load your account access.');
-      })
-      .finally(() => {
+      } finally {
         if (active) setProfileLoading(false);
-      });
+      }
+    }
+
+    void loadProfile();
 
     return () => {
       active = false;

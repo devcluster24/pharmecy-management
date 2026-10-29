@@ -1,4 +1,5 @@
 import { Text } from '@/providers/LanguageProvider';
+import DashboardNotificationCenter from '@/components/dashboard/DashboardNotificationCenter';
 import {
   StyleSheet,
   View
@@ -13,7 +14,10 @@ export default function DashboardTabScreen({
 }) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{title}</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>{title}</Text>
+        <DashboardNotificationCenter />
+      </View>
       {emptyMessage ? <Text style={styles.emptyMessage}>{emptyMessage}</Text> : null}
     </View>
   );
@@ -22,11 +26,19 @@ export default function DashboardTabScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f2f4ef',
+    paddingHorizontal: 20,
+  },
+  header: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   title: {
+    flex: 1,
     color: '#183c31',
     fontSize: 24,
     fontWeight: '700',

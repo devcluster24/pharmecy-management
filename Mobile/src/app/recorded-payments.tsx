@@ -20,6 +20,7 @@ import {
   type DailyPaymentGroup,
   type PaymentTotal,
 } from '@/lib/recorded-payments';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 
 const CHART_DOT_COUNT = 56;
@@ -79,7 +80,7 @@ function PaymentCircleChart({ totals, total }: { totals: PaymentTotal[]; total: 
 }
 
 export default function RecordedPaymentsScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session, storeName } = useAuth();
   const [totals, setTotals] = useState<PaymentTotal[]>([]);
   const [dailyGroups, setDailyGroups] = useState<DailyPaymentGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -161,7 +162,7 @@ export default function RecordedPaymentsScreen() {
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.brand}>Pharmacy Cluster</Text>
+          <Text numberOfLines={1} style={styles.brand}>{getPharmacyDisplayName(storeName)}</Text>
           <Text style={styles.headerSubtitle}>Dashboard payments</Text>
         </View>
         <Pressable
@@ -262,7 +263,7 @@ export default function RecordedPaymentsScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f4f8f5',
   },
   pageContent: {
     flex: 1,

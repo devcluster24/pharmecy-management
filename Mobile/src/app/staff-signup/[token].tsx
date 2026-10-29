@@ -1,4 +1,4 @@
-import { Text } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -28,6 +28,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export default function StaffSignupScreen() {
+  const { alert: showAlert } = useLocalizedAlert();
   const { token = '' } = useLocalSearchParams<{ token: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -85,11 +86,15 @@ export default function StaffSignupScreen() {
     setSignupFinished(true);
     if (signOutError) {
       setHasError(true);
-      setMessage(`Staff account created, but sign out failed: ${signOutError.message}`);
+      const message = `Staff account created, but sign out failed: ${signOutError.message}`;
+      setMessage(message);
+      showAlert('Account created with a warning', message);
       return;
     }
-    setMessage('Google signup complete. Your pharmacy owner must approve your account and assign dashboard access before you can sign in.');
-  }, [configError, signupClient, token]);
+    const message = 'Google signup complete. Your pharmacy owner must approve your account and assign dashboard access before you can sign in.';
+    setMessage(message);
+    showAlert('Staff signup complete', message);
+  }, [configError, showAlert, signupClient, token]);
 
   useEffect(() => {
     if (
@@ -112,41 +117,41 @@ export default function StaffSignupScreen() {
       setHasError(false);
       void finishGoogleSignup(linkingUrl)
         .catch(async (error: unknown) => {
-          const errorMessage = getErrorMessage(error);
+          const initialErrorMessage = getErrorMessage(error);
           const { error: signOutError } = await signupClient.auth.signOut();
           setHasError(true);
-          setMessage(signOutError
-            ? `${errorMessage} Sign out also failed: ${signOutError.message}`
-            : errorMessage);
+          const message = signOutError
+            ? `${initialErrorMessage} Sign out also failed: ${signOutError.message}`
+            : initialErrorMessage;
+          setMessage(message);
+          showAlert('Google signup failed', message);
         })
         .finally(() => setIsCompletingGoogleSignup(false));
     }, 0);
     return () => clearTimeout(timeout);
-  }, [token, signupClient, isInvalidLink, linkingUrl, finishGoogleSignup]);
+  }, [token, signupClient, isInvalidLink, linkingUrl, finishGoogleSignup, showAlert]);
 
   async function handleSignup() {
     Keyboard.dismiss();
-    setMessage('');
-    setHasError(false);
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !password) {
-      setMessage('Enter your email and password.');
+      showAlert('Missing details', 'Enter your email and password.');
       setHasError(true);
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setMessage('Enter a valid email address.');
+      showAlert('Invalid email', 'Enter a valid email address.');
       setHasError(true);
       return;
     }
     if (password.length < 8) {
-      setMessage('Password must be at least 8 characters.');
+      showAlert('Password too short', 'Password must be at least 8 characters.');
       setHasError(true);
       return;
     }
     if (!signupClient) {
-      setMessage(configError);
+      showAlert('Sign up unavailable', configError);
       setHasError(true);
       return;
     }
@@ -169,13 +174,19 @@ export default function StaffSignupScreen() {
       if (data.session) {
         const { error: signOutError } = await signupClient.auth.signOut();
         if (signOutError) throw signOutError;
-        setMessage('Staff application submitted. Your pharmacy owner must approve it and assign dashboard access before you can sign in.');
+        const message = 'Staff application submitted. Your pharmacy owner must approve it and assign dashboard access before you can sign in.';
+        setMessage(message);
+        showAlert('Staff application submitted', message);
       } else {
-        setMessage('Check your email to confirm your staff application. Your pharmacy owner must approve it and assign dashboard access before you can sign in.');
+        const message = 'Check your email to confirm your staff application. Your pharmacy owner must approve it and assign dashboard access before you can sign in.';
+        setMessage(message);
+        showAlert('Staff application submitted', message);
       }
     } catch (signupError) {
       setHasError(true);
-      setMessage(getErrorMessage(signupError));
+      const errorMessage = getErrorMessage(signupError);
+      setMessage(errorMessage);
+      showAlert('Staff signup failed', errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -183,7 +194,7 @@ export default function StaffSignupScreen() {
 
   async function handleGoogleSignup() {
     if (!signupClient) {
-      setMessage(configError);
+      showAlert('Sign up unavailable', configError);
       setHasError(true);
       return;
     }
@@ -212,12 +223,14 @@ export default function StaffSignupScreen() {
       setIsCompletingGoogleSignup(true);
       await finishGoogleSignup(result.url);
     } catch (signupError) {
-      const errorMessage = getErrorMessage(signupError);
+      const initialErrorMessage = getErrorMessage(signupError);
       const { error: signOutError } = await signupClient.auth.signOut();
       setHasError(true);
-      setMessage(signOutError
-        ? `${errorMessage} Sign out also failed: ${signOutError.message}`
-        : errorMessage);
+      const errorMessage = signOutError
+        ? `${initialErrorMessage} Sign out also failed: ${signOutError.message}`
+        : initialErrorMessage;
+      setMessage(errorMessage);
+      showAlert('Google signup failed', errorMessage);
     } finally {
       setIsSubmitting(false);
       setIsCompletingGoogleSignup(false);

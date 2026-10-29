@@ -1,5 +1,5 @@
 import { supabase, supabaseConfigError } from '@/lib/supabase';
-import { Text, TextInput, useTranslate } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export default function ReturnDeductionSettingsScreen() {
+  const { alert } = useLocalizedAlert();
   const t = useTranslate();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
   const [rate, setRate] = useState('0');
@@ -85,17 +86,22 @@ export default function ReturnDeductionSettingsScreen() {
   async function saveRate() {
     const value = Number(rate);
     if (rate.trim() === '' || !Number.isFinite(value) || value < 0 || value > 100) {
-      setError(t('Enter a return deduction rate between 0 and 100%.'));
+      const message = t('Enter a return deduction rate between 0 and 100%.');
+      setError(message);
+      alert('Check your input', message);
       setMessage('');
       return;
     }
     if (dashboardRole !== 'owner' || !session) {
-      setError(t('Return settings are available to store owners.'));
+      const message = t('Return settings are available to store owners.');
+      setError(message);
+      alert('Error', message);
       setMessage('');
       return;
     }
     if (!supabase) {
       setError(supabaseConfigError);
+      alert('Error', supabaseConfigError);
       setMessage('');
       return;
     }
@@ -137,9 +143,13 @@ export default function ReturnDeductionSettingsScreen() {
 
       setRate(String(normalizedRate));
       setSavedRate(normalizedRate);
-      setMessage(t('Return deduction rate saved.'));
+      const message = t('Return deduction rate saved.');
+      setMessage(message);
+      alert('Success', message);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : t('Could not save the return deduction rate.'));
+      const message = saveError instanceof Error ? saveError.message : t('Could not save the return deduction rate.');
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }

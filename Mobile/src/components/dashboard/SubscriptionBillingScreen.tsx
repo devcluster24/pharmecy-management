@@ -1,4 +1,4 @@
-import { Text } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
   type PharmacySubscriptionOptions,
 } from '@/lib/pharmacy-subscription';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -106,6 +107,7 @@ function getNextPlan(
 }
 
 export default function SubscriptionBillingScreen() {
+  const alert = useLocalizedAlert();
   const {
     dashboardRole,
     isLoading: isAuthLoading,
@@ -229,8 +231,11 @@ export default function SubscriptionBillingScreen() {
       const { error: claimError } = await supabase.rpc('claim_my_pharmacy_extended_access');
       if (claimError) throw claimError;
       setRetryKey((value) => value + 1);
+      alert.alert('Extended access activated', 'Your extended access is now active.');
     } catch (claimError) {
-      setError(claimError instanceof Error ? claimError.message : 'Could not activate Extended Access.');
+      const message = claimError instanceof Error ? claimError.message : 'Could not activate Extended Access.';
+      setError(message);
+      alert.alert('Error', message);
     } finally {
       setIsClaimingExtendedAccess(false);
     }
@@ -304,7 +309,9 @@ export default function SubscriptionBillingScreen() {
             </Text>
           </View>
           <Text style={styles.planName}>{options?.plan?.name ?? 'Plan not available'}</Text>
-          <Text style={styles.muted}>{profile?.storeName ?? 'Your pharmacy account'}</Text>
+          <Text style={styles.muted}>
+            {profile?.storeName ? getPharmacyDisplayName(profile.storeName) : 'Your pharmacy account'}
+          </Text>
           <Text style={styles.description}>
             {options?.plan?.description || 'Your Starter Access plan is ready to view.'}
           </Text>
@@ -394,7 +401,11 @@ export default function SubscriptionBillingScreen() {
 
       <View style={styles.accountCards}>
         {[
-          { label: 'Store Owner', value: profile?.fullName || 'Not available', detail: profile?.storeName || '' },
+          {
+            label: 'Store Owner',
+            value: profile?.fullName || 'Not available',
+            detail: profile?.storeName ? getPharmacyDisplayName(profile.storeName) : '',
+          },
           { label: 'Billing Email', value: profile?.email || 'Not available', detail: 'Account email' },
           { label: 'Payment Method', value: lastPayment?.payment_method || 'Not added', detail: lastPayment ? 'Current subscription' : 'No billing method on file' },
           { label: 'Account Created', value: profile ? formatDate(profile.accountCreatedAt) : 'Not available', detail: 'Pharmacy account' },

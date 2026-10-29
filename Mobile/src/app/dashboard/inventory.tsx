@@ -432,7 +432,7 @@ export default function InventoryScreen() {
                 setCurrentPage(1);
                 setExpandedBatchId(null);
               }}
-              style={[styles.tab, activeList === tab.id && styles.tabSelected]}>
+              style={styles.tab}>
               <Text style={[styles.tabText, activeList === tab.id && styles.tabTextSelected]}>
                 {tab.label}
               </Text>
@@ -569,7 +569,7 @@ export default function InventoryScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f2f4ef',
   },
   centered: {
     flex: 1,

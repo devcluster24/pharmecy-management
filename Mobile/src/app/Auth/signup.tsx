@@ -1,4 +1,4 @@
-import { Text } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { supabase, supabaseConfigError } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
 export default function SignupScreen() {
+  const alert = useLocalizedAlert();
   const router = useRouter();
   const { session, isLoading, authError } = useAuth();
   const [fullName, setFullName] = useState('');
@@ -24,8 +25,6 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
-  const [hasError, setHasError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (isLoading) return null;
@@ -33,35 +32,27 @@ export default function SignupScreen() {
 
   async function handleSignup() {
     Keyboard.dismiss();
-    setMessage('');
-    setHasError(false);
-
     const normalizedEmail = email.trim().toLowerCase();
     const trimmedName = fullName.trim();
     const trimmedUsername = username.trim();
     if (!trimmedName || !trimmedUsername || !normalizedEmail || !password) {
-      setMessage('Complete your name, username, email, and password.');
-      setHasError(true);
+      alert.alert('Missing details', 'Complete your name, username, email, and password.');
       return;
     }
     if (trimmedUsername.length < 3) {
-      setMessage('Username must be at least 3 characters.');
-      setHasError(true);
+      alert.alert('Invalid username', 'Username must be at least 3 characters.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setMessage('Enter a valid email address.');
-      setHasError(true);
+      alert.alert('Invalid email', 'Enter a valid email address.');
       return;
     }
     if (password.length < 8) {
-      setMessage('Password must be at least 8 characters.');
-      setHasError(true);
+      alert.alert('Password too short', 'Password must be at least 8 characters.');
       return;
     }
     if (!supabase) {
-      setMessage(supabaseConfigError);
-      setHasError(true);
+      alert.alert('Sign up unavailable', supabaseConfigError);
       return;
     }
 
@@ -86,16 +77,17 @@ export default function SignupScreen() {
         return;
       }
 
-      setMessage('Check your email to confirm your account, then sign in to continue.');
-      setHasError(false);
+      alert.alert('Account created', 'Check your email to confirm your account, then sign in to continue.');
       setFullName('');
       setUsername('');
       setEmail('');
       setPhone('');
       setPassword('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not create your account.');
-      setHasError(true);
+      alert.alert(
+        'Sign up failed',
+        error instanceof Error ? error.message : 'Could not create your account.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -177,11 +169,6 @@ export default function SignupScreen() {
           onSubmitEditing={() => void handleSignup()}
           editable={!isSubmitting}
         />
-        {message ? (
-          <Text style={[authStyles.feedback, hasError ? authStyles.errorFeedback : authStyles.successFeedback]}>
-            {message}
-          </Text>
-        ) : null}
         <AuthSubmitButton
           title="Create account"
           loadingTitle="Creating account…"

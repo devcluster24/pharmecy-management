@@ -23,6 +23,8 @@ import {
   saveProductAutoSyncSettings,
 } from '@/lib/product-catalog-auto-sync';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
+import { useAuth } from '@/providers/AuthProvider';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
 import BackupSettingsScreen from '@/components/dashboard/BackupSettingsScreen';
@@ -34,7 +36,6 @@ import ReturnDeductionSettingsScreen from '@/components/dashboard/ReturnDeductio
 import SubscriptionBillingScreen from '@/components/dashboard/SubscriptionBillingScreen';
 import VatTaxSettingsScreen from '@/components/dashboard/VatTaxSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
-import { useAuth } from '@/providers/AuthProvider';
 
 type MenuEntry = {
   label: string;
@@ -159,6 +160,7 @@ export default function ManagementMenuScreen({
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    storeName,
   } = useAuth();
   const [isProductSyncExpanded, setIsProductSyncExpanded] = useState(false);
   const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(false);
@@ -496,7 +498,7 @@ export default function ManagementMenuScreen({
           onBack={() => router.replace('/dashboard/menu')}
         />
         <ScrollView style={styles.pageContent} contentContainerStyle={styles.fullPageContent}>
-          <Text style={styles.eyebrow}>PHARMACY CLUSTER</Text>
+          <Text style={styles.eyebrow}>{getPharmacyDisplayName(storeName).toLocaleUpperCase()}</Text>
           <Text style={styles.welcomeText}>Welcome {pageTitle}</Text>
         </ScrollView>
       </SafeAreaView>
@@ -707,7 +709,7 @@ const styles = StyleSheet.create({
   },
   fullPage: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f5f7f5',
   },
   pageContent: {
     flex: 1,

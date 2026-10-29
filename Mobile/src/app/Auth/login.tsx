@@ -23,7 +23,6 @@ export default function LoginScreen() {
   const { session, isLoading, authError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (isLoading) return null;
@@ -31,19 +30,17 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     Keyboard.dismiss();
-    setMessage('');
-
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !password) {
-      setMessage('Enter your email address and password.');
+      alert.alert('Invalid details', 'Enter your email address and password.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setMessage('Enter a valid email address.');
+      alert.alert('Invalid email', 'Enter a valid email address.');
       return;
     }
     if (!supabase) {
-      setMessage(supabaseConfigError);
+      alert.alert('Sign in unavailable', supabaseConfigError);
       return;
     }
 
@@ -57,19 +54,24 @@ export default function LoginScreen() {
       if (!data.session || !data.user) {
         throw new Error('Sign in did not complete. Please try again.');
       }
+      let activityWarning = '';
       try {
         await recordPharmacySessionActivity('login');
       } catch (activityError) {
-        alert.alert(
-          'Login activity was not saved',
-          activityError instanceof Error
-            ? activityError.message
-            : 'Could not record this login in the activity history.',
-        );
+        activityWarning = activityError instanceof Error
+          ? activityError.message
+          : 'Could not record this login in the activity history.';
       }
-      router.replace('/dashboard');
+      alert.alert(
+        activityWarning ? 'Signed in with a warning' : 'Signed in',
+        activityWarning || 'You are now signed in.',
+        [{ text: 'Continue', onPress: () => router.replace('/dashboard') }],
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not sign in. Please try again.');
+      alert.alert(
+        'Sign in failed',
+        error instanceof Error ? error.message : 'Could not sign in. Please try again.',
+      );
       setIsSubmitting(false);
     }
   }
@@ -118,9 +120,6 @@ export default function LoginScreen() {
           onSubmitEditing={() => void handleLogin()}
           editable={!isSubmitting}
         />
-        {message ? (
-          <Text style={[authStyles.feedback, authStyles.errorFeedback]}>{message}</Text>
-        ) : null}
         <AuthSubmitButton
           title="Sign in"
           loadingTitle="Signing in…"

@@ -39,15 +39,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Pharmacy Cluster to scan medicine labels for New Sale.",
+          "cameraPermission": "Allow the app to scan medicine labels for New Sale.",
           "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Pharmacy Cluster to select a profile photo.",
-          "cameraPermission": "Allow Pharmacy Cluster to scan medicine labels for New Sale.",
+          "photosPermission": "Allow the app to select a profile photo.",
+          "cameraPermission": "Allow the app to scan medicine labels for New Sale.",
           "microphonePermission": false
         }
       ]
@@ -58,10 +58,7 @@
     },
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "26409c49-c02c-4560-ba07-38cd153719bd"
-      }
-    },
-    "owner": "alhabib911"
+      "eas": {}
+    }
   }
 }

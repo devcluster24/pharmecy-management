@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { Text, useTranslate } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { supabase } from '@/lib/supabase';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 
 type ProfileDetails = {
@@ -65,6 +66,7 @@ function getPhotoMimeType(photo: ImagePicker.ImagePickerAsset) {
 }
 
 export default function ProfileScreen() {
+  const { alert } = useLocalizedAlert();
   const t = useTranslate();
   const {
     isLoading: isAuthLoading,
@@ -188,7 +190,9 @@ export default function ProfileScreen() {
       }
       setSelectedPhoto(photo);
     } catch (pickerError) {
-      setError(pickerError instanceof Error ? pickerError.message : 'Could not select a profile photo.');
+      const message = pickerError instanceof Error ? pickerError.message : 'Could not select a profile photo.';
+      setError(message);
+      alert('Error', message);
     }
   }
 
@@ -203,17 +207,23 @@ export default function ProfileScreen() {
 
   async function saveProfile() {
     if (!supabase || !session || !profile) {
-      setError('Sign in again before updating your profile.');
+      const message = 'Sign in again before updating your profile.';
+      setError(message);
+      alert('Error', message);
       return;
     }
     const fullName = fullNameDraft.trim();
     const phone = phoneDraft.trim();
     if (!fullName || fullName.length > 120) {
-      setError('Full name must contain between 1 and 120 characters.');
+      const message = 'Full name must contain between 1 and 120 characters.';
+      setError(message);
+      alert('Check your input', message);
       return;
     }
     if (phone.length > 32) {
-      setError('Phone number cannot exceed 32 characters.');
+      const message = 'Phone number cannot exceed 32 characters.';
+      setError(message);
+      alert('Check your input', message);
       return;
     }
 
@@ -278,13 +288,17 @@ export default function ProfileScreen() {
       });
       setSelectedPhoto(null);
       setIsEditing(false);
-      setMessage('Your profile has been updated.');
+      const message = 'Your profile has been updated.';
+      setMessage(message);
+      alert('Success', message);
     } catch (saveError) {
       if (uploadedPhotoPath) {
         const { error: cleanupError } = await client.storage.from(PHOTO_BUCKET).remove([uploadedPhotoPath]);
         if (cleanupError) console.error('Could not remove the profile photo after the profile update failed.', cleanupError);
       }
-      setError(saveError instanceof Error ? saveError.message : 'Could not update your profile.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not update your profile.';
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -368,7 +382,7 @@ export default function ProfileScreen() {
                   ['Email address', 'email', profile.email || 'Not provided'],
                   ['Phone number', 'phone', profile.phone || 'Not provided'],
                   ['Account type', 'role', profile.role],
-                  ['Pharmacy', 'store', profile.storeName || 'Not assigned'],
+                  ['Pharmacy', 'store', profile.storeName ? getPharmacyDisplayName(profile.storeName) : 'Not assigned'],
                   ['Account status', 'status', profile.status],
                 ] as const).map(([label, key, value]) => (
                   <View key={key} style={styles.detail}>

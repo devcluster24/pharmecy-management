@@ -1,7 +1,6 @@
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -12,6 +11,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   View
 } from 'react-native';
@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCurrencySymbol } from '@/lib/currency';
 import { prefetchPharmacySearchData } from '@/lib/pharmacy-search-cache';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 
 type PharmacyNotification = {
@@ -390,6 +391,33 @@ export default function OwnerHomeScreen() {
       setIsLoadingNotifications(false);
     }
   }, [session]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !session) return;
+
+    const channel = client
+      .channel(`owner-notifications:${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pharmacy_notifications',
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        () => void loadNotifications(),
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setNotificationError('Live notifications are temporarily unavailable.');
+        }
+      });
+
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [loadNotifications, session]);
 
   const loadTodaySales = useCallback(async () => {
     const client = supabase;
@@ -938,7 +966,7 @@ export default function OwnerHomeScreen() {
   return (
     <>
       <StatusBar
-        style={isNotificationsOpen ? 'dark' : 'light'}
+        barStyle={isNotificationsOpen ? 'dark-content' : 'light-content'}
         backgroundColor={isNotificationsOpen ? '#f7f8f4' : '#145642'}
       />
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -955,10 +983,10 @@ export default function OwnerHomeScreen() {
                   source={require('../../../../public/pharmacy-icon.png')}
                   contentFit="contain"
                   style={styles.storeIcon}
-                  accessibilityLabel="Pharmacy Cluster icon"
+                  accessibilityLabel={`${getPharmacyDisplayName(storeName)} icon`}
                 />
                 <Text numberOfLines={1} style={styles.storeName}>
-                  {storeName || 'My Pharmacy'}
+                  {getPharmacyDisplayName(storeName)}
                 </Text>
               </View>
 
@@ -1324,7 +1352,7 @@ export default function OwnerHomeScreen() {
                       <Text style={styles.currentPlanEyebrow}>Current Plan</Text>
                       <Text style={styles.currentPlanName}>{currentSubscription.plan.name}</Text>
                       {storeName ? (
-                        <Text style={styles.currentPlanStoreName}>{storeName}</Text>
+                        <Text style={styles.currentPlanStoreName}>{getPharmacyDisplayName(storeName)}</Text>
                       ) : null}
                     </View>
                     <Text
@@ -1513,7 +1541,7 @@ export default function OwnerHomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f2f4ef',
   },
   dashboardScroll: {
     backgroundColor: '#f2f4ef',
@@ -1897,6 +1925,7 @@ const styles = StyleSheet.create({
   },
   expiredBatchInlineField: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: 3,
   },
@@ -1906,6 +1935,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   expiredBatchValue: {
+    flexShrink: 1,
+    minWidth: 0,
     marginTop: 3,
     color: '#183c31',
     fontSize: 11,

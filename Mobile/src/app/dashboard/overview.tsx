@@ -772,7 +772,7 @@ export default function OverviewScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f5f7f5',
   },
   pageContent: {
     flex: 1,

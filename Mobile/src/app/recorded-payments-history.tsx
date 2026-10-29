@@ -19,6 +19,7 @@ import {
   getRecordedPayments,
   type DailyPaymentGroup,
 } from '@/lib/recorded-payments';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 
 type DateSelector = 'month' | 'year' | null;
@@ -29,7 +30,7 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, month) => ({
 }));
 
 export default function RecordedPaymentsHistoryScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session, storeName } = useAuth();
   const [history, setHistory] = useState<DailyPaymentGroup[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
@@ -118,7 +119,7 @@ export default function RecordedPaymentsHistoryScreen() {
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.brand}>Pharmacy Cluster</Text>
+          <Text numberOfLines={1} style={styles.brand}>{getPharmacyDisplayName(storeName)}</Text>
           <Text style={styles.headerSubtitle}>Payment history</Text>
         </View>
         <Pressable
@@ -273,7 +274,7 @@ export default function RecordedPaymentsHistoryScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f4f8f5',
   },
   pageContent: {
     flex: 1,

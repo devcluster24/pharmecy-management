@@ -1,4 +1,4 @@
-import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -175,6 +175,7 @@ function Field({
 }
 
 export default function ProductManagementScreen({ isAddPage = false }: { isAddPage?: boolean }) {
+  const { alert } = useLocalizedAlert();
   const { dashboardRole, session } = useAuth();
   const [ownerId, setOwnerId] = useState('');
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -399,6 +400,7 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
   async function saveProduct() {
     if (!supabase || !ownerId) {
       setError('Could not verify the signed-in pharmacy account.');
+      alert('Error', 'Could not verify the signed-in pharmacy account.');
       return;
     }
     const brand = form.brand.trim();
@@ -407,19 +409,23 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
     const parsedPrices = prices.map(parsePrice);
     if (!brand || !company) {
       setError('Brand Name and Company Name are required.');
+      alert('Check your input', 'Brand Name and Company Name are required.');
       return;
     }
     if (!form.id) {
       setError('A product ID has not been reserved. Go back and reopen Add New Product.');
+      alert('Error', 'A product ID has not been reserved. Go back and reopen Add New Product.');
       return;
     }
     if (prices.some((value, index) => value.trim() && parsedPrices[index] === null)) {
       setError('Enter valid non-negative numbers for pack size and prices.');
+      alert('Check your input', 'Enter valid non-negative numbers for pack size and prices.');
       return;
     }
     const [packSize, unitPrice, packPrice] = parsedPrices;
     if (packSize !== null && packSize <= 0) {
       setError('Pack Size must be greater than zero.');
+      alert('Check your input', 'Pack Size must be greater than zero.');
       return;
     }
     setIsSaving(true);
@@ -472,9 +478,14 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
       };
       const { error: insertError } = await supabase.from('pharmacy_catalog_products').insert(product);
       if (insertError) throw insertError;
-      router.replace('/dashboard/menu/product-management');
+      alert('Product saved', 'The product was added to your inventory catalog.', [{
+        text: 'Continue',
+        onPress: () => router.replace('/dashboard/menu/product-management'),
+      }]);
     } catch (saveError) {
-      setError(`Could not save product: ${getErrorMessage(saveError)}`);
+      const message = `Could not save product: ${getErrorMessage(saveError)}`;
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -549,10 +560,14 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
       setCurrentPage(1);
       setSearch('');
       await loadProducts(1, '', ownerId);
-      setNotice(`Imported ${added} product(s). ${duplicates} duplicate(s) skipped.`);
+      const message = `Imported ${added} product(s). ${duplicates} duplicate(s) skipped.`;
+      setNotice(message);
+      alert('Import complete', message);
       setImportProgress('');
     } catch (importError) {
-      setError(`Product import failed${added ? ` after importing ${added} product(s)` : ''}: ${getErrorMessage(importError)}`);
+      const message = `Product import failed${added ? ` after importing ${added} product(s)` : ''}: ${getErrorMessage(importError)}`;
+      setError(message);
+      alert('Import failed', message);
       setImportProgress('');
     } finally {
       setIsImporting(false);
@@ -751,7 +766,7 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f5f7f5',
   },
   pageBody: {
     flex: 1,

@@ -1,6 +1,5 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { Camera, CameraView } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -21,8 +20,10 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import {
   cachePharmacySearchData,
@@ -31,6 +32,15 @@ import {
   loadPharmacySearchPayloads,
   readCachedPharmacySearchData,
 } from '@/lib/pharmacy-search-cache';
+import {
+  buildBrandNameIndex,
+  buildBrandWordIndex,
+  findBrandWordMatches,
+  getBrandNameMatches,
+  getCachedBrandScanResult,
+  loadBrandScanCache,
+  saveBrandScanResult,
+} from '@/lib/medicine-brand-scan';
 import {
   loadInvoiceTemplateSettings,
   type InvoiceFieldKey,
@@ -44,7 +54,7 @@ const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const VAT_SETTINGS_KEY = 'pharmacy-vat-tax-settings-v1';
 const SEARCH_RESULT_LIMIT = 30;
 const SCAN_FRAME_INTERVAL_MS = 100;
-const SCAN_TIMEOUT_MS = 1000;
+const SCAN_TIMEOUT_MS = 2000;
 const WALK_IN_CUSTOMER = 'Walk-in Customer';
 const SALE_SEARCH_CACHE = 'new-sale-search';
 
@@ -139,7 +149,7 @@ function getInvoiceHtml(
   }[template.style];
   const date = new Date(invoice.createdAt).toLocaleString('en-BD');
   const fieldValues: Record<InvoiceFieldKey, string> = {
-    storeName: storeName || 'Pharmacy Cluster',
+    storeName: getPharmacyDisplayName(storeName),
     invoiceNumber: invoice.invoice,
     dateTime: date,
     customer: invoice.customer,
@@ -349,15 +359,6 @@ function roundCurrency(amount: number) {
   return Number(amount.toFixed(2));
 }
 
-function getBrandWords(value: string) {
-  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
-}
-
-function hasBrandWordMatch(brand: string, scannedText: string) {
-  const scannedWords = new Set(getBrandWords(scannedText));
-  return getBrandWords(brand).some((word) => scannedWords.has(word));
-}
-
 export default function SalesScreen() {
   const alert = useLocalizedAlert();
   const {
@@ -404,6 +405,10 @@ export default function SalesScreen() {
   const scrollOffsetBeforeKeyboardRef = useRef(0);
   const keyboardVisibleRef = useRef(false);
   const keyboardTopRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (session?.user.id) void loadBrandScanCache(session.user.id, 'sales');
+  }, [session?.user.id]);
 
   function scrollFocusedInputIntoView() {
     const input = focusedInputRef.current;
@@ -582,6 +587,14 @@ export default function SalesScreen() {
     && (getAvailableQuantity(row) ?? 0) > 0
     && !lines.some((line) => line.batchId === row.id),
   ), [inventory, lines]);
+  const availableBrandWordIndex = useMemo(
+    () => buildBrandWordIndex(availableInventory, (batch) => batch.brand),
+    [availableInventory],
+  );
+  const availableBatchesByBrand = useMemo(
+    () => buildBrandNameIndex(availableInventory, (batch) => batch.brand),
+    [availableInventory],
+  );
   const filteredInventory = useMemo(() => {
     const query = searchValue.trim().toLocaleLowerCase();
     if (!query) return [];
@@ -592,6 +605,7 @@ export default function SalesScreen() {
   }, [availableInventory, searchValue]);
 
   async function scanMedicine() {
+    if (!OCR_ENABLED) return;
     if (Platform.OS === 'web') {
       alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
       return;
@@ -624,8 +638,14 @@ export default function SalesScreen() {
     if (!isCameraOpen || !isCameraReady) return;
     let active = true;
     let complete = false;
-    let timeout: ReturnType<typeof setTimeout>;
-    const scanStartedAt = Date.now();
+    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
+    const scanTimeout = setTimeout(() => {
+      if (!active || complete) return;
+      complete = true;
+      setIsRecognizingFrame(false);
+      setScanResult({ status: 'notFound' });
+      setIsCameraOpen(false);
+    }, SCAN_TIMEOUT_MS);
 
     async function scanFrame() {
       if (!active || complete) return;
@@ -638,32 +658,45 @@ export default function SalesScreen() {
         });
         if (!frame) throw new Error('The camera could not provide a scan frame.');
         frameUri = frame.uri;
-        const recognized = await TextRecognition.recognize(frameUri);
-        const matchingBatches = availableInventory.filter((batch) =>
-          hasBrandWordMatch(batch.brand, recognized.text),
-        );
+        if (!active || complete) return;
+        const recognized = await recognizeText(frameUri);
+        if (!active || complete) return;
+        const ownerId = session?.user.id;
+        const cachedBrands = ownerId
+          ? getCachedBrandScanResult(ownerId, 'sales', recognized.text)
+          : undefined;
+        const cachedBatches = cachedBrands
+          ? getBrandNameMatches(availableBatchesByBrand, cachedBrands)
+          : [];
+        const matchingBatches = cachedBatches.length > 0
+          ? cachedBatches
+          : findBrandWordMatches(availableBrandWordIndex, recognized.text)
+            .map(({ item }) => item);
 
         if (matchingBatches.length > 0) {
           complete = true;
+          if (ownerId && cachedBatches.length === 0) {
+            void saveBrandScanResult(
+              ownerId,
+              'sales',
+              recognized.text,
+              [...new Set(matchingBatches.slice(0, SEARCH_RESULT_LIMIT).map((batch) => batch.brand))],
+            );
+          }
           setScanResult({
             status: 'matched',
             batches: matchingBatches.slice(0, SEARCH_RESULT_LIMIT),
           });
           setIsCameraOpen(false);
-        } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
-          complete = true;
-          setScanResult({ status: 'notFound' });
-          setIsCameraOpen(false);
         }
       } catch (scanError) {
+        if (!active || complete) return;
         complete = true;
-        if (active) {
-          alert.alert(
-            'Medicine scan failed',
-            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
-          );
-          setIsCameraOpen(false);
-        }
+        alert.alert(
+          'Medicine scan failed',
+          scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+        );
+        setIsCameraOpen(false);
       } finally {
         if (frameUri) {
           try {
@@ -685,16 +718,24 @@ export default function SalesScreen() {
       }
 
       if (active && !complete) {
-        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+        frameTimeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
       }
     }
 
     void scanFrame();
     return () => {
       active = false;
-      clearTimeout(timeout);
+      if (frameTimeout) clearTimeout(frameTimeout);
+      clearTimeout(scanTimeout);
     };
-  }, [alert, availableInventory, isCameraOpen, isCameraReady]);
+  }, [
+    alert,
+    availableBatchesByBrand,
+    availableBrandWordIndex,
+    isCameraOpen,
+    isCameraReady,
+    session?.user.id,
+  ]);
 
   const selectedRows = lines.map((line) => ({
     line,
@@ -763,49 +804,54 @@ export default function SalesScreen() {
     );
   }
 
+  function showSaleError(message: string) {
+    setError(message);
+    alert.alert('Check your input', message);
+  }
+
   async function saveSale() {
     setError('');
     if (!isSaleDataFresh) {
-      setError('Updating inventory data. Please wait a moment and try again.');
+      showSaleError('Updating inventory data. Please wait a moment and try again.');
       return;
     }
     if (!customerName.trim()) {
-      setError('Customer Name is required.');
+      showSaleError('Customer Name is required.');
       return;
     }
     if (lines.length === 0 || selectedRows.some((row) =>
       !row.batch || !Number.isInteger(row.quantity) || row.quantity <= 0)) {
-      setError('Add at least one product and enter a valid quantity.');
+      showSaleError('Add at least one product and enter a valid quantity.');
       return;
     }
     for (const selected of selectedRows) {
       const available = selected.batch ? getAvailableQuantity(selected.batch) : null;
       if (available === null || selected.quantity > available) {
-        setError(`Not enough stock for ${selected.batch?.brand ?? 'the selected product'}.`);
+        showSaleError(`Not enough stock for ${selected.batch?.brand ?? 'the selected product'}.`);
         return;
       }
     }
     if (!validDiscount) {
-      setError(discountType === 'percent'
+      showSaleError(discountType === 'percent'
         ? 'Discount must be between zero and 100%.'
         : 'Discount cannot exceed total price.');
       return;
     }
     if (!validTax) {
-      setError('VAT/TAX must be between zero and 100%.');
+      showSaleError('VAT/TAX must be between zero and 100%.');
       return;
     }
     if (!hasPaymentAmount || !validPayment) {
-      setError('Pay amount must be zero or greater.');
+      showSaleError('Pay amount must be zero or greater.');
       return;
     }
     const selectedMethod = paymentMethods.find((method) => method.id === paymentMethod);
     if (!selectedMethod) {
-      setError('Choose a valid payment method.');
+      showSaleError('Choose a valid payment method.');
       return;
     }
     if (!supabase || !session) {
-      setError('Sales data is unavailable. Check your account connection.');
+      showSaleError('Sales data is unavailable. Check your account connection.');
       return;
     }
 
@@ -935,6 +981,7 @@ export default function SalesScreen() {
         sales: updatedSales,
       });
       setSavedInvoice(invoice);
+      alert.alert('Sale completed', `Invoice ${invoice.invoice} was saved successfully.`);
       setLines([]);
       setIsBillSummaryOpen(false);
       setSearchValue('');
@@ -947,7 +994,9 @@ export default function SalesScreen() {
       setTaxRate(String(defaultTaxRate));
       setPaymentMethod('cash');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save this sale.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save this sale.';
+      setError(message);
+      alert.alert('Sale failed', message);
     } finally {
       setIsSaving(false);
     }
@@ -1065,7 +1114,7 @@ export default function SalesScreen() {
         <ScrollView style={styles.pageContent} contentContainerStyle={styles.receiptContent}>
           <View style={styles.receiptCard}>
             <View style={styles.receiptBrand}>
-              <Text style={styles.receiptStoreName}>{storeName || 'Pharmacy Cluster'}</Text>
+              <Text style={styles.receiptStoreName}>{getPharmacyDisplayName(storeName)}</Text>
               <Text style={styles.receiptType}>SALES INVOICE</Text>
             </View>
             <Text style={styles.receiptAmount}>{formatCurrency(savedInvoice.amount)}</Text>
@@ -1202,23 +1251,25 @@ export default function SalesScreen() {
                     style={styles.searchInput}
                     value={searchValue}
                   />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Scan medicine"
-                    accessibilityState={{ disabled: isScanning }}
-                    disabled={isScanning}
-                    onPress={() => void scanMedicine()}
-                    style={[styles.scanButton, isScanning && styles.buttonDisabled]}>
-                    {isScanning ? (
-                      <ActivityIndicator color="#17664f" />
-                    ) : (
-                      <SymbolView
-                        name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                        size={20}
-                        tintColor="#17664f"
-                      />
-                    )}
-                  </Pressable>
+                  {OCR_ENABLED ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Scan medicine"
+                      accessibilityState={{ disabled: isScanning }}
+                      disabled={isScanning}
+                      onPress={() => void scanMedicine()}
+                      style={[styles.scanButton, isScanning && styles.buttonDisabled]}>
+                      {isScanning ? (
+                        <ActivityIndicator color="#17664f" />
+                      ) : (
+                        <SymbolView
+                          name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                          size={20}
+                          tintColor="#17664f"
+                        />
+                      )}
+                    </Pressable>
+                  ) : null}
                 </View>
             {searchValue.trim() ? (
               <View style={styles.searchResults}>
@@ -1227,7 +1278,7 @@ export default function SalesScreen() {
                 )}
               </View>
             ) : null}
-            {scanResult ? (
+            {OCR_ENABLED && scanResult ? (
               <View style={styles.searchResults}>
                 {scanResult.status === 'matched' ? (
                   scanResult.batches.map(renderInventoryResult)
@@ -1603,7 +1654,7 @@ function SummaryLine({
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#145642' },
+  safeArea: { flex: 1, backgroundColor: '#f4f8f5' },
   pageContent: { flex: 1, backgroundColor: '#f4f8f5' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f4f8f5' },
   content: { width: '100%', maxWidth: 680, alignSelf: 'center', padding: 18, paddingBottom: 32 },

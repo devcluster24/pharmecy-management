@@ -6,7 +6,7 @@ import ExpensesScreen from '@/components/dashboard/ExpensesScreen';
 
 export default function ExpensesRoute() {
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#145642' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f5f8f5' }}>
       <DashboardSubpageHeader
         subtitle="Expenses"
         onBack={() => router.replace('/dashboard')}

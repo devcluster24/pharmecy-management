@@ -1,6 +1,5 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { Camera, CameraView } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -18,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
+import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { getCurrencySymbol } from '@/lib/currency';
 import {
   cachePharmacySearchData,
@@ -26,6 +26,15 @@ import {
   loadPharmacySearchPayloads,
   readCachedPharmacySearchData,
 } from '@/lib/pharmacy-search-cache';
+import {
+  buildBrandNameIndex,
+  buildBrandWordIndex,
+  findBrandWordMatches,
+  getCachedBrandScanResult,
+  loadBrandScanCache,
+  normalizeBrandName,
+  saveBrandScanResult,
+} from '@/lib/medicine-brand-scan';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -36,7 +45,7 @@ const RETURN_DEDUCTION_SETTINGS_KEY = 'pharmacy-return-deduction-settings-v1';
 const RETURN_SEARCH_CACHE = 'return-search-data';
 const WALK_IN_CUSTOMER = 'Walk-in customer';
 const SCAN_FRAME_INTERVAL_MS = 100;
-const SCAN_TIMEOUT_MS = 1000;
+const SCAN_TIMEOUT_MS = 2000;
 
 type SaleLine = {
   brand: string;
@@ -193,15 +202,6 @@ function returnKey(invoice: SaleInvoice, line: SaleLine, index: number) {
   return `${invoice.id}-${line.batchNumber}-${index}`;
 }
 
-function getBrandWords(value: string) {
-  return value.normalize('NFKC').toLocaleLowerCase('en-US').match(/[\p{L}\p{M}]+/gu) ?? [];
-}
-
-function getBrandMatchScore(brand: string, scannedText: string) {
-  const scannedWords = new Set(getBrandWords(scannedText));
-  return new Set(getBrandWords(brand).filter((word) => scannedWords.has(word))).size;
-}
-
 async function persistPayload(
   client: NonNullable<typeof supabase>,
   ownerId: string,
@@ -251,6 +251,10 @@ export default function ReturnScreen() {
   const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
   const [scanNotFound, setScanNotFound] = useState(false);
   const cameraRef = useRef<CameraView | null>(null);
+
+  useEffect(() => {
+    if (session?.user.id) void loadBrandScanCache(session.user.id, 'returns');
+  }, [session?.user.id]);
 
   const quantitiesAlreadyReturned = (invoice: string, line: SaleLine) => returns
     .filter((record) => record.invoice === invoice
@@ -384,16 +388,31 @@ export default function ReturnScreen() {
     })).slice(0, 20);
   }, [invoices, query, returns, selectedItems]);
 
+  const returnBrands = useMemo(() => [...new Set([
+    ...returns.map((record) => record.brand),
+    ...invoices.flatMap((invoice) => invoice.lines.map((line) => line.brand)),
+  ].map((brand) => brand.trim()).filter(Boolean))], [invoices, returns]);
+  const returnBrandWordIndex = useMemo(
+    () => buildBrandWordIndex(returnBrands, (brand) => brand),
+    [returnBrands],
+  );
+  const returnBrandsByName = useMemo(
+    () => buildBrandNameIndex(returnBrands, (brand) => brand),
+    [returnBrands],
+  );
+
   useEffect(() => {
     if (!isScannerOpen || !isCameraReady) return;
     let active = true;
     let complete = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const scanStartedAt = Date.now();
-    const brands = [...new Set([
-      ...returns.map((record) => record.brand),
-      ...invoices.flatMap((invoice) => invoice.lines.map((line) => line.brand)),
-    ].map((brand) => brand.trim()).filter(Boolean))];
+    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
+    const scanTimeout = setTimeout(() => {
+      if (!active || complete) return;
+      complete = true;
+      setIsRecognizingFrame(false);
+      setScanNotFound(true);
+      setIsScannerOpen(false);
+    }, SCAN_TIMEOUT_MS);
 
     async function scanFrame() {
       if (!active || complete) return;
@@ -406,35 +425,41 @@ export default function ReturnScreen() {
         });
         if (!frame) throw new Error('The camera could not provide a scan frame.');
         frameUri = frame.uri;
-        const recognized = await TextRecognition.recognize(frameUri);
-        if (!active) return;
+        if (!active || complete) return;
+        const recognized = await recognizeText(frameUri);
+        if (!active || complete) return;
 
-        const matches = brands
-          .map((brand) => ({ brand, score: getBrandMatchScore(brand, recognized.text) }))
-          .filter(({ score }) => score > 0)
-          .sort((left, right) => right.score - left.score);
+        const ownerId = session?.user.id;
+        const cachedBrands = ownerId
+          ? getCachedBrandScanResult(ownerId, 'returns', recognized.text)
+          : undefined;
+        const cachedBrand = cachedBrands?.[0]
+          ? returnBrandsByName.get(normalizeBrandName(cachedBrands[0]))?.[0]
+          : undefined;
+        const matches = cachedBrand
+          ? [{ item: cachedBrand, score: Number.MAX_SAFE_INTEGER }]
+          : findBrandWordMatches(returnBrandWordIndex, recognized.text);
         const bestScore = matches[0]?.score ?? 0;
         if (bestScore > 0) {
           complete = true;
-          setSearchValue(matches[0].brand);
+          const matchedBrand = matches[0].item;
+          if (ownerId && !cachedBrand) {
+            void saveBrandScanResult(ownerId, 'returns', recognized.text, [matchedBrand]);
+          }
+          setSearchValue(matchedBrand);
           setScanNotFound(false);
           setError('');
           setIsScannerOpen(false);
           Keyboard.dismiss();
-        } else if (Date.now() - scanStartedAt >= SCAN_TIMEOUT_MS) {
-          complete = true;
-          setScanNotFound(true);
-          setIsScannerOpen(false);
         }
       } catch (scanError) {
+        if (!active || complete) return;
         complete = true;
-        if (active) {
-          alert.alert(
-            'Camera scan failed',
-            scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
-          );
-          setIsScannerOpen(false);
-        }
+        alert.alert(
+          'Camera scan failed',
+          scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+        );
+        setIsScannerOpen(false);
       } finally {
         if (frameUri) {
           try {
@@ -456,18 +481,27 @@ export default function ReturnScreen() {
       }
 
       if (active && !complete) {
-        timeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+        frameTimeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
       }
     }
 
     void scanFrame();
     return () => {
       active = false;
-      if (timeout) clearTimeout(timeout);
+      if (frameTimeout) clearTimeout(frameTimeout);
+      clearTimeout(scanTimeout);
     };
-  }, [alert, invoices, isCameraReady, isScannerOpen, returns]);
+  }, [
+    alert,
+    isCameraReady,
+    isScannerOpen,
+    returnBrandWordIndex,
+    returnBrandsByName,
+    session?.user.id,
+  ]);
 
   async function startCameraScan() {
+    if (!OCR_ENABLED) return;
     if (Platform.OS === 'web') {
       alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
       return;
@@ -517,7 +551,7 @@ export default function ReturnScreen() {
   function addItem(invoice: SaleInvoice, line: SaleLine, index: number) {
     const key = returnKey(invoice, line, index);
     if (availableQuantity(invoice.invoice, line) < 1) {
-      setError('This invoice item has already been fully returned.');
+      showReturnError('This invoice item has already been fully returned.');
       return;
     }
     setSelectedItems((current) => current.some((item) => item.key === key)
@@ -571,17 +605,22 @@ export default function ReturnScreen() {
     return nextRows;
   }
 
+  function showReturnError(message: string) {
+    setError(message);
+    alert.alert('Check your input', message);
+  }
+
   async function recordReturn() {
     if (!isReturnDataFresh) {
-      setError('Updating return and inventory data. Please wait a moment and try again.');
+      showReturnError('Updating return and inventory data. Please wait a moment and try again.');
       return;
     }
     if (!supabase || !session) {
-      setError('Return data is unavailable. Check your account connection.');
+      showReturnError('Return data is unavailable. Check your account connection.');
       return;
     }
     if (selectedItems.length === 0) {
-      setError('Search and add at least one invoice product.');
+      showReturnError('Search and add at least one invoice product.');
       return;
     }
     const invalidItem = selectedItems.find((item) => {
@@ -591,7 +630,7 @@ export default function ReturnScreen() {
         || quantity > availableQuantity(item.invoice.invoice, item.line);
     });
     if (invalidItem) {
-      setError(`Return quantity must be between 1 and ${availableQuantity(invalidItem.invoice.invoice, invalidItem.line)} for ${invalidItem.line.brand}.`);
+      showReturnError(`Return quantity must be between 1 and ${availableQuantity(invalidItem.invoice.invoice, invalidItem.line)} for ${invalidItem.line.brand}.`);
       setScreen('record');
       return;
     }
@@ -600,7 +639,7 @@ export default function ReturnScreen() {
       || !Number.isFinite(parsedDeductionRate)
       || parsedDeductionRate < 0
       || parsedDeductionRate > 100) {
-      setError('Return deduction must be between 0 and 100%.');
+      showReturnError('Return deduction must be between 0 and 100%.');
       setScreen('summary');
       return;
     }
@@ -671,8 +710,11 @@ export default function ReturnScreen() {
         purchaseRows: nextPurchase,
       });
       setScreen('list');
+      alert.alert('Return recorded', `${returnId} was saved successfully.`);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save this return.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save this return.';
+      setError(message);
+      alert.alert('Return failed', message);
     } finally {
       setSaving(false);
     }
@@ -733,26 +775,7 @@ export default function ReturnScreen() {
                 placeholderTextColor="#87928d"
                 style={styles.search}
               />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Scan product brand"
-                onPress={() => void startCameraScan()}
-                style={styles.scanButton}>
-                <SymbolView
-                  name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                  size={20}
-                  tintColor="#17664f"
-                />
-              </Pressable>
             </View>
-            {scanNotFound ? (
-              <View style={styles.scanMessageRow}>
-                <Text style={styles.scanNotFound}>Not Found</Text>
-                <Pressable onPress={() => void startCameraScan()}>
-                  <Text style={styles.link}>New Search</Text>
-                </Pressable>
-              </View>
-            ) : null}
             {error ? (
               <View style={styles.errorCard}>
                 <Text style={styles.error}>{error}</Text>
@@ -813,19 +836,21 @@ export default function ReturnScreen() {
                 placeholderTextColor="#87928d"
                 style={styles.search}
               />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Scan product brand"
-                onPress={() => void startCameraScan()}
-                style={styles.scanButton}>
-                <SymbolView
-                  name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                  size={20}
-                  tintColor="#17664f"
-                />
-              </Pressable>
+              {OCR_ENABLED ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Scan product brand"
+                  onPress={() => void startCameraScan()}
+                  style={styles.scanButton}>
+                  <SymbolView
+                    name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                    size={20}
+                    tintColor="#17664f"
+                  />
+                </Pressable>
+              ) : null}
             </View>
-            {scanNotFound ? (
+            {OCR_ENABLED && scanNotFound ? (
               <View style={styles.scanMessageRow}>
                 <Text style={styles.scanNotFound}>Not Found</Text>
                 <Pressable onPress={() => void startCameraScan()}>
@@ -995,7 +1020,7 @@ export default function ReturnScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#145642' },
+  page: { flex: 1, backgroundColor: '#f4f6f2' },
   pageContent: { flex: 1, backgroundColor: '#f4f6f2' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: '#f4f6f2' },
   content: { padding: 16, paddingBottom: 36, gap: 12 },

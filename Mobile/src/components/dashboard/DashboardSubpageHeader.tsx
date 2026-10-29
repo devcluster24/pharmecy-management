@@ -8,6 +8,9 @@ import {
   View
 } from 'react-native';
 
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
+import { useAuth } from '@/providers/AuthProvider';
+
 export default function DashboardSubpageHeader({
   subtitle,
   onBack,
@@ -15,6 +18,8 @@ export default function DashboardSubpageHeader({
   subtitle: string;
   onBack?: () => void;
 }) {
+  const { storeName } = useAuth();
+
   return (
     <>
       <StatusBar barStyle="light-content" backgroundColor="#145642" />
@@ -27,7 +32,7 @@ export default function DashboardSubpageHeader({
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.brand}>Pharmacy Cluster</Text>
+          <Text numberOfLines={1} style={styles.brand}>{getPharmacyDisplayName(storeName)}</Text>
           <Text style={styles.headerSubtitle}>{subtitle}</Text>
         </View>
         <Pressable

@@ -1,5 +1,5 @@
 import * as Crypto from 'expo-crypto';
-import { Text, TextInput, useTranslate } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -24,6 +24,7 @@ import {
 } from '@/lib/invoice-template-settings';
 import { useAuth } from '@/providers/AuthProvider';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 
 type EditableSection = 'header' | 'footer';
 type PreviewStatus = 'paid' | 'due';
@@ -43,7 +44,7 @@ const templateAppearance: Record<InvoiceTemplate['style'], {
 function getPreviewValue(item: InvoiceTemplateItem, storeName: string) {
   if (item.type === 'text') return item.value.trim();
   const values: Record<InvoiceFieldKey, string> = {
-    storeName: storeName || 'Pharmacy Cluster',
+    storeName: getPharmacyDisplayName(storeName),
     invoiceNumber: 'INV-2026-0184',
     dateTime: '22 Oct 2026, 10:30 AM',
     customer: 'Rahim Uddin',
@@ -64,6 +65,7 @@ function moveItem(items: InvoiceTemplateItem[], index: number, direction: -1 | 1
 }
 
 export default function InvoiceSetupScreen() {
+  const { alert } = useLocalizedAlert();
   const t = useTranslate();
   const { width } = useWindowDimensions();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, session, storeName } = useAuth();
@@ -134,7 +136,9 @@ export default function InvoiceSetupScreen() {
     if (!commonInfoSection || !selectedTemplate) return;
     const section = commonInfoSection;
     if (selectedTemplate[section].length >= 8) {
-      setError(`${section === 'header' ? 'Header' : 'Footer'} can contain at most 8 entries.`);
+      const message = `${section === 'header' ? 'Header' : 'Footer'} can contain at most 8 entries.`;
+      setError(message);
+      alert('Check your input', message);
       setCommonInfoSection(null);
       return;
     }
@@ -153,11 +157,15 @@ export default function InvoiceSetupScreen() {
   function addCustomText(section: EditableSection) {
     const value = (section === 'header' ? headerCustomText : footerCustomText).trim();
     if (!value) {
-      setError('Enter information to add to the invoice.');
+      const message = 'Enter information to add to the invoice.';
+      setError(message);
+      alert('Check your input', message);
       return;
     }
     if (!selectedTemplate || selectedTemplate[section].length >= 8) {
-      setError(`${section === 'header' ? 'Header' : 'Footer'} can contain at most 8 entries.`);
+      const message = `${section === 'header' ? 'Header' : 'Footer'} can contain at most 8 entries.`;
+      setError(message);
+      alert('Check your input', message);
       return;
     }
     updateSection(section, (items) => [...items, {
@@ -173,7 +181,9 @@ export default function InvoiceSetupScreen() {
 
   async function saveSetup() {
     if (dashboardRole !== 'owner' || !session) {
-      setError('Invoice setup is available to pharmacy owners.');
+      const message = 'Invoice setup is available to pharmacy owners.';
+      setError(message);
+      alert('Error', message);
       return;
     }
     let pageSize = settings.pageSize;
@@ -181,11 +191,15 @@ export default function InvoiceSetupScreen() {
       const widthMm = Number(customWidth);
       const heightMm = Number(customHeight);
       if (!Number.isFinite(widthMm) || widthMm < 50 || widthMm > 420) {
-        setError('Custom invoice width must be between 50 and 420 mm.');
+        const message = 'Custom invoice width must be between 50 and 420 mm.';
+        setError(message);
+        alert('Check your input', message);
         return;
       }
       if (!Number.isFinite(heightMm) || heightMm < 50 || heightMm > 590) {
-        setError('Custom invoice height must be between 50 and 590 mm.');
+        const message = 'Custom invoice height must be between 50 and 590 mm.';
+        setError(message);
+        alert('Check your input', message);
         return;
       }
       pageSize = { ...pageSize, widthMm, heightMm };
@@ -197,9 +211,13 @@ export default function InvoiceSetupScreen() {
       const nextSettings = { ...settings, activeTemplateId: selectedTemplateId, pageSize };
       await saveInvoiceTemplateSettings(nextSettings, session.user.id);
       setSettings(nextSettings);
-      setMessage('Invoice setup saved.');
+      const message = 'Invoice setup saved.';
+      setMessage(message);
+      alert('Success', message);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save invoice setup.');
+      const message = saveError instanceof Error ? saveError.message : 'Could not save invoice setup.';
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }

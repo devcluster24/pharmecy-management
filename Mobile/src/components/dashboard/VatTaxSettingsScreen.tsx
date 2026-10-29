@@ -1,5 +1,5 @@
 import { supabase, supabaseConfigError } from '@/lib/supabase';
-import { Text, TextInput, useTranslate } from '@/providers/LanguageProvider';
+import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export default function VatTaxSettingsScreen() {
+  const { alert } = useLocalizedAlert();
   const t = useTranslate();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
   const [rate, setRate] = useState('0');
@@ -78,17 +79,22 @@ export default function VatTaxSettingsScreen() {
   async function saveRate() {
     const value = Number(rate);
     if (rate.trim() === '' || !Number.isFinite(value) || value < 0 || value > 100) {
-      setError(t('VAT/TAX must be between 0 and 100%.'));
+      const message = t('VAT/TAX must be between 0 and 100%.');
+      setError(message);
+      alert('Check your input', message);
       setMessage('');
       return;
     }
     if (dashboardRole !== 'owner' || !session) {
-      setError(t('VAT/TAX settings are available to store owners.'));
+      const message = t('VAT/TAX settings are available to store owners.');
+      setError(message);
+      alert('Error', message);
       setMessage('');
       return;
     }
     if (!supabase) {
       setError(supabaseConfigError);
+      alert('Error', supabaseConfigError);
       setMessage('');
       return;
     }
@@ -129,9 +135,13 @@ export default function VatTaxSettingsScreen() {
       if (!result.data) throw new Error('Could not save VAT/TAX settings. Please try again.');
 
       setRate(String(normalizedRate));
-      setMessage(t('Default VAT/TAX rate saved.'));
+      const message = t('Default VAT/TAX rate saved.');
+      setMessage(message);
+      alert('Success', message);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : t('Could not save VAT/TAX settings.'));
+      const message = saveError instanceof Error ? saveError.message : t('Could not save VAT/TAX settings.');
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }

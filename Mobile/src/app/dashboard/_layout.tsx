@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useProductCatalogAutoSync } from '@/components/dashboard/ProductCatalogAutoSync';
 import { supabase } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
@@ -23,6 +24,7 @@ export default function DashboardLayout() {
     approvalStatus,
     profileLoading,
     profileError,
+    storeName,
   } = useAuth();
   const [signOutError, setSignOutError] = useState('');
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -68,7 +70,7 @@ export default function DashboardLayout() {
     return (
       <View style={styles.accessPage}>
         <View style={styles.accessCard}>
-          <Text style={styles.accessEyebrow}>PHARMACY CLUSTER</Text>
+          <Text style={styles.accessEyebrow}>{getPharmacyDisplayName(storeName).toLocaleUpperCase()}</Text>
           <Text style={styles.accessTitle}>Dashboard access unavailable</Text>
           <Text style={styles.accessMessage}>{message}</Text>
           {signOutError ? <Text style={styles.signOutError}>{signOutError}</Text> : null}

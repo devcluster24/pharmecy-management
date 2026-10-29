@@ -1,4 +1,4 @@
-import { Text } from '@/providers/LanguageProvider';
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   type PharmacySubscriptionPlan,
 } from '@/lib/pharmacy-subscription';
 import { getCurrencySymbol } from '@/lib/currency';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -35,7 +36,8 @@ function formatFeeLabel(plan: PharmacySubscriptionPlan) {
 }
 
 export default function SubscriptionSetupScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading } = useAuth();
+  const { alert } = useLocalizedAlert();
+  const { dashboardRole, isLoading: isAuthLoading, profileLoading, storeName } = useAuth();
   const [options, setOptions] = useState<PharmacySubscriptionOptions | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [billingCycles, setBillingCycles] = useState(1);
@@ -110,7 +112,9 @@ export default function SubscriptionSetupScreen() {
 
   async function continueWithPlan() {
     if (!selectedPlan || amountError || !options || !supabase) {
-      setError(amountError || 'Could not connect to the subscription service.');
+      const message = amountError || 'Could not connect to the subscription service.';
+      setError(message);
+      alert('Error', message);
       return;
     }
     setIsSubmitting(true);
@@ -129,9 +133,18 @@ export default function SubscriptionSetupScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (activationError) throw activationError;
-      router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } });
+      alert(
+        'Subscription activated',
+        'Your subscription plan has been updated.',
+        [{
+          text: 'Continue',
+          onPress: () => router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'subscription' } }),
+        }],
+      );
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Could not continue with the selected plan.');
+      const message = submitError instanceof Error ? submitError.message : 'Could not continue with the selected plan.';
+      setError(message);
+      alert('Error', message);
       setIsSubmitting(false);
     }
   }
@@ -151,7 +164,7 @@ export default function SubscriptionSetupScreen() {
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.brand}>Pharmacy Cluster</Text>
+          <Text numberOfLines={1} style={styles.brand}>{getPharmacyDisplayName(storeName)}</Text>
           <Text style={styles.headerSubtitle}>Choose your plan</Text>
         </View>
         <Text style={styles.stepBadge}>3 of 3</Text>

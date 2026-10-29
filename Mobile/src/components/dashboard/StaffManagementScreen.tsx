@@ -157,6 +157,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
   async function createStaffUrl() {
     if (!supabase) {
       setInviteMessage('Supabase is not configured.');
+      alert.alert('Error', 'Supabase is not configured.');
       return;
     }
     setIsCreatingInvite(true);
@@ -184,9 +185,13 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
 
       setInviteToken(token);
       setInviteUrl(`${origin}/staff-signup/${token}`);
-      setInviteMessage('This private link accepts one staff application and expires in 30 days.');
+      const message = 'This private link accepts one staff application and expires in 30 days.';
+      setInviteMessage(message);
+      alert.alert('Signup link created', message);
     } catch (createError) {
-      setInviteMessage(getErrorMessage(createError));
+      const message = getErrorMessage(createError);
+      setInviteMessage(message);
+      alert.alert('Error', message);
     } finally {
       setIsCreatingInvite(false);
     }
@@ -197,7 +202,9 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
     try {
       await Share.share({ message: inviteUrl, url: inviteUrl, title: 'Staff signup link' });
     } catch (shareError) {
-      setInviteMessage(`Could not share the signup link: ${getErrorMessage(shareError)}`);
+      const message = `Could not share the signup link: ${getErrorMessage(shareError)}`;
+      setInviteMessage(message);
+      alert.alert('Error', message);
     }
   }
 
@@ -205,6 +212,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
     if (!supabase || !selectedMember) return;
     if (!fullName.trim()) {
       setError('Staff name is required.');
+      alert.alert('Check your input', 'Staff name is required.');
       return;
     }
     setIsSaving(true);
@@ -222,9 +230,14 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
         requested_full_name: fullName.trim(),
       });
       if (saveError) throw saveError;
-      router.replace('/dashboard/menu/staff-management');
+      alert.alert('Staff details updated', 'Staff access settings have been saved.', [{
+        text: 'Continue',
+        onPress: () => router.replace('/dashboard/menu/staff-management'),
+      }]);
     } catch (saveError) {
-      setError(`Could not update staff access: ${getErrorMessage(saveError)}`);
+      const message = `Could not update staff access: ${getErrorMessage(saveError)}`;
+      setError(message);
+      alert.alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -244,8 +257,11 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
       });
       if (statusError) throw statusError;
       await loadMembers();
+      alert.alert('Staff status updated', 'The staff account status has been changed.');
     } catch (statusError) {
-      setError(`Could not update staff status: ${getErrorMessage(statusError)}`);
+      const message = `Could not update staff status: ${getErrorMessage(statusError)}`;
+      setError(message);
+      alert.alert('Error', message);
     }
   }
 
@@ -273,8 +289,11 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
       });
       if (deleteError) throw deleteError;
       setMembers((current) => current.filter((item) => item.staff_user_id !== member.staff_user_id));
+      alert.alert('Staff account deleted', 'The staff account has been removed.');
     } catch (deleteError) {
-      setError(`Could not delete staff account: ${getErrorMessage(deleteError)}`);
+      const message = `Could not delete staff account: ${getErrorMessage(deleteError)}`;
+      setError(message);
+      alert.alert('Error', message);
     }
   }
 
@@ -505,7 +524,7 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f5f7f5',
   },
   pageBody: {
     flex: 1,

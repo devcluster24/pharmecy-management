@@ -748,7 +748,7 @@ export default function ReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#145642' },
+  safeArea: { flex: 1, backgroundColor: '#f2f4ef' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f2f4ef' },
   pageContent: { flex: 1, backgroundColor: '#f2f4ef' },
   content: { paddingTop: 14, paddingBottom: 28 },

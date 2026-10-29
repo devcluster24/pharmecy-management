@@ -270,29 +270,38 @@ export default function PaymentMethodsSettingsScreen() {
     setMethods(nextMethods);
     setMessage(t(successMessage));
     setError('');
+    alert('Success', t(successMessage));
   }
 
   async function saveMethod() {
     setMessage('');
     setError('');
     if (dashboardRole !== 'owner' || !session) {
-      setError(t('Payment methods are available to store owners.'));
+      const message = t('Payment methods are available to store owners.');
+      setError(message);
+      alert('Error', message);
       return;
     }
 
     if (methodType === 'mobile' && !methodName.trim()) {
-      setError(t('Enter a payment method name.'));
+      const message = t('Enter a payment method name.');
+      setError(message);
+      alert('Check your input', message);
       return;
     }
     if (methodType === 'bank' && (!bankName || !accountHolderName.trim() || !accountNumber.trim())) {
-      setError(t('Complete all required bank account fields.'));
+      const message = t('Complete all required bank account fields.');
+      setError(message);
+      alert('Check your input', message);
       return;
     }
 
     const identity = methodType === 'mobile' ? methodName.trim() : bankName.trim();
     const duplicates = methodType === 'mobile' ? existingMobileNames : existingBankNames;
     if (duplicates.has(identity.toLocaleLowerCase())) {
-      setError(t('This payment method name has already been added.'));
+      const message = t('This payment method name has already been added.');
+      setError(message);
+      alert('Check your input', message);
       return;
     }
 
@@ -321,7 +330,9 @@ export default function PaymentMethodsSettingsScreen() {
       await persistMethods(nextMethods, editingId ? 'Payment method updated.' : 'Payment method saved.');
       resetForm();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : t('Could not save payment methods.'));
+      const message = saveError instanceof Error ? saveError.message : t('Could not save payment methods.');
+      setError(message);
+      alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -343,7 +354,9 @@ export default function PaymentMethodsSettingsScreen() {
                 if (editingId === method.id) resetForm();
               })
               .catch((deleteError: unknown) => {
-                setError(deleteError instanceof Error ? deleteError.message : t('Could not delete payment method.'));
+                const message = deleteError instanceof Error ? deleteError.message : t('Could not delete payment method.');
+                setError(message);
+                alert('Error', message);
               })
               .finally(() => setIsSaving(false));
           },

@@ -1,4 +1,5 @@
 import { Text, TextInput } from '@/providers/LanguageProvider';
+import { Image } from 'expo-image';
 import type { ReactNode } from 'react';
 import {
   Pressable,
@@ -9,6 +10,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
+
+// Metro needs a static require for this shared image, which lives outside the Mobile asset tree.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pharmacyIcon = require('../../../../public/pharmacy-icon.png');
 
 type AuthScreenProps = {
   eyebrow: string;
@@ -27,23 +32,16 @@ export function AuthScreen({ eyebrow, title, subtitle, children, footer }: AuthS
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets>
             <View style={styles.brandRow}>
-              <View style={styles.brandMark}>
-                <Text style={styles.brandMarkText}>+</Text>
-              </View>
+              <Image
+                source={pharmacyIcon}
+                contentFit="contain"
+                style={styles.brandMark}
+                alt="Pharmacy icon"
+                accessibilityLabel="Pharmacy icon"
+              />
               <View>
                 <Text style={styles.brandName}>Pharmacy Cluster</Text>
                 <Text style={styles.brandCaption}>PHARMACY WORKSPACE</Text>
-              </View>
-            </View>
-
-            <View style={styles.hero}>
-              <View style={styles.heroCircleLarge} />
-              <View style={styles.heroCircleSmall} />
-              <Text style={styles.heroEyebrow}>ONE PLACE FOR YOUR PHARMACY</Text>
-              <Text style={styles.heroTitle}>Good care starts with a better-organized pharmacy.</Text>
-              <View style={styles.heroAccent}>
-                <View style={styles.heroAccentDot} />
-                <Text style={styles.heroAccentText}>A clearer day, from the very first sign in.</Text>
               </View>
             </View>
 
@@ -190,18 +188,6 @@ const styles = StyleSheet.create({
   brandMark: {
     width: 40,
     height: 40,
-    borderRadius: 14,
-    backgroundColor: '#145642',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transform: [{ rotate: '-5deg' }],
-  },
-  brandMarkText: {
-    color: '#c8f36c',
-    fontSize: 29,
-    lineHeight: 33,
-    fontWeight: '500',
-    transform: [{ rotate: '5deg' }],
   },
   brandName: {
     color: '#183c31',
@@ -215,67 +201,6 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: '800',
     letterSpacing: 1.8,
-  },
-  hero: {
-    minHeight: 158,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    paddingHorizontal: 22,
-    paddingVertical: 19,
-    borderRadius: 23,
-    backgroundColor: '#145642',
-    marginBottom: 16,
-  },
-  heroCircleLarge: {
-    position: 'absolute',
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    backgroundColor: 'rgba(200, 243, 108, 0.08)',
-    right: -57,
-    top: -95,
-  },
-  heroCircleSmall: {
-    position: 'absolute',
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    borderWidth: 1,
-    borderColor: 'rgba(235, 248, 218, 0.16)',
-    right: -23,
-    bottom: -55,
-  },
-  heroEyebrow: {
-    color: '#c8f36c',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.6,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    maxWidth: 320,
-    color: '#fffdf7',
-    fontSize: 20,
-    lineHeight: 25,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  heroAccent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginTop: 12,
-  },
-  heroAccentDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#c8f36c',
-  },
-  heroAccentText: {
-    color: '#d6e6dc',
-    fontSize: 10,
-    fontWeight: '500',
   },
   card: {
     padding: 21,
@@ -351,12 +276,12 @@ const styles = StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: 17,
     borderRadius: 13,
-    backgroundColor: '#c8f36c',
+    backgroundColor: '#145642',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     marginTop: 3,
-    shadowColor: '#77a633',
+    shadowColor: '#145642',
     shadowOpacity: 0.16,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
@@ -369,14 +294,14 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   submitButtonText: {
-    color: '#173c2c',
+    color: '#fffefa',
     fontSize: 14,
     fontWeight: '800',
   },
   submitArrow: {
     position: 'absolute',
     right: 17,
-    color: '#173c2c',
+    color: '#fffefa',
     fontSize: 19,
     lineHeight: 22,
   },

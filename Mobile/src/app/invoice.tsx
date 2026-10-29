@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
+import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 
 const INVOICES_PER_PAGE = 10;
@@ -368,7 +369,7 @@ export default function InvoiceScreen() {
               </Pressable>
               <View style={styles.modalHeaderText}>
                 <Text numberOfLines={1} style={styles.modalBrand}>
-                  {storeName || 'Pharmacy Cluster'}
+                  {getPharmacyDisplayName(storeName)}
                 </Text>
                 <Text numberOfLines={1} style={styles.modalSubtitle}>
                   Sales Invoice · {selectedInvoice.invoice}
@@ -483,7 +484,7 @@ function MoneyRow({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#145642',
+    backgroundColor: '#f4f8f5',
   },
   pageContent: {
     flex: 1,
