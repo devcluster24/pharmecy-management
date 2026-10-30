@@ -6,6 +6,7 @@ import {
 } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
 import { useEffect, useState, type ComponentProps } from 'react';
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import {
   Pressable,
@@ -36,6 +37,21 @@ import ReturnDeductionSettingsScreen from '@/components/dashboard/ReturnDeductio
 import SubscriptionBillingScreen from '@/components/dashboard/SubscriptionBillingScreen';
 import VatTaxSettingsScreen from '@/components/dashboard/VatTaxSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
+import categoryIcon from '../../../assets/images/tabIcons/category.png';
+import cloudSyncIcon from '../../../assets/images/tabIcons/cloud_sync.png';
+import currencyExchangeIcon from '../../../assets/images/tabIcons/currency_exchange.png';
+import diversity3Icon from '../../../assets/images/tabIcons/diversity_3.png';
+import languageIcon from '../../../assets/images/tabIcons/language.png';
+import pharmacyInventoryIcon from '../../../assets/images/tabIcons/pharmacy_inventory.png';
+import pharmacyPaymentIcon from '../../../assets/images/tabIcons/pharmacy_payment.png';
+import pharmacyProductManagementIcon from '../../../assets/images/tabIcons/pharmacy_product_management.png';
+import pharmacyReturnManagementIcon from '../../../assets/images/tabIcons/pharmacy_return_management.png';
+import pharmacySetupIcon from '../../../assets/images/tabIcons/pharmacy_setup.png';
+import pharmacyVatTaxIcon from '../../../assets/images/tabIcons/pharmacy_vat_tax.png';
+import documentIcon from '../../../assets/images/tabIcons/documents.png';
+import profileIcon from '../../../assets/images/tabIcons/profile.png';
+import subscriptionIcon from '../../../assets/images/tabIcons/subscriptions.png';
+import settingsSuggestIcon from '../../../assets/images/tabIcons/settings_suggest.png';
 
 type MenuEntry = {
   label: string;
@@ -125,6 +141,24 @@ const menuEntries: MenuEntry[] = [
     icon: { ios: 'person.crop.circle.fill', android: 'account_circle', web: 'account_circle' },
   },
 ];
+
+const menuIcons: Record<string, number> = {
+  'product-management': categoryIcon,
+  'staff-management': diversity3Icon,
+  setting: settingsSuggestIcon,
+  language: languageIcon,
+  currency: currencyExchangeIcon,
+  'backup-file': cloudSyncIcon,
+  'pharmacy-setup': pharmacySetupIcon,
+  inventory: pharmacyInventoryIcon,
+  'vat-tax': pharmacyVatTaxIcon,
+  'payment-methord': pharmacyPaymentIcon,
+  'return-management': pharmacyReturnManagementIcon,
+  'pharmacy-product-management': pharmacyProductManagementIcon,
+  subscription: subscriptionIcon,
+  documents: documentIcon,
+  profile: profileIcon,
+};
 
 const menuTitleBySlug = new Map<string, string>();
 
@@ -508,6 +542,7 @@ export default function ManagementMenuScreen({
   function renderEntry(entry: MenuEntry, nested = false) {
     const isActive = activeSlug === entry.slug;
     const isExpanded = expandedGroup === entry.slug;
+    const customIcon = menuIcons[entry.slug];
     const hasAutoSyncToggle = entry.slug === 'pharmacy-product-management';
     const isAutoSyncEntryExpanded = hasAutoSyncToggle && isProductSyncExpanded;
 
@@ -517,7 +552,7 @@ export default function ManagementMenuScreen({
           {entry.slug === 'language' ? (
             <>
               <View style={[styles.menuButton, styles.languageLabel]}>
-                <SymbolView name={entry.icon} size={18} tintColor="#718078" />
+                <Image alt="" source={languageIcon} contentFit="contain" style={styles.menuIcon} />
                 <Text style={styles.menuButtonText}>{entry.label}</Text>
               </View>
               <View style={styles.languageButtons}>
@@ -567,7 +602,16 @@ export default function ManagementMenuScreen({
                 }
               }}
               style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}>
-              <SymbolView name={entry.icon} size={18} tintColor={isActive ? '#17664f' : '#718078'} />
+              {customIcon !== undefined ? (
+                <Image
+                  alt=""
+                  source={customIcon}
+                  contentFit="contain"
+                  style={styles.menuIcon}
+                />
+              ) : (
+                <SymbolView name={entry.icon} size={18} tintColor={isActive ? '#17664f' : '#718078'} />
+              )}
               <Text style={[styles.menuButtonText, isActive && styles.activeMenuButtonText]}>
                 {entry.label}
               </Text>
@@ -905,6 +949,10 @@ const styles = StyleSheet.create({
     gap: 11,
     paddingHorizontal: 12,
     borderRadius: 10,
+  },
+  menuIcon: {
+    width: 18,
+    height: 18,
   },
   languageLabel: {
     paddingRight: 4,

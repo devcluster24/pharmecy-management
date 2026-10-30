@@ -1,13 +1,11 @@
-import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AppState,
   ActivityIndicator,
-  Modal,
   PanResponder,
   Pressable,
   ScrollView,
@@ -17,19 +15,23 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import DashboardNotificationCenter from '@/components/dashboard/DashboardNotificationCenter';
 import { supabase } from '@/lib/supabase';
 import { getCurrencySymbol } from '@/lib/currency';
 import { prefetchPharmacySearchData } from '@/lib/pharmacy-search-cache';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
-
-type PharmacyNotification = {
-  id: string;
-  title: string;
-  body: string;
-  created_at: string;
-  read_at: string | null;
-};
+import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
+import assignmentReturnIcon from '../../../assets/images/tabIcons/assignment_return.png';
+import assessmentIcon from '../../../assets/images/tabIcons/assessment.png';
+import expensesIcon from '../../../assets/images/tabIcons/expenses.png';
+import inventoryIcon from '../../../assets/images/tabIcons/inventory.png';
+import localMallIcon from '../../../assets/images/tabIcons/local_mall.png';
+import localShippingIcon from '../../../assets/images/tabIcons/local_shipping.png';
+import overviewIcon from '../../../assets/images/tabIcons/overview.png';
+import peopleAltIcon from '../../../assets/images/tabIcons/people_alt.png';
+import receiptIcon from '../../../assets/images/tabIcons/receipt.png';
+import shoppingCartIcon from '../../../assets/images/tabIcons/shopping_cart.png';
 
 type TodaySalesSummary = {
   amount: number;
@@ -319,11 +321,6 @@ export default function OwnerHomeScreen() {
   const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
   const [currentHour, setCurrentHour] = useState(() => new Date().getHours());
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey(new Date()));
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<PharmacyNotification[]>([]);
-  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
-  const [notificationError, setNotificationError] = useState('');
-  const [updatingNotificationId, setUpdatingNotificationId] = useState<string | null>(null);
   const [todaySales, setTodaySales] = useState<TodaySalesSummary>({ amount: 0, invoiceCount: 0 });
   const [isLoadingTodaySales, setIsLoadingTodaySales] = useState(true);
   const [todaySalesError, setTodaySalesError] = useState('');
@@ -364,60 +361,6 @@ export default function OwnerHomeScreen() {
     if (dashboardRole !== 'owner' || !session) return;
     void prefetchPharmacySearchData(session.user.id);
   }, [dashboardRole, session]);
-
-  const loadNotifications = useCallback(async () => {
-    if (!supabase || !session) {
-      setNotificationError('Notifications are unavailable. Check your Supabase connection.');
-      return;
-    }
-
-    setIsLoadingNotifications(true);
-    setNotificationError('');
-
-    try {
-      const { data, error } = await supabase
-        .from('pharmacy_notifications')
-        .select('id, title, body, created_at, read_at')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setNotifications(data ?? []);
-    } catch (error) {
-      setNotificationError(
-        error instanceof Error ? error.message : 'Could not load notifications.',
-      );
-    } finally {
-      setIsLoadingNotifications(false);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    const client = supabase;
-    if (!client || !session) return;
-
-    const channel = client
-      .channel(`owner-notifications:${session.user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pharmacy_notifications',
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        () => void loadNotifications(),
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setNotificationError('Live notifications are temporarily unavailable.');
-        }
-      });
-
-    return () => {
-      void client.removeChannel(channel);
-    };
-  }, [loadNotifications, session]);
 
   const loadTodaySales = useCallback(async () => {
     const client = supabase;
@@ -714,10 +657,6 @@ export default function OwnerHomeScreen() {
   }, [alert.alert, destroyingExpiredBatchId, expiredBatches, loadExpiredBatches, session]);
 
   useEffect(() => {
-    void loadNotifications();
-  }, [loadNotifications]);
-
-  useEffect(() => {
     void loadTodaySales();
 
     const client = supabase;
@@ -875,47 +814,6 @@ export default function OwnerHomeScreen() {
     };
   }, [favouritesStorageKey]);
 
-  async function toggleReadState(notification: PharmacyNotification) {
-    if (!supabase) {
-      setNotificationError('Notifications are unavailable. Check your Supabase connection.');
-      return;
-    }
-
-    setUpdatingNotificationId(notification.id);
-    setNotificationError('');
-    const readAt = notification.read_at ? null : new Date().toISOString();
-
-    try {
-      const { data, error } = await supabase
-        .from('pharmacy_notifications')
-        .update({ read_at: readAt })
-        .eq('id', notification.id)
-        .eq('user_id', session?.user.id ?? '')
-        .select('id')
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) throw new Error('Notification could not be updated. Please refresh and try again.');
-
-      setNotifications((current) =>
-        current.map((item) =>
-          item.id === notification.id ? { ...item, read_at: readAt } : item,
-        ),
-      );
-    } catch (error) {
-      setNotificationError(
-        error instanceof Error ? error.message : 'Could not update notification status.',
-      );
-    } finally {
-      setUpdatingNotificationId(null);
-    }
-  }
-
-  function openNotifications() {
-    setIsNotificationsOpen(true);
-    void loadNotifications();
-  }
-
   async function openQuickAccess(itemId: QuickAccessId) {
     if (favouritesLoadedForKey === favouritesStorageKey) {
       const nextCounts = {
@@ -961,13 +859,11 @@ export default function OwnerHomeScreen() {
   const visibleHomeMenuItems = selectedHomeMenu === 'quick-access'
     ? visibleQuickAccessItems
     : visibleFavouriteItems;
-  const unreadCount = notifications.filter((notification) => !notification.read_at).length;
-
   return (
     <>
       <StatusBar
-        barStyle={isNotificationsOpen ? 'dark-content' : 'light-content'}
-        backgroundColor={isNotificationsOpen ? '#f7f8f4' : '#145642'}
+        barStyle="light-content"
+        backgroundColor="#145642"
       />
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView
@@ -990,34 +886,10 @@ export default function OwnerHomeScreen() {
                 </Text>
               </View>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  unreadCount > 0
-                    ? `Notifications, ${unreadCount} unread`
-                    : 'Notifications'
-                }
-                onPress={openNotifications}
-                style={({ pressed }) => [
-                  styles.notificationButton,
-                  pressed && styles.notificationButtonPressed,
-                ]}>
-                <SymbolView
-                  name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
-                  size={18}
-                  tintColor="#245744"
-                />
-                {unreadCount > 0 ? (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeText}>
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
+              <DashboardNotificationCenter />
             </View>
 
-            <View style={styles.greetingDecoration} />
+            <View pointerEvents="none" style={styles.greetingDecoration} />
             <Text style={styles.greeting}>{getGreeting(currentHour)}</Text>
             <Text numberOfLines={2} style={styles.ownerName}>
               {ownerName || 'Owner'}
@@ -1131,14 +1003,24 @@ export default function OwnerHomeScreen() {
                           && styles.quickAccessButtonDisabled,
                         pressed && styles.quickAccessButtonPressed,
                       ]}>
-                      <SymbolView
-                        name={{
-                          ios: item.icon,
-                          android: item.androidIcon,
-                          web: item.androidIcon,
-                        }}
-                        size={19}
-                        tintColor="#17664f"
+                      <Image
+                        source={
+                          item.id === 'overview'
+                            ? overviewIcon
+                            : item.id === 'inventory'
+                              ? inventoryIcon
+                              : item.id === 'reports'
+                                ? assessmentIcon
+                                : item.id === 'invoice'
+                                  ? receiptIcon
+                                  : item.id === 'customer'
+                                    ? peopleAltIcon
+                                    : item.id === 'supplier'
+                                      ? localShippingIcon
+                                      : expensesIcon
+                        }
+                        contentFit="contain"
+                        style={styles.quickAccessIcon}
                       />
                       <Text numberOfLines={1} style={styles.quickAccessLabel}>
                         {item.label}
@@ -1190,10 +1072,17 @@ export default function OwnerHomeScreen() {
                 styles.ownerActionButton,
                 pressed && styles.ownerActionButtonPressed,
               ]}>
-              <SymbolView
-                name={{ ios: item.icon, android: item.androidIcon, web: item.androidIcon }}
-                size={18}
-                tintColor="#17664f"
+              <Image
+                alt=""
+                source={
+                  item.id === 'sale'
+                    ? shoppingCartIcon
+                    : item.id === 'purchase'
+                      ? localMallIcon
+                      : assignmentReturnIcon
+                }
+                contentFit="contain"
+                style={styles.ownerActionIcon}
               />
               <Text numberOfLines={1} style={styles.ownerActionButtonText}>
                 {item.label}
@@ -1443,96 +1332,6 @@ export default function OwnerHomeScreen() {
 
       </ScrollView>
 
-      <Modal
-        animationType="slide"
-        onRequestClose={() => setIsNotificationsOpen(false)}
-        presentationStyle="pageSheet"
-        visible={isNotificationsOpen}>
-        <SafeAreaView style={styles.modalSafeArea}>
-          <View style={styles.modalHeader}>
-            <View>
-              <Text style={styles.modalEyebrow}>STAY UP TO DATE</Text>
-              <Text style={styles.modalTitle}>Notifications</Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close notifications"
-              onPress={() => setIsNotificationsOpen(false)}
-              style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>×</Text>
-            </Pressable>
-          </View>
-
-          {notificationError ? (
-            <View style={styles.notificationErrorBox}>
-              <Text style={styles.notificationError}>{notificationError}</Text>
-              <Pressable onPress={() => void loadNotifications()} accessibilityRole="button">
-                <Text style={styles.retryText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {isLoadingNotifications ? (
-            <View style={styles.loadingState}>
-              <ActivityIndicator color="#17664f" />
-              <Text style={styles.emptyText}>Loading notifications…</Text>
-            </View>
-          ) : notifications.length === 0 && !notificationError ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIcon}>
-                <SymbolView
-                  name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
-                  size={23}
-                  tintColor="#47826b"
-                />
-              </View>
-              <Text style={styles.emptyTitle}>You’re all caught up</Text>
-              <Text style={styles.emptyText}>New pharmacy updates will appear here.</Text>
-            </View>
-          ) : (
-            <ScrollView
-              contentContainerStyle={styles.notificationList}
-              showsVerticalScrollIndicator={false}>
-              {notifications.map((notification) => {
-                const isUnread = !notification.read_at;
-                const isUpdating = updatingNotificationId === notification.id;
-
-                return (
-                  <View
-                    key={notification.id}
-                    style={[styles.notificationCard, isUnread && styles.unreadNotificationCard]}>
-                    <View style={styles.notificationHeading}>
-                      <View
-                        style={[
-                          styles.notificationStatusDot,
-                          isUnread ? styles.unreadStatusDot : styles.readStatusDot,
-                        ]}
-                      />
-                      <Text style={styles.notificationTitle}>{notification.title}</Text>
-                    </View>
-                    {notification.body ? (
-                      <Text style={styles.notificationBody}>{notification.body}</Text>
-                    ) : null}
-                    <View style={styles.notificationFooter}>
-                      <Text style={styles.notificationDate}>
-                        {formatNotificationTime(notification.created_at)}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={isUpdating}
-                        onPress={() => void toggleReadState(notification)}>
-                        <Text style={[styles.readAction, isUpdating && styles.disabledText]}>
-                          {isUpdating ? 'Updating…' : isUnread ? 'Mark as read' : 'Mark unread'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          )}
-        </SafeAreaView>
-      </Modal>
       </SafeAreaView>
     </>
   );
@@ -1564,6 +1363,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#145642',
   },
   topBar: {
+    zIndex: 1,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1589,38 +1389,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
     letterSpacing: -0.4,
-  },
-  notificationButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
-    backgroundColor: '#fffefa',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationButtonPressed: {
-    opacity: 0.72,
-  },
-  unreadBadge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    borderRadius: 9,
-    backgroundColor: '#d9483b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#145642',
-  },
-  unreadBadgeText: {
-    color: '#fff',
-    fontSize: 8,
-    fontWeight: '800',
   },
   greetingDecoration: {
     position: 'absolute',
@@ -1767,6 +1535,10 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 4,
   },
+  quickAccessIcon: {
+    width: 19,
+    height: 19,
+  },
   quickAccessButtonPressed: {
     opacity: 0.7,
   },
@@ -1834,6 +1606,10 @@ const styles = StyleSheet.create({
   },
   ownerActionButtonPressed: {
     opacity: 0.7,
+  },
+  ownerActionIcon: {
+    width: 18,
+    height: 18,
   },
   ownerActionButtonText: {
     color: '#315b47',
@@ -2140,160 +1916,5 @@ const styles = StyleSheet.create({
     color: '#a63e34',
     fontSize: 10,
     lineHeight: 15,
-  },
-  modalSafeArea: {
-    flex: 1,
-    paddingHorizontal: 22,
-    paddingTop: 14,
-    backgroundColor: '#f7f8f4',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  modalEyebrow: {
-    color: '#47826b',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  modalTitle: {
-    marginTop: 5,
-    color: '#183c31',
-    fontSize: 25,
-    fontWeight: '800',
-    letterSpacing: -0.6,
-  },
-  closeButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
-    backgroundColor: '#eaf0e8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonText: {
-    marginTop: -2,
-    color: '#315b47',
-    fontSize: 27,
-    fontWeight: '400',
-  },
-  notificationErrorBox: {
-    padding: 13,
-    marginBottom: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#f0c9c2',
-    backgroundColor: '#fff3f0',
-  },
-  notificationError: {
-    color: '#a63e34',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  retryText: {
-    marginTop: 8,
-    color: '#17664f',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  loadingState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 50,
-  },
-  emptyIcon: {
-    width: 54,
-    height: 54,
-    marginBottom: 15,
-    borderRadius: 19,
-    backgroundColor: '#eaf3e7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    color: '#183c31',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  emptyText: {
-    marginTop: 6,
-    color: '#758078',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  notificationList: {
-    paddingBottom: 28,
-    gap: 12,
-  },
-  notificationCard: {
-    padding: 15,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e6ebe4',
-    backgroundColor: '#fffefa',
-  },
-  unreadNotificationCard: {
-    borderColor: '#b8d8c2',
-    backgroundColor: '#fbfef8',
-  },
-  notificationHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  notificationStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  unreadStatusDot: {
-    backgroundColor: '#2a9a6c',
-  },
-  readStatusDot: {
-    backgroundColor: '#c5cdc5',
-  },
-  notificationTitle: {
-    flex: 1,
-    color: '#20392d',
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '800',
-  },
-  notificationBody: {
-    marginTop: 8,
-    marginLeft: 17,
-    color: '#68776e',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  notificationFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginTop: 13,
-    marginLeft: 17,
-  },
-  notificationDate: {
-    color: '#8b968e',
-    fontSize: 10,
-  },
-  readAction: {
-    color: '#17664f',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  disabledText: {
-    opacity: 0.5,
   },
 });

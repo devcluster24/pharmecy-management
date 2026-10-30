@@ -13,6 +13,11 @@ import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useProductCatalogAutoSync } from '@/components/dashboard/ProductCatalogAutoSync';
 import { supabase } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
+import homeIcon from '../../../assets/images/tabIcons/home.png';
+import inventoryIcon from '../../../assets/images/tabIcons/inventory.png';
+import localShippingIcon from '../../../assets/images/tabIcons/local_shipping.png';
+import menuIcon from '../../../assets/images/tabIcons/menu.png';
+import overviewIcon from '../../../assets/images/tabIcons/overview.png';
 
 export default function DashboardLayout() {
   const alert = useLocalizedAlert();
@@ -96,22 +101,22 @@ export default function DashboardLayout() {
       labelStyle={{ selected: { color: '#17664f' } }}>
       <NativeTabs.Trigger name="index" testID="dashboard-tab-home">
         <NativeTabs.Trigger.Label>{t('Home')}</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
+        <NativeTabs.Trigger.Icon src={homeIcon} renderingMode="original" />
       </NativeTabs.Trigger>
 
       {dashboardRole === 'owner' ? (
         [
           <NativeTabs.Trigger key="overview" name="overview" testID="dashboard-tab-overview">
             <NativeTabs.Trigger.Label>{t('Overview')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="square.grid.2x2.fill" md="dashboard" />
+            <NativeTabs.Trigger.Icon src={overviewIcon} renderingMode="original" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="inventory" name="inventory" testID="dashboard-tab-inventory">
             <NativeTabs.Trigger.Label>{t('Inventory')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="shippingbox.fill" md="inventory_2" />
+            <NativeTabs.Trigger.Icon src={inventoryIcon} renderingMode="original" />
           </NativeTabs.Trigger>,
           <NativeTabs.Trigger key="supplier" name="supplier" testID="dashboard-tab-supplier">
             <NativeTabs.Trigger.Label>{t('Supplier')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="shippingbox" md="local_shipping" />
+            <NativeTabs.Trigger.Icon src={localShippingIcon} renderingMode="original" />
           </NativeTabs.Trigger>,
         ]
       ) : (
@@ -133,7 +138,10 @@ export default function DashboardLayout() {
 
       <NativeTabs.Trigger name="menu" testID="dashboard-tab-menu">
         <NativeTabs.Trigger.Label>{t('Menu')}</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="line.3.horizontal" md="menu" />
+        <NativeTabs.Trigger.Icon
+          src={menuIcon}
+          renderingMode="original"
+        />
       </NativeTabs.Trigger>
     </NativeTabs>
   );
