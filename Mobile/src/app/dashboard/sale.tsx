@@ -1,5 +1,5 @@
-import DashboardTabScreen from '@/components/dashboard/DashboardTabScreen';
+import SalesScreen from '../sales';
 
 export default function SaleScreen() {
-  return <DashboardTabScreen title="Sale" />;
+  return <SalesScreen />;
 }

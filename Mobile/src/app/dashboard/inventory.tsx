@@ -14,6 +14,7 @@ import { getCurrencySymbol } from '@/lib/currency';
 import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasAnyDashboardPageAccess, hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 type InventoryList = 'inventory' | 'expire-soon' | 'expired' | 'low-stock' | 'out-of-stock';
 
@@ -253,7 +254,17 @@ function InventoryDetails({ batch, totalQuantity }: { batch: InventoryBatch; tot
 }
 
 export default function InventoryScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasInventoryAccess = dashboardRole === 'staff'
+    ? hasAnyDashboardPageAccess(dashboardRole, staffPermissions, ['inventory', 'purchase'])
+    : hasDashboardPageAccess(dashboardRole, staffPermissions, 'inventory');
   const [inventory, setInventory] = useState<PharmacyInventory>({
     batches: [],
     lowStockThreshold: null,
@@ -267,26 +278,53 @@ export default function InventoryScreen() {
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (isAuthLoading || profileLoading || dashboardRole !== 'owner') return;
+    if (isAuthLoading || profileLoading || !hasInventoryAccess) return;
     const client = supabase;
     const currentSession = session;
-    if (!client || !currentSession) return;
+    const currentOwnerId = pharmacyOwnerId;
+    if (!client || !currentSession || !currentOwnerId) return;
 
     let active = true;
     let latestRequest = 0;
     async function loadInventory(
       inventoryClient: NonNullable<typeof supabase>,
-      inventorySession: NonNullable<typeof session>,
+      inventoryOwnerId: string,
       showLoading = false,
     ) {
       const requestId = ++latestRequest;
       if (showLoading) setIsLoading(true);
       setError('');
       try {
+        if (dashboardRole === 'staff') {
+          const { data: staffData, error: staffError } = await inventoryClient.rpc(
+            'get_my_pharmacy_staff_home_inventory',
+          );
+          if (staffError) throw staffError;
+          if (!Array.isArray(staffData) || !staffData[0] || typeof staffData[0] !== 'object') {
+            throw new Error('Staff inventory data has an invalid format.');
+          }
+          const staffPayload = staffData[0] as Record<string, unknown>;
+          if (
+            !Array.isArray(staffPayload.purchase_payload)
+            || staffPayload.purchase_payload.some((row) => !row || typeof row !== 'object')
+          ) {
+            throw new Error('Saved inventory data has an invalid format.');
+          }
+          const batches = staffPayload.purchase_payload.map(parseInventoryBatch);
+          const threshold = typeof staffPayload.low_stock_threshold === 'number'
+            ? staffPayload.low_stock_threshold
+            : typeof staffPayload.low_stock_threshold === 'string'
+              ? Number(staffPayload.low_stock_threshold)
+              : Number.NaN;
+          const lowStockThreshold = Number.isInteger(threshold) && threshold > 0 ? threshold : null;
+          if (active && requestId === latestRequest) setInventory({ batches, lowStockThreshold });
+          return;
+        }
+
         const { data, error: queryError } = await inventoryClient
           .from('pharmacy_app_data')
           .select('data_key, payload')
-          .eq('owner_user_id', inventorySession.user.id)
+          .eq('owner_user_id', inventoryOwnerId)
           .in('data_key', ['pharmacy-purchase-list-v1', 'pharmacy-low-stock-threshold-v1']);
         if (queryError) throw queryError;
 
@@ -318,16 +356,16 @@ export default function InventoryScreen() {
       }
     }
 
-    void loadInventory(client, currentSession, true);
+    void loadInventory(client, currentOwnerId, true);
     const channel = client
-      .channel(`inventory-updates-${currentSession.user.id}-${Date.now()}`)
+      .channel(`inventory-updates-${currentOwnerId}-${Date.now()}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'pharmacy_app_data',
-          filter: `owner_user_id=eq.${currentSession.user.id}`,
+          filter: `owner_user_id=eq.${currentOwnerId}`,
         },
         (change) => {
           const row = change.eventType === 'DELETE' ? change.old : change.new;
@@ -335,27 +373,27 @@ export default function InventoryScreen() {
             row.data_key === 'pharmacy-purchase-list-v1'
             || row.data_key === 'pharmacy-low-stock-threshold-v1'
           ) {
-            void loadInventory(client, currentSession);
+            void loadInventory(client, currentOwnerId);
           }
         },
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') void loadInventory(client, currentSession);
+        if (status === 'SUBSCRIBED') void loadInventory(client, currentOwnerId);
       });
 
     return () => {
       active = false;
       void client.removeChannel(channel);
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasInventoryAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const displayError = error
     || (!supabase
       ? 'Inventory is unavailable. Check your account connection.'
       : !session
         ? 'Sign in to view inventory.'
-        : dashboardRole !== 'owner'
-          ? 'Inventory is available to store owners.'
+        : !hasInventoryAccess
+          ? 'Inventory access has not been enabled by your owner.'
           : '');
 
   const sortedBatches = useMemo(
@@ -444,7 +482,7 @@ export default function InventoryScreen() {
         {displayError ? (
           <View style={styles.errorCard}>
             <Text style={styles.errorText}>{displayError}</Text>
-            {error && supabase && session && dashboardRole === 'owner' ? (
+            {error && supabase && session && hasInventoryAccess ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setRetryKey((previous) => previous + 1)}>

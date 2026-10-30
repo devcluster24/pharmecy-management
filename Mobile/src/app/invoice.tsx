@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 const INVOICES_PER_PAGE = 10;
 
@@ -159,8 +160,15 @@ export default function InvoiceScreen() {
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    pharmacyOwnerId,
+    staffPermissions,
     storeName,
   } = useAuth();
+  const hasInvoiceAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'invoice',
+  );
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [searchValue, setSearchValue] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<SalesInvoice | null>(null);
@@ -171,7 +179,7 @@ export default function InvoiceScreen() {
 
   useEffect(() => {
     if (isAuthLoading || profileLoading) return;
-    if (dashboardRole !== 'owner') {
+    if (!hasInvoiceAccess) {
       router.replace('/dashboard');
       return;
     }
@@ -181,13 +189,13 @@ export default function InvoiceScreen() {
       setIsLoading(true);
       setError('');
       try {
-        if (!supabase || !session) {
+        if (!supabase || !session || !pharmacyOwnerId) {
           throw new Error('Invoices are unavailable. Check your account connection.');
         }
         const result = await supabase
           .from('pharmacy_app_data')
           .select('payload')
-          .eq('owner_user_id', session.user.id)
+          .eq('owner_user_id', pharmacyOwnerId)
           .eq('data_key', 'pharmacy-sales-list-v1')
           .maybeSingle();
         if (result.error) throw result.error;
@@ -206,7 +214,7 @@ export default function InvoiceScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasInvoiceAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const filteredInvoices = useMemo(() => {
     const normalizedSearch = searchValue.trim().toLocaleLowerCase();
@@ -227,7 +235,7 @@ export default function InvoiceScreen() {
     safeCurrentPage * INVOICES_PER_PAGE,
   );
 
-  if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
+  if (isAuthLoading || profileLoading || !hasInvoiceAccess) {
     return (
       <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />

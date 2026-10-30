@@ -16,6 +16,7 @@ import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeade
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 const CUSTOMERS_PER_PAGE = 10;
 const SALES_DATA_KEY = 'pharmacy-sales-list-v1';
@@ -131,7 +132,14 @@ export default function CustomerScreen() {
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    pharmacyOwnerId,
+    staffPermissions,
   } = useAuth();
+  const hasCustomerAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'customers',
+  );
   const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);
   const [activeList, setActiveList] = useState<CustomerList>('customers');
   const [searchValue, setSearchValue] = useState('');
@@ -153,7 +161,7 @@ export default function CustomerScreen() {
 
   useEffect(() => {
     if (isAuthLoading || profileLoading) return;
-    if (dashboardRole !== 'owner') {
+    if (!hasCustomerAccess) {
       router.replace('/dashboard');
       return;
     }
@@ -163,13 +171,13 @@ export default function CustomerScreen() {
       setIsLoading(true);
       setError('');
       try {
-        if (!supabase || !session) {
+        if (!supabase || !session || !pharmacyOwnerId) {
           throw new Error('Customer data is unavailable. Check your account connection.');
         }
         const result = await supabase
           .from('pharmacy_app_data')
           .select('data_key, payload')
-          .eq('owner_user_id', session.user.id)
+          .eq('owner_user_id', pharmacyOwnerId)
           .in('data_key', [SALES_DATA_KEY, PAYMENT_METHODS_DATA_KEY]);
         if (result.error) throw result.error;
         const rows = new Map((result.data ?? []).map((row) => [row.data_key, row.payload]));
@@ -213,7 +221,7 @@ export default function CustomerScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasCustomerAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   async function saveInvoicePayment() {
     setPaymentError('');
@@ -235,7 +243,7 @@ export default function CustomerScreen() {
       alert('Check your input', message);
       return;
     }
-    if (!supabase || !session) {
+    if (!supabase || !session || !pharmacyOwnerId) {
       const message = 'Customer data is unavailable. Check your account connection.';
       setPaymentError(message);
       alert('Error', message);
@@ -332,7 +340,7 @@ export default function CustomerScreen() {
       const result = await supabase
         .from('pharmacy_app_data')
         .update({ payload: updatedInvoices, updated_at: new Date().toISOString() })
-        .eq('owner_user_id', session.user.id)
+        .eq('owner_user_id', pharmacyOwnerId)
         .eq('data_key', SALES_DATA_KEY)
         .select('data_key')
         .maybeSingle();
@@ -453,7 +461,7 @@ export default function CustomerScreen() {
   );
   const totalDueAmount = dueCustomers.reduce((total, customer) => total + customer.totalDue, 0);
 
-  if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
+  if (isAuthLoading || profileLoading || !hasCustomerAccess) {
     return (
       <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />

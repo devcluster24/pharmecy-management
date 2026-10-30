@@ -13,6 +13,7 @@ import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeade
 import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 type ReportTab = 'sales' | 'customers' | 'suppliers' | 'stock' | 'returns' | 'profit';
 type ReportPeriod = 'today' | 'this-week' | 'this-month' | 'last-month';
@@ -612,7 +613,19 @@ function ReportList({ section }: { section: ReportSection }) {
 }
 
 export default function ReportsScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasReportsAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'reports',
+  );
   const [reportData, setReportData] = useState<ReportData>(emptyReportData);
   const [activeTab, setActiveTab] = useState<ReportTab>('sales');
   const [period, setPeriod] = useState<ReportPeriod>('this-month');
@@ -622,16 +635,18 @@ export default function ReportsScreen() {
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (isAuthLoading || profileLoading || dashboardRole !== 'owner') return;
+    if (isAuthLoading || profileLoading || !hasReportsAccess) return;
     const client = supabase;
     const currentSession = session;
-    if (!client || !currentSession) return;
+    const currentOwnerId = pharmacyOwnerId;
+    if (!client || !currentSession || !currentOwnerId) return;
     let active = true;
     let latestRequest = 0;
 
     async function loadReports(
       reportsClient: NonNullable<typeof supabase>,
       reportsSession: NonNullable<typeof session>,
+      reportsOwnerId: string,
       showLoading = false,
     ) {
       const requestId = ++latestRequest;
@@ -641,7 +656,7 @@ export default function ReportsScreen() {
         const { data, error: queryError } = await reportsClient
           .from('pharmacy_app_data')
           .select('data_key, payload')
-          .eq('owner_user_id', reportsSession.user.id)
+          .eq('owner_user_id', reportsOwnerId)
           .in('data_key', [...REPORT_DATA_KEYS]);
         if (queryError) throw queryError;
         const nextData = parseReportData((data ?? []) as { data_key: string; payload: unknown }[]);
@@ -653,27 +668,29 @@ export default function ReportsScreen() {
       }
     }
 
-    void loadReports(client, currentSession, true);
+    void loadReports(client, currentSession, currentOwnerId, true);
     const channel = client
-      .channel(`reports-updates-${currentSession.user.id}-${Date.now()}`)
+      .channel(`reports-updates-${currentOwnerId}-${Date.now()}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'pharmacy_app_data',
-        filter: `owner_user_id=eq.${currentSession.user.id}`,
+        filter: `owner_user_id=eq.${currentOwnerId}`,
       }, (change) => {
         const row = change.eventType === 'DELETE' ? change.old : change.new;
-        if ((REPORT_DATA_KEYS as readonly string[]).includes(row.data_key)) void loadReports(client, currentSession);
+        if ((REPORT_DATA_KEYS as readonly string[]).includes(row.data_key)) {
+          void loadReports(client, currentSession, currentOwnerId);
+        }
       })
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') void loadReports(client, currentSession);
+        if (status === 'SUBSCRIBED') void loadReports(client, currentSession, currentOwnerId);
       });
 
     return () => {
       active = false;
       void client.removeChannel(channel);
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasReportsAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const reportContent = useMemo(
     () => buildReportContent(reportData, activeTab, period, stockFilter, new Date()),
@@ -684,8 +701,8 @@ export default function ReportsScreen() {
       ? 'Reports are unavailable. Check your account connection.'
       : !session
         ? 'Sign in to view reports.'
-        : dashboardRole !== 'owner'
-          ? 'Reports are available to store owners.'
+        : !hasReportsAccess
+          ? 'Report access has not been enabled by your owner.'
           : '');
   const selectedRange = getPeriodRange(period, new Date());
 
@@ -715,7 +732,7 @@ export default function ReportsScreen() {
         {displayError ? (
           <View style={styles.errorPanel}>
             <Text style={styles.errorText}>{displayError}</Text>
-            {error && supabase && session && dashboardRole === 'owner' ? <Pressable accessibilityRole="button" onPress={() => setRetryKey((value) => value + 1)}><Text style={styles.retryText}>Retry</Text></Pressable> : null}
+            {error && supabase && session && hasReportsAccess ? <Pressable accessibilityRole="button" onPress={() => setRetryKey((value) => value + 1)}><Text style={styles.retryText}>Retry</Text></Pressable> : null}
           </View>
         ) : isLoading ? (
           <ActivityIndicator size="large" color="#17664f" style={styles.loader} />

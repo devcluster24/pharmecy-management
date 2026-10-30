@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider, usePathname } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider, usePathname } from 'expo-router';
 import { KeyboardAvoidingView, Platform, StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,8 +8,30 @@ import { LanguageProvider } from '@/providers/LanguageProvider';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const theme = {
+    dark: isDark,
+    colors: isDark
+      ? {
+        primary: '#0a84ff',
+        background: '#010101',
+        card: '#121212',
+        text: '#e5e5e7',
+        border: '#272729',
+        notification: '#ff453a',
+      }
+      : {
+        primary: '#007aff',
+        background: '#f2f2f2',
+        card: '#ffffff',
+        text: '#1c1c1e',
+        border: '#d8d8d8',
+        notification: '#ff3b30',
+      },
+    fonts: DefaultTheme.fonts,
+  };
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={theme}>
       <LanguageProvider>
         <AuthProvider>
           <KeyboardAvoidingView

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useProductCatalogAutoSync } from '@/components/dashboard/ProductCatalogAutoSync';
 import { supabase } from '@/lib/supabase';
@@ -16,8 +17,11 @@ import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 import homeIcon from '../../../assets/images/tabIcons/home.png';
 import inventoryIcon from '../../../assets/images/tabIcons/inventory.png';
 import localShippingIcon from '../../../assets/images/tabIcons/local_shipping.png';
+import localMallIcon from '../../../assets/images/tabIcons/local_mall.png';
 import menuIcon from '../../../assets/images/tabIcons/menu.png';
 import overviewIcon from '../../../assets/images/tabIcons/overview.png';
+import assignmentReturnIcon from '../../../assets/images/tabIcons/assignment_return.png';
+import shoppingCartIcon from '../../../assets/images/tabIcons/shopping_cart.png';
 
 export default function DashboardLayout() {
   const alert = useLocalizedAlert();
@@ -30,6 +34,7 @@ export default function DashboardLayout() {
     profileLoading,
     profileError,
     storeName,
+    staffPermissions,
   } = useAuth();
   const [signOutError, setSignOutError] = useState('');
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -121,18 +126,24 @@ export default function DashboardLayout() {
         ]
       ) : (
         [
-          <NativeTabs.Trigger key="purchase" name="purchase" testID="dashboard-tab-purchase">
-            <NativeTabs.Trigger.Label>{t('Purchase')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="bag.fill" md="shopping_bag" />
-          </NativeTabs.Trigger>,
-          <NativeTabs.Trigger key="sale" name="sale" testID="dashboard-tab-sale">
-            <NativeTabs.Trigger.Label>{t('Sale')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="arrow.left.arrow.right" md="currency_exchange" />
-          </NativeTabs.Trigger>,
-          <NativeTabs.Trigger key="return" name="return" testID="dashboard-tab-return">
-            <NativeTabs.Trigger.Label>{t('Return')}</NativeTabs.Trigger.Label>
-            <NativeTabs.Trigger.Icon sf="arrow.uturn.backward" md="assignment_return" />
-          </NativeTabs.Trigger>,
+          ...(hasDashboardPageAccess('staff', staffPermissions, ['sales', 'purchase']) ? [
+            <NativeTabs.Trigger key="sale" name="sale" testID="dashboard-tab-sale">
+              <NativeTabs.Trigger.Label>{t('Sale')}</NativeTabs.Trigger.Label>
+              <NativeTabs.Trigger.Icon src={shoppingCartIcon} renderingMode="original" />
+            </NativeTabs.Trigger>,
+          ] : []),
+          ...(hasDashboardPageAccess('staff', staffPermissions, 'purchase') ? [
+            <NativeTabs.Trigger key="purchase" name="purchase" testID="dashboard-tab-purchase">
+              <NativeTabs.Trigger.Label>{t('Purchase')}</NativeTabs.Trigger.Label>
+              <NativeTabs.Trigger.Icon src={localMallIcon} renderingMode="original" />
+            </NativeTabs.Trigger>,
+          ] : []),
+          ...(hasDashboardPageAccess('staff', staffPermissions, ['returns', 'sales', 'purchase', 'settings']) ? [
+            <NativeTabs.Trigger key="return" name="return" testID="dashboard-tab-return">
+              <NativeTabs.Trigger.Label>{t('Return')}</NativeTabs.Trigger.Label>
+              <NativeTabs.Trigger.Icon src={assignmentReturnIcon} renderingMode="original" />
+            </NativeTabs.Trigger>,
+          ] : []),
         ]
       )}
 

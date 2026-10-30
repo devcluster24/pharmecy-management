@@ -19,6 +19,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { getCurrencySymbol } from '@/lib/currency';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import {
   cachePharmacySearchData,
   clearCachedPharmacySearchData,
@@ -231,7 +232,19 @@ async function persistPayload(
 
 export default function ReturnScreen() {
   const alert = useLocalizedAlert();
-  const { dashboardRole, isLoading: authLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: authLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasReturnAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'returns',
+  );
   const [screen, setScreen] = useState<Screen>('list');
   const [invoices, setInvoices] = useState<SaleInvoice[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
@@ -265,9 +278,9 @@ export default function ReturnScreen() {
     Math.max(0, line.quantity - quantitiesAlreadyReturned(invoice, line));
 
   useEffect(() => {
-    if (authLoading || profileLoading || dashboardRole !== 'owner' || !session || !supabase) return;
+    if (authLoading || profileLoading || !hasReturnAccess || !session || !supabase || !pharmacyOwnerId) return;
     let active = true;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
     let hasCachedData = false;
 
     function applyReturnData(cached: unknown, isFresh = false) {
@@ -306,13 +319,14 @@ export default function ReturnScreen() {
       }
     }
 
-    const cachedInMemory = getCachedPharmacySearchData<unknown>(ownerId, RETURN_SEARCH_CACHE);
+    const cacheUserId = session.user.id;
+    const cachedInMemory = getCachedPharmacySearchData<unknown>(cacheUserId, RETURN_SEARCH_CACHE);
     if (cachedInMemory !== undefined) {
       try {
         applyReturnData(cachedInMemory);
       } catch (cacheError) {
         console.warn('Ignoring invalid cached Return data.', cacheError);
-        void clearCachedPharmacySearchData(ownerId, RETURN_SEARCH_CACHE);
+        void clearCachedPharmacySearchData(cacheUserId, RETURN_SEARCH_CACHE);
       }
     }
 
@@ -321,13 +335,13 @@ export default function ReturnScreen() {
       setError('');
       try {
         if (!hasCachedData) {
-          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(ownerId, RETURN_SEARCH_CACHE);
+          const cachedOnDisk = await readCachedPharmacySearchData<unknown>(cacheUserId, RETURN_SEARCH_CACHE);
           if (cachedOnDisk !== undefined) {
             try {
               applyReturnData(cachedOnDisk);
             } catch (cacheError) {
               console.warn('Ignoring invalid cached Return data.', cacheError);
-              await clearCachedPharmacySearchData(ownerId, RETURN_SEARCH_CACHE);
+              await clearCachedPharmacySearchData(cacheUserId, RETURN_SEARCH_CACHE);
             }
           }
         }
@@ -346,7 +360,7 @@ export default function ReturnScreen() {
         };
         applyReturnData(nextData, true);
         if (active) {
-          void cachePharmacySearchData(ownerId, RETURN_SEARCH_CACHE, nextData);
+          void cachePharmacySearchData(cacheUserId, RETURN_SEARCH_CACHE, nextData);
         }
       } catch (loadError) {
         if (active) {
@@ -364,7 +378,7 @@ export default function ReturnScreen() {
     return () => {
       active = false;
     };
-  }, [authLoading, dashboardRole, profileLoading, retry, session]);
+  }, [authLoading, dashboardRole, hasReturnAccess, pharmacyOwnerId, profileLoading, retry, session]);
 
   const query = searchValue.trim().toLocaleLowerCase();
   const matchingItems = useMemo(() => {
@@ -681,7 +695,8 @@ export default function ReturnScreen() {
     setError('');
     try {
       const client = supabase;
-      const ownerId = session.user.id;
+      const ownerId = pharmacyOwnerId;
+      if (!ownerId) throw new Error('Pharmacy information is unavailable. Sign in again.');
       const nextPurchase = adjustInventory(selectedItems);
       const purchaseChanged = nextPurchase.some((row, index) => row !== purchaseRows[index]);
       if (purchaseChanged) {
@@ -723,7 +738,7 @@ export default function ReturnScreen() {
   if (authLoading || profileLoading) {
     return <SafeAreaView edges={['top', 'left', 'right']} style={styles.center}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
   }
-  if (dashboardRole !== 'owner') {
+  if (!hasReturnAccess) {
     return (
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.page}>
         <DashboardSubpageHeader subtitle="Returns" onBack={() => router.replace('/dashboard')} />

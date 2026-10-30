@@ -30,5 +30,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "Mobile"]
+  "exclude": [
+    "node_modules",
+    "Mobile",
+    "pharmacy-cluster"
+  ]
 }

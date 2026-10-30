@@ -24,9 +24,10 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false);
 
   if (isLoading) return null;
-  if (session) return <Redirect href="/dashboard" />;
+  if (session && !hasAttemptedLogin) return <Redirect href="/dashboard" />;
 
   async function handleLogin() {
     Keyboard.dismiss();
@@ -45,6 +46,8 @@ export default function LoginScreen() {
     }
 
     setIsSubmitting(true);
+    setHasAttemptedLogin(true);
+    let hasAuthenticated = false;
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -54,6 +57,37 @@ export default function LoginScreen() {
       if (!data.session || !data.user) {
         throw new Error('Sign in did not complete. Please try again.');
       }
+      hasAuthenticated = true;
+
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('role, approval_status')
+        .eq('id', data.user.id)
+        .maybeSingle();
+      if (profileError) throw profileError;
+      if (!profile) throw new Error('Your account profile could not be found.');
+
+      if (profile.role === 'pharmacy_staff' && profile.approval_status !== 'approved') {
+        const title = profile.approval_status === 'suspended'
+          ? 'Staff account inactive'
+          : profile.approval_status === 'rejected'
+            ? 'Staff account not approved'
+            : 'Staff approval pending';
+        const notice = profile.approval_status === 'suspended'
+          ? 'Your pharmacy owner has marked your staff account as inactive. Contact them to restore access.'
+          : profile.approval_status === 'rejected'
+            ? 'Your staff application was not approved. Contact your pharmacy owner.'
+            : 'Your staff account is waiting for approval from your pharmacy owner.';
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (!signOutError) hasAuthenticated = false;
+        alert.alert(
+          title,
+          signOutError ? `${notice}\n\nSign out failed: ${signOutError.message}` : notice,
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
       let activityWarning = '';
       try {
         await recordPharmacySessionActivity('login');
@@ -62,15 +96,19 @@ export default function LoginScreen() {
           ? activityError.message
           : 'Could not record this login in the activity history.';
       }
-      alert.alert(
-        activityWarning ? 'Signed in with a warning' : 'Signed in',
-        activityWarning || 'You are now signed in.',
-        [{ text: 'Continue', onPress: () => router.replace('/dashboard') }],
-      );
+      if (activityWarning) {
+        alert.alert('Signed in with a warning', activityWarning);
+      }
+      router.replace('/dashboard');
     } catch (error) {
+      let message = error instanceof Error ? error.message : 'Could not sign in. Please try again.';
+      if (hasAuthenticated) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) message += ` Sign out failed: ${signOutError.message}`;
+      }
       alert.alert(
         'Sign in failed',
-        error instanceof Error ? error.message : 'Could not sign in. Please try again.',
+        message,
       );
       setIsSubmitting(false);
     }

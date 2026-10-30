@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { useLocalizedAlert, Text, TextInput, useLanguage, useTranslate } from '@/providers/LanguageProvider';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { supabase, supabaseConfigError } from '@/lib/supabase';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -124,7 +125,15 @@ export default function PaymentMethodsSettingsScreen() {
   const { language } = useLanguage();
   const t = useTranslate();
   const isBengali = language === 'bn';
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasSettingsAccess = hasDashboardPageAccess(dashboardRole, staffPermissions, 'settings');
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [methodType, setMethodType] = useState<'mobile' | 'bank'>('mobile');
   const [methodName, setMethodName] = useState('');
@@ -161,15 +170,15 @@ export default function PaymentMethodsSettingsScreen() {
         setIsLoading(true);
         setError('');
         try {
-          if (dashboardRole !== 'owner' || !session) {
-            throw new Error('Payment methods are available to store owners.');
+          if (!hasSettingsAccess || !session || !pharmacyOwnerId) {
+            throw new Error('Settings access has not been enabled by your owner.');
           }
           if (!supabase) throw new Error(supabaseConfigError);
 
           const { data, error: loadError } = await supabase
             .from('pharmacy_app_data')
             .select('payload')
-            .eq('owner_user_id', session.user.id)
+            .eq('owner_user_id', pharmacyOwnerId)
             .eq('data_key', PAYMENT_METHODS_KEY)
             .maybeSingle();
           if (loadError) throw loadError;
@@ -196,7 +205,7 @@ export default function PaymentMethodsSettingsScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, session]);
+  }, [dashboardRole, hasSettingsAccess, isAuthLoading, pharmacyOwnerId, profileLoading, session]);
 
   function resetForm() {
     setMethodType('mobile');
@@ -235,11 +244,13 @@ export default function PaymentMethodsSettingsScreen() {
   }
 
   async function persistMethods(nextMethods: PaymentMethod[], successMessage: string) {
-    if (dashboardRole !== 'owner' || !session) throw new Error('Payment methods are available to store owners.');
+    if (!hasSettingsAccess || !session || !pharmacyOwnerId) {
+      throw new Error('Settings access has not been enabled by your owner.');
+    }
     if (!supabase) throw new Error(supabaseConfigError);
 
     const client = supabase;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
     const existing = await client.from('pharmacy_app_data')
       .select('data_key')
       .eq('owner_user_id', ownerId)
@@ -276,8 +287,8 @@ export default function PaymentMethodsSettingsScreen() {
   async function saveMethod() {
     setMessage('');
     setError('');
-    if (dashboardRole !== 'owner' || !session) {
-      const message = t('Payment methods are available to store owners.');
+    if (!hasSettingsAccess || !session || !pharmacyOwnerId) {
+      const message = t('Settings access has not been enabled by your owner.');
       setError(message);
       alert('Error', message);
       return;

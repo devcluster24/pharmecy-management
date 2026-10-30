@@ -16,6 +16,7 @@ import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/La
 import { getCurrencySymbol } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 const EXPENSES_KEY = 'pharmacy-expenses-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
@@ -122,7 +123,15 @@ function escapeCsvCell(value: string | number) {
 export default function ExpensesScreen() {
   const t = useTranslate();
   const { alert } = useLocalizedAlert();
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasExpensesAccess = hasDashboardPageAccess(dashboardRole, staffPermissions, 'expenses');
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [date, setDate] = useState(todayInputValue);
@@ -145,8 +154,8 @@ export default function ExpensesScreen() {
 
   useFocusEffect(useCallback(() => {
     if (isAuthLoading || profileLoading) return;
-    if (!session || dashboardRole !== 'owner') {
-      setError('Expenses are available to pharmacy owners.');
+    if (!session || !pharmacyOwnerId || !hasExpensesAccess) {
+      setError('Expense access has not been enabled by your owner.');
       setIsLoading(false);
       return;
     }
@@ -157,7 +166,7 @@ export default function ExpensesScreen() {
     }
 
     const client = supabase;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
     const requestId = retryKey;
     let active = true;
     async function loadData() {
@@ -204,7 +213,7 @@ export default function ExpensesScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]));
+  }, [hasExpensesAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]));
 
   const paymentOptions = useMemo(
     () => [{ id: 'cash', label: 'Cash' }, ...paymentMethods.map((method) => ({
@@ -241,11 +250,11 @@ export default function ExpensesScreen() {
   const selectedPaymentLabel = paymentOptions.find((option) => option.id === effectivePaymentMethod)?.label ?? 'Cash';
 
   async function persistExpenses(nextExpenses: ExpenseRecord[]) {
-    if (!supabase || !session || dashboardRole !== 'owner') {
-      throw new Error('Expenses are available to pharmacy owners.');
+    if (!supabase || !session || !pharmacyOwnerId || !hasExpensesAccess) {
+      throw new Error('Expense access has not been enabled by your owner.');
     }
     const client = supabase;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
     const existing = await client.from('pharmacy_app_data')
       .select('data_key')
       .eq('owner_user_id', ownerId)

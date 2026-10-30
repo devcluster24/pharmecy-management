@@ -23,6 +23,7 @@ import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeade
 import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { getInventoryPackPrice, getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import {
@@ -366,8 +367,11 @@ export default function SalesScreen() {
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    pharmacyOwnerId,
+    staffPermissions,
     storeName,
   } = useAuth();
+  const hasSalesAccess = hasDashboardPageAccess(dashboardRole, staffPermissions, 'sales');
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [salesPayload, setSalesPayload] = useState<Record<string, unknown>[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([
@@ -475,12 +479,12 @@ export default function SalesScreen() {
 
   useEffect(() => {
     if (isAuthLoading || profileLoading) return;
-    if (dashboardRole !== 'owner') {
+    if (!hasSalesAccess) {
       router.replace('/dashboard');
       return;
     }
     let active = true;
-    const ownerId = session?.user.id;
+    const ownerId = pharmacyOwnerId;
     let hasCachedData = false;
     function applySaleData(cached: unknown, isFresh = false) {
       if (!isRecord(cached)) throw new Error('Cached sales data has an invalid format.');
@@ -546,7 +550,8 @@ export default function SalesScreen() {
           }
         }
         if (!hasCachedData) setIsLoading(true);
-        const payloads = await loadPharmacySearchPayloads(session.user.id, [
+        if (!ownerId) throw new Error('Pharmacy information is unavailable. Sign in again.');
+        const payloads = await loadPharmacySearchPayloads(ownerId, [
           PURCHASE_KEY,
           SALES_KEY,
           PAYMENT_METHODS_KEY,
@@ -578,7 +583,7 @@ export default function SalesScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasSalesAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const availableInventory = useMemo(() => inventory.filter((row) =>
     row.status.toLocaleLowerCase() === 'received'
@@ -661,7 +666,7 @@ export default function SalesScreen() {
         if (!active || complete) return;
         const recognized = await recognizeText(frameUri);
         if (!active || complete) return;
-        const ownerId = session?.user.id;
+        const ownerId = pharmacyOwnerId;
         const cachedBrands = ownerId
           ? getCachedBrandScanResult(ownerId, 'sales', recognized.text)
           : undefined;
@@ -734,6 +739,7 @@ export default function SalesScreen() {
     availableBrandWordIndex,
     isCameraOpen,
     isCameraReady,
+    pharmacyOwnerId,
     session?.user.id,
   ]);
 
@@ -931,7 +937,8 @@ export default function SalesScreen() {
     setIsSaving(true);
     try {
       const client = supabase;
-      const ownerId = session.user.id;
+      const ownerId = pharmacyOwnerId;
+      if (!ownerId) throw new Error('Pharmacy information is unavailable. Sign in again.');
       const purchaseSaved = await client
         .from('pharmacy_app_data')
         .update({ payload: nextInventory, updated_at: now.toISOString() })
@@ -1036,7 +1043,8 @@ export default function SalesScreen() {
     setIsSaving(true);
     try {
       if (!session) throw new Error('Sign in to load your invoice setup.');
-      const invoiceSettings = await loadInvoiceTemplateSettings(session.user.id);
+      if (!pharmacyOwnerId) throw new Error('Pharmacy information is unavailable. Sign in again.');
+      const invoiceSettings = await loadInvoiceTemplateSettings(pharmacyOwnerId);
       const html = getInvoiceHtml(savedInvoice, storeName, invoiceSettings);
       const pdf = await Print.printToFileAsync({ html, base64: true });
       if (Platform.OS === 'android') {
@@ -1086,7 +1094,8 @@ export default function SalesScreen() {
     setIsSaving(true);
     try {
       if (!session) throw new Error('Sign in to load your invoice setup.');
-      const invoiceSettings = await loadInvoiceTemplateSettings(session.user.id);
+      if (!pharmacyOwnerId) throw new Error('Pharmacy information is unavailable. Sign in again.');
+      const invoiceSettings = await loadInvoiceTemplateSettings(pharmacyOwnerId);
       await Print.printAsync({ html: getInvoiceHtml(savedInvoice, storeName, invoiceSettings) });
     } catch (printError) {
       alert.alert(
@@ -1098,7 +1107,7 @@ export default function SalesScreen() {
     }
   }
 
-  if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
+  if (isAuthLoading || profileLoading || !hasSalesAccess) {
     return (
       <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />

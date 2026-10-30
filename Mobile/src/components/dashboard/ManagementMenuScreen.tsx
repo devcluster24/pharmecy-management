@@ -4,7 +4,7 @@ import {
   useLanguage,
   useLocalizedAlert,
 } from '@/providers/LanguageProvider';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useEffect, useState, type ComponentProps } from 'react';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -37,6 +37,7 @@ import ReturnDeductionSettingsScreen from '@/components/dashboard/ReturnDeductio
 import SubscriptionBillingScreen from '@/components/dashboard/SubscriptionBillingScreen';
 import VatTaxSettingsScreen from '@/components/dashboard/VatTaxSettingsScreen';
 import OwnerHomeScreen from '@/components/dashboard/OwnerHomeScreen';
+import StaffHomeScreen from '@/components/dashboard/StaffHomeScreen';
 import categoryIcon from '../../../assets/images/tabIcons/category.png';
 import cloudSyncIcon from '../../../assets/images/tabIcons/cloud_sync.png';
 import currencyExchangeIcon from '../../../assets/images/tabIcons/currency_exchange.png';
@@ -194,8 +195,16 @@ export default function ManagementMenuScreen({
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    pharmacyOwnerId,
     storeName,
   } = useAuth();
+  const settingChildren = menuEntries.find((entry) => entry.slug === 'setting')?.children ?? [];
+  const visibleSettingChildren = dashboardRole === 'staff'
+    ? settingChildren.filter((entry) => entry.slug === 'language')
+    : settingChildren;
+  const visibleMenuEntries = dashboardRole === 'staff'
+    ? menuEntries.filter((entry) => entry.slug === 'setting' || entry.slug === 'profile')
+    : menuEntries;
   const [isProductSyncExpanded, setIsProductSyncExpanded] = useState(false);
   const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(false);
   const [isAutoSyncLoading, setIsAutoSyncLoading] = useState(true);
@@ -218,14 +227,8 @@ export default function ManagementMenuScreen({
     async function loadAutoSyncPreference() {
       setIsAutoSyncLoading(true);
       try {
-        let ownerId = currentSession.user.id;
-        if (dashboardRole === 'staff') {
-          const { data, error } = await client.rpc('get_my_pharmacy_dashboard_context');
-          if (error) throw error;
-          const context = (data ?? [])[0] as { owner_user_id?: string } | undefined;
-          if (!context?.owner_user_id) throw new Error('Could not resolve the pharmacy account for auto sync.');
-          ownerId = context.owner_user_id;
-        }
+        const ownerId = dashboardRole === 'staff' ? pharmacyOwnerId : currentSession.user.id;
+        if (!ownerId) throw new Error('Could not resolve the pharmacy account for auto sync.');
         const settings = await loadProductAutoSyncSettings(client, ownerId);
         if (active) setIsAutoSyncEnabled(settings.enabled);
         if (active) {
@@ -270,7 +273,7 @@ export default function ManagementMenuScreen({
       active = false;
       removeSettingsChannel?.();
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, session]);
+  }, [dashboardRole, isAuthLoading, pharmacyOwnerId, profileLoading, session]);
 
   function toggleGroup(slug: string, isExpanded: boolean) {
     setExpandedGroup(isExpanded ? null : slug);
@@ -278,6 +281,10 @@ export default function ManagementMenuScreen({
 
   function openPage(slug: string) {
     if (slug === 'language') return;
+    if (dashboardRole === 'staff' && ['currency', 'backup-file'].includes(slug)) {
+      router.replace({ pathname: '/dashboard/menu/[slug]', params: { slug: 'setting' } });
+      return;
+    }
     if (slug === 'staff-management') {
       router.push('/dashboard/menu/staff-management');
       return;
@@ -314,14 +321,8 @@ export default function ManagementMenuScreen({
     setErrorMessage('');
     try {
       const client = supabase;
-      let ownerId = session.user.id;
-      if (dashboardRole === 'staff') {
-        const { data, error } = await client.rpc('get_my_pharmacy_dashboard_context');
-        if (error) throw error;
-        const context = (data ?? [])[0] as { owner_user_id?: string } | undefined;
-        if (!context?.owner_user_id) throw new Error('Could not resolve the pharmacy account for auto sync.');
-        ownerId = context.owner_user_id;
-      }
+      const ownerId = dashboardRole === 'staff' ? pharmacyOwnerId : session.user.id;
+      if (!ownerId) throw new Error('Could not resolve the pharmacy account for auto sync.');
       const settings = await saveProductAutoSyncSettings(client, ownerId, !isAutoSyncEnabled);
       setIsAutoSyncEnabled(settings.enabled);
     } catch (saveError) {
@@ -362,7 +363,79 @@ export default function ManagementMenuScreen({
     }
   }
 
+  if (
+    dashboardRole === 'staff'
+    && (activeSlug === 'currency' || activeSlug === 'backup-file')
+  ) {
+    return (
+      <Redirect
+        href={{ pathname: '/dashboard/menu/[slug]', params: { slug: 'setting' } }}
+      />
+    );
+  }
+
   if (activeSlug) {
+    if (activeSlug === 'setting') {
+      return (
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
+          <DashboardSubpageHeader
+            subtitle={pageTitle}
+            onBack={() => router.replace('/dashboard/menu')}
+          />
+          <ScrollView style={styles.pageContent} contentContainerStyle={styles.settingShortcuts}>
+            {visibleSettingChildren.map((entry) => (
+              <View key={entry.slug} style={styles.settingShortcutRow}>
+                <View style={styles.settingShortcutHeading}>
+                  <Image
+                    alt=""
+                    source={menuIcons[entry.slug] ?? settingsSuggestIcon}
+                    contentFit="contain"
+                    style={styles.menuIcon}
+                  />
+                  <Text style={styles.settingShortcutTitle}>{entry.label}</Text>
+                </View>
+                {entry.slug === 'language' ? (
+                  <View style={styles.settingLanguageOptions}>
+                    {([
+                      { key: 'en', label: 'Eng' },
+                      { key: 'bn', label: 'বাং' },
+                    ] as const).map((option) => (
+                      <Pressable
+                        key={option.key}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: language === option.key }}
+                        onPress={() => void chooseLanguage(option.key)}
+                        style={[
+                          styles.languageButton,
+                          language === option.key && styles.languageButtonSelected,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.languageButtonText,
+                            language === option.key && styles.languageButtonTextSelected,
+                          ]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => openPage(entry.slug)}
+                    style={styles.settingShortcutButton}>
+                    <Text style={styles.settingShortcutButtonText}>Open</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+            {errorMessage || languageError || currencyError ? (
+              <Text style={styles.errorMessage}>{errorMessage || languageError || currencyError}</Text>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
     if (activeSlug === 'payment-methord') {
       return (
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
@@ -641,7 +714,7 @@ export default function ManagementMenuScreen({
         </View>
         {entry.children && isExpanded ? (
           <View>
-            {entry.children.map((child) => (
+            {(entry.slug === 'setting' ? visibleSettingChildren : entry.children).map((child) => (
               <View key={child.slug}>
                 {renderEntry(child, true)}
                 {child.slug === 'pharmacy-product-management' && isProductSyncExpanded ? (
@@ -683,7 +756,9 @@ export default function ManagementMenuScreen({
       <View style={styles.homeBackground}>
         {dashboardRole === 'owner'
           ? <OwnerHomeScreen />
-          : <DashboardTabScreen title="Welcome Dashboard" />}
+          : dashboardRole === 'staff'
+            ? <StaffHomeScreen />
+            : <DashboardTabScreen title="Welcome Dashboard" />}
       </View>
       <Pressable
         accessibilityRole="button"
@@ -702,7 +777,7 @@ export default function ManagementMenuScreen({
           />
           <Text style={styles.sidebarTitle}>Cluster Menu</Text>
         </View>
-        {menuEntries.map((entry) => renderEntry(entry))}
+        {visibleMenuEntries.map((entry) => renderEntry(entry))}
         {errorMessage || languageError ? (
           <Text style={styles.errorMessage}>{errorMessage || languageError}</Text>
         ) : null}
@@ -856,6 +931,50 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 20,
+  },
+  settingShortcuts: {
+    padding: 18,
+    gap: 10,
+  },
+  settingShortcutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: '#e4eae1',
+    borderRadius: 12,
+    backgroundColor: '#fffefa',
+  },
+  settingShortcutHeading: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  settingShortcutTitle: {
+    color: '#183c31',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  settingLanguageOptions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  settingShortcutButton: {
+    minWidth: 62,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#e8f0e8',
+  },
+  settingShortcutButtonText: {
+    color: '#17664f',
+    fontSize: 11,
+    fontWeight: '700',
   },
   sidebar: {
     backgroundColor: '#f2f4ef',

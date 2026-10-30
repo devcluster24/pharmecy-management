@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { supabase } from '@/lib/supabase';
 
 type ProductRow = {
@@ -176,7 +177,12 @@ function Field({
 
 export default function ProductManagementScreen({ isAddPage = false }: { isAddPage?: boolean }) {
   const { alert } = useLocalizedAlert();
-  const { dashboardRole, session } = useAuth();
+  const { dashboardRole, session, pharmacyOwnerId, staffPermissions } = useAuth();
+  const hasProductManagementAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'product-management',
+  );
   const [ownerId, setOwnerId] = useState('');
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [productCount, setProductCount] = useState(0);
@@ -231,17 +237,12 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
     let active = true;
     async function initialize() {
       try {
-        const { data: { session }, error: sessionError } = await supabase!.auth.getSession();
-        if (sessionError) throw sessionError;
-        if (!session?.user) throw new Error('Sign in to manage pharmacy products.');
-        let resolvedOwnerId = session.user.id;
-        if (dashboardRole === 'staff') {
-          const { data, error: contextError } = await supabase!.rpc('get_my_pharmacy_dashboard_context');
-          if (contextError) throw contextError;
-          const context = (data ?? [])[0] as { owner_user_id?: string } | undefined;
-          if (!context?.owner_user_id) throw new Error('Could not find the pharmacy linked to this staff account.');
-          resolvedOwnerId = context.owner_user_id;
+        if (!hasProductManagementAccess) {
+          throw new Error('Product management access has not been enabled by your owner.');
         }
+        if (!session?.user) throw new Error('Sign in to manage pharmacy products.');
+        const resolvedOwnerId = dashboardRole === 'staff' ? pharmacyOwnerId : session.user.id;
+        if (!resolvedOwnerId) throw new Error('Could not find the pharmacy linked to this staff account.');
         if (!active) return;
         setOwnerId(resolvedOwnerId);
         await loadProducts(1, '', resolvedOwnerId);
@@ -255,7 +256,7 @@ export default function ProductManagementScreen({ isAddPage = false }: { isAddPa
     return () => {
       active = false;
     };
-  }, [dashboardRole, loadProducts]);
+  }, [dashboardRole, hasProductManagementAccess, loadProducts, pharmacyOwnerId, session]);
 
   useEffect(() => {
     if (!ownerId || isAddPage) return;

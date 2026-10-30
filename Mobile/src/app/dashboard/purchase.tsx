@@ -1,5 +1,5 @@
-import { Redirect } from 'expo-router';
+import PurchaseScreen from '../purchase';
 
-export default function PurchaseScreen() {
-  return <Redirect href="/purchase" />;
+export default function PurchaseScreenRoute() {
+  return <PurchaseScreen />;
 }

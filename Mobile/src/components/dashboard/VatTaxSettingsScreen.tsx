@@ -1,6 +1,7 @@
 import { supabase, supabaseConfigError } from '@/lib/supabase';
 import { Text, TextInput, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export default function VatTaxSettingsScreen() {
   const { alert } = useLocalizedAlert();
   const t = useTranslate();
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasSettingsAccess = hasDashboardPageAccess(dashboardRole, staffPermissions, 'settings');
   const [rate, setRate] = useState('0');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -34,15 +43,15 @@ export default function VatTaxSettingsScreen() {
         setIsLoading(true);
         setError('');
         try {
-          if (dashboardRole !== 'owner' || !session) {
-            throw new Error('VAT/TAX settings are available to store owners.');
+          if (!hasSettingsAccess || !session || !pharmacyOwnerId) {
+            throw new Error('Settings access has not been enabled by your owner.');
           }
           if (!supabase) throw new Error(supabaseConfigError);
 
           const { data, error: loadError } = await supabase
             .from('pharmacy_app_data')
             .select('payload')
-            .eq('owner_user_id', session.user.id)
+            .eq('owner_user_id', pharmacyOwnerId)
             .eq('data_key', VAT_TAX_SETTINGS_KEY)
             .maybeSingle();
           if (loadError) throw loadError;
@@ -74,7 +83,7 @@ export default function VatTaxSettingsScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, session]);
+  }, [dashboardRole, hasSettingsAccess, isAuthLoading, pharmacyOwnerId, profileLoading, session]);
 
   async function saveRate() {
     const value = Number(rate);
@@ -85,8 +94,8 @@ export default function VatTaxSettingsScreen() {
       setMessage('');
       return;
     }
-    if (dashboardRole !== 'owner' || !session) {
-      const message = t('VAT/TAX settings are available to store owners.');
+    if (!hasSettingsAccess || !session || !pharmacyOwnerId) {
+      const message = t('Settings access has not been enabled by your owner.');
       setError(message);
       alert('Error', message);
       setMessage('');
@@ -106,7 +115,7 @@ export default function VatTaxSettingsScreen() {
     setMessage('');
     try {
       const client = supabase;
-      const ownerId = session.user.id;
+      const ownerId = pharmacyOwnerId;
       const existing = await client.from('pharmacy_app_data')
         .select('data_key')
         .eq('owner_user_id', ownerId)
@@ -160,7 +169,7 @@ export default function VatTaxSettingsScreen() {
             <ActivityIndicator color="#17664f" />
             <Text style={styles.helperText}>{t('Loading VAT/TAX settings…')}</Text>
           </View>
-        ) : dashboardRole === 'owner' ? (
+        ) : hasSettingsAccess ? (
           <>
             <View style={styles.card}>
               <Text style={styles.label}>{t('Default VAT/TAX rate (%)')}</Text>

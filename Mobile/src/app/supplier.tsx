@@ -16,6 +16,7 @@ import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeade
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/recorded-payments';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
@@ -233,7 +234,14 @@ export default function SupplierScreen() {
     isLoading: isAuthLoading,
     profileLoading,
     session,
+    pharmacyOwnerId,
+    staffPermissions,
   } = useAuth();
+  const hasSupplierAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'suppliers',
+  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [duePaymentsLedger, setDuePaymentsLedger] = useState<Record<string, DueEntry[]>>({});
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([
@@ -253,7 +261,7 @@ export default function SupplierScreen() {
 
   useEffect(() => {
     if (isAuthLoading || profileLoading) return;
-    if (dashboardRole !== 'owner') {
+    if (!hasSupplierAccess) {
       router.replace('/dashboard');
       return;
     }
@@ -263,13 +271,13 @@ export default function SupplierScreen() {
       setIsLoading(true);
       setError('');
       try {
-        if (!supabase || !session) {
+        if (!supabase || !session || !pharmacyOwnerId) {
           throw new Error('Supplier data is unavailable. Check your account connection.');
         }
         const result = await supabase
           .from('pharmacy_app_data')
           .select('data_key, payload')
-          .eq('owner_user_id', session.user.id)
+          .eq('owner_user_id', pharmacyOwnerId)
           .in('data_key', [
             PURCHASE_KEY,
             PAYMENT_METHODS_KEY,
@@ -304,7 +312,7 @@ export default function SupplierScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasSupplierAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const filteredSuppliers = useMemo(() => {
     const query = searchValue.trim().toLocaleLowerCase();
@@ -373,7 +381,11 @@ export default function SupplierScreen() {
     }
 
     const client = supabase;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
+    if (!ownerId) {
+      setPaymentError('Pharmacy information is unavailable. Sign in again.');
+      return;
+    }
     const supplier = selectedDueSupplier;
     const nextEntry: DueEntry = {
       amount: Number(amount.toFixed(2)),
@@ -443,7 +455,7 @@ export default function SupplierScreen() {
     }
   }
 
-  if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
+  if (isAuthLoading || profileLoading || !hasSupplierAccess) {
     return (
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />

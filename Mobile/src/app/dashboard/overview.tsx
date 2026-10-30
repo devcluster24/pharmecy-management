@@ -18,6 +18,7 @@ import {
   type PaymentTotal,
 } from '@/lib/recorded-payments';
 import { useAuth } from '@/providers/AuthProvider';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 
 type OverviewPeriod = 'Daily' | 'Weekly' | 'Monthly';
 type SalesInvoice = {
@@ -290,7 +291,19 @@ function formatQuantity(amount: number) {
 }
 
 export default function OverviewScreen() {
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasOverviewAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'overview',
+  );
   const [data, setData] = useState<OverviewData | null>(null);
   const [period, setPeriod] = useState<OverviewPeriod>('Daily');
   const [isLoading, setIsLoading] = useState(true);
@@ -300,10 +313,10 @@ export default function OverviewScreen() {
   const todayKey = getLocalDateKey(now);
 
   useEffect(() => {
-    if (isAuthLoading || profileLoading || dashboardRole !== 'owner') return;
+    if (isAuthLoading || profileLoading || !hasOverviewAccess) return;
     let active = true;
     async function loadOverview() {
-      if (!supabase || !session) {
+      if (!supabase || !session || !pharmacyOwnerId) {
         setError('Overview data is unavailable. Check your account connection.');
         setIsLoading(false);
         return;
@@ -314,7 +327,7 @@ export default function OverviewScreen() {
         const { data: rows, error: queryError } = await supabase
           .from('pharmacy_app_data')
           .select('data_key, payload')
-          .eq('owner_user_id', session.user.id)
+          .eq('owner_user_id', pharmacyOwnerId)
           .in('data_key', [
             'pharmacy-sales-list-v1',
             'pharmacy-purchase-list-v1',
@@ -367,7 +380,7 @@ export default function OverviewScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retryKey, session]);
+  }, [dashboardRole, hasOverviewAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retryKey, session]);
 
   const metrics = useMemo(() => {
     if (!data || !todayKey) return [];
@@ -594,7 +607,7 @@ export default function OverviewScreen() {
     return { fastMoving, deadStock };
   }, [data, now, todayKey]);
 
-  if (isAuthLoading || profileLoading || dashboardRole !== 'owner') {
+  if (isAuthLoading || profileLoading || !hasOverviewAccess) {
     return (
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.centered}>
         <ActivityIndicator size="large" color="#17664f" />

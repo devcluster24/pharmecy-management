@@ -20,6 +20,7 @@ import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeade
 import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { getCurrencySymbol } from '@/lib/currency';
 import { getInventoryUnitPrice } from '@/lib/inventory-pricing';
+import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import {
   cachePharmacySearchData,
   clearCachedPharmacySearchData,
@@ -339,7 +340,19 @@ function parseScannedBatchDetails(text: string): ScannedBatchDetails {
 
 export default function PurchaseScreen() {
   const alert = useLocalizedAlert();
-  const { dashboardRole, isLoading: isAuthLoading, profileLoading, session } = useAuth();
+  const {
+    dashboardRole,
+    isLoading: isAuthLoading,
+    profileLoading,
+    session,
+    pharmacyOwnerId,
+    staffPermissions,
+  } = useAuth();
+  const hasPurchaseAccess = hasDashboardPageAccess(
+    dashboardRole,
+    staffPermissions,
+    'purchase',
+  );
   const [listType, setListType] = useState<ListType>('place');
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
   const [placeRows, setPlaceRows] = useState<PurchaseRow[]>([]);
@@ -390,12 +403,14 @@ export default function PurchaseScreen() {
 
   useEffect(() => {
     if (isAuthLoading || profileLoading) return;
-    if (dashboardRole !== 'owner') {
+    if (!hasPurchaseAccess) {
       return;
     }
     const client = supabase;
     const currentSession = session;
-    if (!client || !currentSession) return;
+    const currentOwnerId = pharmacyOwnerId;
+    if (!client || !currentSession || !currentOwnerId) return;
+    const activeOwnerId = currentOwnerId;
     const purchaseClient = client;
     const purchaseSession = currentSession;
     let active = true;
@@ -459,7 +474,7 @@ export default function PurchaseScreen() {
           }
         }
         if (!hasCachedData) setIsLoading(true);
-        const payloads = await loadPharmacySearchPayloads(purchaseSession.user.id, [
+        const payloads = await loadPharmacySearchPayloads(activeOwnerId, [
           PURCHASE_KEY,
           PLACE_ORDER_KEY,
           PAYMENT_METHODS_KEY,
@@ -492,7 +507,7 @@ export default function PurchaseScreen() {
         event: '*',
         schema: 'public',
         table: 'pharmacy_app_data',
-        filter: `owner_user_id=eq.${purchaseSession.user.id}`,
+        filter: `owner_user_id=eq.${activeOwnerId}`,
       }, (change) => {
         const row = change.eventType === 'DELETE' ? change.old : change.new;
         if (row.data_key === PURCHASE_KEY || row.data_key === PLACE_ORDER_KEY || row.data_key === PAYMENT_METHODS_KEY) {
@@ -504,13 +519,15 @@ export default function PurchaseScreen() {
       active = false;
       void purchaseClient.removeChannel(channel);
     };
-  }, [dashboardRole, isAuthLoading, profileLoading, retry, session]);
+  }, [dashboardRole, hasPurchaseAccess, isAuthLoading, pharmacyOwnerId, profileLoading, retry, session]);
 
   useEffect(() => {
-    if (isAuthLoading || profileLoading || dashboardRole !== 'owner') return;
+    if (isAuthLoading || profileLoading || !hasPurchaseAccess) return;
     const client = supabase;
     const currentSession = session;
-    if (!client || !currentSession) return;
+    const currentOwnerId = pharmacyOwnerId;
+    if (!client || !currentSession || !currentOwnerId) return;
+    const activeOwnerId = currentOwnerId;
     const catalogSession = currentSession;
     let active = true;
     let hasCachedCatalog = false;
@@ -563,7 +580,7 @@ export default function PurchaseScreen() {
           }
         }
         if (!hasCachedCatalog) setIsCatalogLoading(true);
-        const nextProducts = await loadPharmacyProductCatalog(catalogSession.user.id);
+        const nextProducts = await loadPharmacyProductCatalog(activeOwnerId);
         if (!active) return;
         applyCatalogData({ products: nextProducts }, true);
       } catch (loadError) {
@@ -582,7 +599,7 @@ export default function PurchaseScreen() {
     return () => {
       active = false;
     };
-  }, [catalogRetry, dashboardRole, isAuthLoading, profileLoading, session]);
+  }, [catalogRetry, dashboardRole, hasPurchaseAccess, isAuthLoading, pharmacyOwnerId, profileLoading, session]);
 
   useEffect(() => {
     if (!pendingReceiveRow || selectedGroup) return;
@@ -1006,9 +1023,9 @@ export default function PurchaseScreen() {
   }
 
   async function persistRows(key: string, rows: PurchaseRow[]) {
-    if (!supabase || !session) throw new Error('Sign in to save purchase orders.');
+    if (!supabase || !session || !pharmacyOwnerId) throw new Error('Sign in to save purchase orders.');
     const client = supabase;
-    const ownerId = session.user.id;
+    const ownerId = pharmacyOwnerId;
     const existing = await client.from('pharmacy_app_data')
       .select('data_key')
       .eq('owner_user_id', ownerId)
@@ -1332,7 +1349,7 @@ export default function PurchaseScreen() {
     return <SafeAreaView style={styles.loading}><ActivityIndicator size="large" color="#17664f" /></SafeAreaView>;
   }
 
-  if (dashboardRole !== 'owner') {
+  if (!hasPurchaseAccess) {
     return (
       <SafeAreaView style={styles.page}>
         <DashboardSubpageHeader subtitle="Purchase" onBack={() => router.replace('/dashboard')} />

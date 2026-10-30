@@ -61,6 +61,7 @@ const staffPages = [
   { key: 'expenses', label: 'Expenses' },
   { key: 'settings', label: 'Setting' },
 ];
+const mandatoryPermissions = ['sales', 'purchase', 'returns'] as const;
 const webAppUrl = process.env.EXPO_PUBLIC_WEB_APP_URL?.replace(/\/+$/, '');
 
 function getErrorMessage(error: unknown) {
@@ -68,13 +69,22 @@ function getErrorMessage(error: unknown) {
 }
 
 function normalizePermissions(permissions: StaffPermissions) {
-  return Object.fromEntries(
-    Object.entries(permissions).map(([key, value]) => [key, typeof value === 'boolean' ? value : false]),
-  );
+  return {
+    ...Object.fromEntries(
+      Object.entries(permissions).map(([key, value]) => [key, typeof value === 'boolean' ? value : false]),
+    ),
+    ...Object.fromEntries(mandatoryPermissions.map((key) => [key, true])),
+  };
+}
+
+function isMandatoryPermission(page: string) {
+  return mandatoryPermissions.some((permission) => permission === page);
 }
 
 function getInitialPermissions(role: StaffRole): StaffPermissions {
-  return Object.fromEntries(staffPages.map((page) => [page.key, pageAccess[role].includes(page.key)]));
+  return normalizePermissions(
+    Object.fromEntries(staffPages.map((page) => [page.key, pageAccess[role].includes(page.key)])),
+  );
 }
 
 function hasPageAccess(permissions: StaffPermissions, page: string) {
@@ -360,14 +370,20 @@ export default function StaffManagementScreen({ actionPage = false }: { actionPa
                       <Pressable
                         key={page.key}
                         accessibilityRole="checkbox"
-                        accessibilityState={{ checked: hasPageAccess(permissions, page.key) }}
+                        accessibilityState={{
+                          checked: isMandatoryPermission(page.key) || hasPageAccess(permissions, page.key),
+                          disabled: isMandatoryPermission(page.key),
+                        }}
+                        disabled={isMandatoryPermission(page.key)}
                         onPress={() => setPermissions((current) => ({
                           ...current,
                           [page.key]: !hasPageAccess(current, page.key),
                         }))}
                         style={styles.optionRow}>
                         <Text style={styles.optionLabel}>
-                          {hasPageAccess(permissions, page.key) ? '☑' : '☐'}  {page.label}
+                          {isMandatoryPermission(page.key) || hasPageAccess(permissions, page.key)
+                            ? '☑' : '☐'}  {page.label}
+                          {isMandatoryPermission(page.key) ? ' (Mandatory)' : ''}
                         </Text>
                       </Pressable>
                     ))}
