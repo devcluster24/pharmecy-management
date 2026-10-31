@@ -2,7 +2,7 @@ import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider
 import { router } from 'expo-router';
 import { Camera, CameraView } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -42,8 +42,19 @@ const SCAN_TIMEOUT_MS = 5000;
 
 type ScannedBatchDetails = {
   batchNumber?: string;
+  suggestedBatchNumber?: string;
   mfgDate?: string;
   expDate?: string;
+};
+
+type OcrLine = {
+  text: string;
+  frame?: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
 };
 
 type PurchaseRow = {
@@ -278,64 +289,120 @@ function parseOcrMonthYear(value: string) {
   return undefined;
 }
 
-function parseScannedBatchDetails(text: string): ScannedBatchDetails {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const findLabelDate = (labelPattern: RegExp) => {
-    const labelIndex = lines.findIndex((line) => labelPattern.test(line));
-    if (labelIndex < 0) return undefined;
-    const labeledLine = lines[labelIndex];
-    const labelMatch = labelPattern.exec(labeledLine);
-    if (labelMatch) {
-      const afterLabel = labeledLine.slice(labelMatch.index + labelMatch[0].length);
-      const nextDateLabel = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?|exp|expiry|expires?|expiration|use\s*by)\b/i;
-      const nextLabelIndex = afterLabel.search(nextDateLabel);
-      const sameLineDate = parseOcrMonthYear(
-        nextLabelIndex >= 0 ? afterLabel.slice(0, nextLabelIndex) : afterLabel,
-      );
+function parseScannedBatchDetails(text: string, recognizedLines: OcrLine[] = []): ScannedBatchDetails {
+  const lines: OcrLine[] = (recognizedLines.length
+    ? recognizedLines.map(({ text: lineText, frame }) => ({ text: lineText.trim(), frame }))
+    : text.split(/\r?\n/).map((lineText) => ({ text: lineText.trim() })))
+    .filter(({ text: lineText }) => lineText);
+  const batchLabel = /\b(?:batch(?:\s*(?:no|number))?|lot(?:\s*(?:no|number))?|b\.?\s*no\.?)\b\.?\s*[:#.-]?\s*/i;
+  const mfgLabel = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)(?:\s*\.?\s*date)?\b\.?\s*[:#.-]?\s*/i;
+  const expLabel = /\b(?:exp|expiry|expires?|expiration|use\s*by)(?:\s*\.?\s*date)?\b\.?\s*[:#.-]?\s*/i;
+  const anyFieldLabel = /(?:\b(?:batch(?:\s*(?:no|number))?|lot(?:\s*(?:no|number))?|b\.?\s*no\.?)\b|\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)|exp|expiry|expires?|expiration|use\s*by)\b)/i;
+
+  function getValueAfterLabel(lineText: string, label: RegExp) {
+    const match = label.exec(lineText);
+    if (!match) return undefined;
+    const value = lineText.slice(match.index + match[0].length);
+    const nextLabelIndex = value.search(anyFieldLabel);
+    return (nextLabelIndex >= 0 ? value.slice(0, nextLabelIndex) : value).trim();
+  }
+
+  function nearbyValue(labelIndex: number, labelFrame: OcrLine['frame'], isDate: boolean) {
+    const candidates = lines.flatMap((line, index) => {
+      if (
+        index === labelIndex
+        || anyFieldLabel.test(line.text)
+        || /\b(?:price|mrp|tk|vat|indicative)\b/i.test(line.text)
+      ) return [];
+      const value = isDate ? parseOcrMonthYear(line.text) : normalizeBatchNumber(line.text);
+      if (!value) return [];
+      const indexDistance = Math.abs(index - labelIndex);
+      let score = indexDistance + (index < labelIndex ? 0.5 : 0);
+      if (labelFrame && line.frame) {
+        const labelCenterY = labelFrame.top + labelFrame.height / 2;
+        const lineCenterY = line.frame.top + line.frame.height / 2;
+        const labelCenterX = labelFrame.left + labelFrame.width / 2;
+        const lineCenterX = line.frame.left + line.frame.width / 2;
+        const verticalDistance = Math.abs(labelCenterY - lineCenterY)
+          / Math.max(labelFrame.height, line.frame.height, 1);
+        const horizontalDistance = Math.abs(labelCenterX - lineCenterX)
+          / Math.max(labelFrame.height, line.frame.height, 1);
+        score = verticalDistance + horizontalDistance * 0.15;
+      }
+      if (score > 4) return [];
+      return [{ value, score }];
+    });
+    return candidates.sort((left, right) => left.score - right.score)[0]?.value;
+  }
+
+  function findDate(label: RegExp) {
+    for (const [index, line] of lines.entries()) {
+      if (!label.test(line.text)) continue;
+      const value = getValueAfterLabel(line.text, label);
+      const sameLineDate = value && parseOcrMonthYear(value);
       if (sameLineDate) return sameLineDate;
-    }
-    for (const lineIndex of [labelIndex + 1, labelIndex - 1]) {
-      if (lineIndex < 0 || lineIndex >= lines.length) continue;
-      const date = parseOcrMonthYear(lines[lineIndex]);
-      if (date) return date;
+      const nearbyDate = nearbyValue(index, line.frame, true);
+      if (nearbyDate) return nearbyDate;
     }
     return undefined;
-  };
-  const mfgIndex = lines.findIndex((line) => /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i.test(line));
-  let batchNumber: string | undefined;
-  if (mfgIndex >= 0) {
-    const batchLabelPattern = /\b(?:batch|lot|b\.?\s*no\.?)\b/i;
-    const mfgLabelPattern = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i;
-    for (let index = mfgIndex; index >= Math.max(0, mfgIndex - 5); index -= 1) {
-      const line = lines[index];
-      if (!batchLabelPattern.test(line)) continue;
-      const mfgPosition = line.search(mfgLabelPattern);
-      const candidate = mfgPosition >= 0 ? line.slice(0, mfgPosition) : line;
-      const digits = candidate.replace(/\D/g, '');
-      if (digits) {
-        batchNumber = digits;
-        break;
-      }
-    }
-    if (!batchNumber) {
-      for (let index = mfgIndex - 1; index >= Math.max(0, mfgIndex - 5); index -= 1) {
-        const line = lines[index];
-        if (parseOcrMonthYear(line)) continue;
-        const digits = line.replace(/\D/g, '');
-        if (digits) {
-          batchNumber = digits;
-          break;
-        }
-      }
-    }
   }
-  const mfgDate = findLabelDate(/\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)\b/i);
-  const expDate = findLabelDate(/\b(?:exp|expiry|expires?|expiration|use\s*by)\b/i);
+
+  function findBatchNumberAboveMfg() {
+    const mfgIndex = lines.findIndex((line) => mfgLabel.test(line.text));
+    if (mfgIndex < 0) return undefined;
+    const mfgLine = lines[mfgIndex];
+    const candidates = lines.flatMap((line, index) => {
+      if (
+        index === mfgIndex
+        || anyFieldLabel.test(line.text)
+        || /\b(?:price|mrp|tk|vat|indicative)\b/i.test(line.text)
+        || parseOcrMonthYear(line.text)
+      ) return [];
+      if (mfgLine.frame && line.frame) {
+        const mfgCenterY = mfgLine.frame.top + mfgLine.frame.height / 2;
+        const lineCenterY = line.frame.top + line.frame.height / 2;
+        if (lineCenterY >= mfgCenterY) return [];
+      } else if (index >= mfgIndex) {
+        return [];
+      }
+      const value = normalizeBatchNumber(line.text);
+      if (!value || !/\d/.test(value) || parseOcrMonthYear(value)) return [];
+      const distance = mfgLine.frame && line.frame
+        ? mfgLine.frame.top - line.frame.top
+        : mfgIndex - index;
+      return [{ value, distance }];
+    });
+    return candidates.sort((left, right) => left.distance - right.distance)[0]?.value;
+  }
+
+  let batchNumber: string | undefined;
+  for (const [index, line] of lines.entries()) {
+    if (!batchLabel.test(line.text)) continue;
+    const value = getValueAfterLabel(line.text, batchLabel);
+    const sameLineBatch = value && normalizeBatchNumber(value);
+    if (sameLineBatch) {
+      batchNumber = sameLineBatch;
+      break;
+    }
+    batchNumber = nearbyValue(index, line.frame, false);
+    if (batchNumber) break;
+  }
+  const suggestedBatchNumber = batchNumber ? undefined : findBatchNumberAboveMfg();
+  const mfgDate = findDate(mfgLabel);
+  const expDate = findDate(expLabel);
   return {
     ...(batchNumber ? { batchNumber } : {}),
+    ...(suggestedBatchNumber ? { suggestedBatchNumber } : {}),
     ...(mfgDate ? { mfgDate } : {}),
     ...(expDate ? { expDate } : {}),
   };
+}
+
+function normalizeBatchNumber(value: string) {
+  const candidate = value.match(/[A-Za-z0-9](?:[\s-]*[A-Za-z0-9])*/)?.[0];
+  if (!candidate || parseOcrMonthYear(candidate)) return undefined;
+  const compact = candidate.replace(/\s+/g, '');
+  return compact.length >= 2 ? compact : undefined;
 }
 
 export default function PurchaseScreen() {
@@ -388,6 +455,7 @@ export default function PurchaseScreen() {
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
   const [batchScanMessage, setBatchScanMessage] = useState('');
+  const [batchNumberSuggestion, setBatchNumberSuggestion] = useState('');
   const cameraRef = useRef<CameraView | null>(null);
   const expDateInputRef = useRef<TextInput>(null);
   const batchInputRefs = useRef<Record<BatchField, TextInput | null>>({
@@ -682,29 +750,83 @@ export default function PurchaseScreen() {
     if (!isBatchScannerOpen || !isCameraReady) return;
     let active = true;
     let complete = false;
+    let framesScanned = 0;
     let frameTimeout: ReturnType<typeof setTimeout> | undefined;
-    const bestScan: ScannedBatchDetails = {};
+    const scanVotes = {
+      batchNumber: new Map<string, number>(),
+      suggestedBatchNumber: new Map<string, number>(),
+      mfgDate: new Map<string, number>(),
+      expDate: new Map<string, number>(),
+    };
+
+    function bestScan(): ScannedBatchDetails {
+      const mostFrequent = (votes: Map<string, number>) => [...votes.entries()]
+        .sort((left, right) => right[1] - left[1])[0]?.[0];
+      return {
+        batchNumber: mostFrequent(scanVotes.batchNumber),
+        suggestedBatchNumber: mostFrequent(scanVotes.suggestedBatchNumber),
+        mfgDate: mostFrequent(scanVotes.mfgDate),
+        expDate: mostFrequent(scanVotes.expDate),
+      };
+    }
+
+    function recordScan(details: ScannedBatchDetails) {
+      if (details.batchNumber) {
+        scanVotes.batchNumber.set(
+          details.batchNumber,
+          (scanVotes.batchNumber.get(details.batchNumber) ?? 0) + 1,
+        );
+      }
+      if (details.suggestedBatchNumber) {
+        scanVotes.suggestedBatchNumber.set(
+          details.suggestedBatchNumber,
+          (scanVotes.suggestedBatchNumber.get(details.suggestedBatchNumber) ?? 0) + 1,
+        );
+      }
+      if (details.mfgDate) {
+        scanVotes.mfgDate.set(details.mfgDate, (scanVotes.mfgDate.get(details.mfgDate) ?? 0) + 1);
+      }
+      if (details.expDate) {
+        scanVotes.expDate.set(details.expDate, (scanVotes.expDate.get(details.expDate) ?? 0) + 1);
+      }
+    }
 
     function applyBatchDetails(details: ScannedBatchDetails) {
       setForm((current) => ({
         ...current,
-        ...(details.batchNumber ? { batchNumber: details.batchNumber } : {}),
         ...(details.mfgDate ? { mfgDate: details.mfgDate } : {}),
         ...(details.expDate ? { expDate: details.expDate } : {}),
       }));
     }
 
-    const scanTimeout = setTimeout(() => {
+    function finishScan() {
       if (!active || complete) return;
       complete = true;
-      applyBatchDetails(bestScan);
+      const details = bestScan();
+      const batchVoteCount = details.batchNumber
+        ? scanVotes.batchNumber.get(details.batchNumber) ?? 0
+        : 0;
+      const confirmedBatchNumber = batchVoteCount >= 2 ? details.batchNumber : undefined;
+      applyBatchDetails(details);
+      if (confirmedBatchNumber) {
+        setForm((current) => ({ ...current, batchNumber: confirmedBatchNumber }));
+      }
+      setBatchNumberSuggestion(
+        confirmedBatchNumber ? '' : details.batchNumber ?? details.suggestedBatchNumber ?? '',
+      );
       setIsRecognizingFrame(false);
       setBatchScanMessage(
-        Object.keys(bestScan).length > 0
-          ? 'Some details were not recognized. Review the fields and enter any missing values.'
-          : 'No batch details recognized. Try again or fill the fields manually.',
+        confirmedBatchNumber && details.mfgDate && details.expDate
+          ? ''
+          : details.batchNumber || details.mfgDate || details.expDate
+            ? 'Some details were not recognized. Review the fields and enter any missing values.'
+            : 'No batch details recognized. Try again or fill the fields manually.',
       );
       setIsBatchScannerOpen(false);
+    }
+
+    const scanTimeout = setTimeout(() => {
+      finishScan();
     }, SCAN_TIMEOUT_MS);
 
     async function scanFrame() {
@@ -722,16 +844,19 @@ export default function PurchaseScreen() {
 
         const recognized = await recognizeText(frameUri);
         if (!active || complete) return;
-        const details = parseScannedBatchDetails(recognized.text);
-        if (details.batchNumber) bestScan.batchNumber = details.batchNumber;
-        if (details.mfgDate) bestScan.mfgDate = details.mfgDate;
-        if (details.expDate) bestScan.expDate = details.expDate;
+        framesScanned += 1;
+        recordScan(parseScannedBatchDetails(
+          recognized.text,
+          recognized.blocks.flatMap((block) => block.lines),
+        ));
+        const details = bestScan();
 
-        if (bestScan.batchNumber && bestScan.mfgDate && bestScan.expDate) {
-          complete = true;
-          applyBatchDetails(bestScan);
-          setBatchScanMessage('');
-          setIsBatchScannerOpen(false);
+        if (
+          framesScanned >= 2
+          && details.mfgDate
+          && details.expDate
+        ) {
+          finishScan();
         }
       } catch (scanError) {
         if (!active || complete) return;
@@ -854,13 +979,14 @@ export default function PurchaseScreen() {
         };
       }
       if (field === 'batchNumber') {
-        return { ...current, batchNumber: value.replace(/\D/g, '') };
+        return { ...current, batchNumber: value.replace(/[^a-z0-9-]/gi, '') };
       }
       if (field === 'mfgDate' || field === 'expDate') {
         return { ...current, [field]: formatMonthYearInput(value, current[field]) };
       }
       return { ...current, [field]: value };
     });
+    if (field === 'batchNumber') setBatchNumberSuggestion('');
     setSaveError('');
   }
 
@@ -887,6 +1013,7 @@ export default function PurchaseScreen() {
       price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
     }));
     setBatchScanMessage('');
+    setBatchNumberSuggestion('');
   }
 
   async function startBatchScan() {
@@ -901,6 +1028,7 @@ export default function PurchaseScreen() {
     }
 
     setBatchScanMessage('');
+    setBatchNumberSuggestion('');
     setIsCameraReady(false);
     try {
       const permission = await Camera.requestCameraPermissionsAsync();
@@ -1568,6 +1696,7 @@ export default function PurchaseScreen() {
                     updateForm('brandName', value);
                     setSelectedSourceId('');
                     setBatchScanMessage('');
+                    setBatchNumberSuggestion('');
                   }}
                   placeholder="Search or type a brand name"
                 />
@@ -1624,7 +1753,25 @@ export default function PurchaseScreen() {
                       </Text>
                     ) : null}
                 <View style={styles.rowFields}>
-                  <Field ref={(node) => { batchInputRefs.current.batchNumber = node; }} label="Batch Number" value={form.batchNumber} onChangeText={(value) => updateForm('batchNumber', value)} onSubmitEditing={() => focusNextBatchField('batchNumber')} returnKeyType="next" placeholder="Batch number" keyboardType="number-pad" style={styles.halfField} />
+                  <Field
+                    ref={(node) => { batchInputRefs.current.batchNumber = node; }}
+                    label="Batch Number"
+                    labelAccessory={batchNumberSuggestion && batchNumberSuggestion !== form.batchNumber ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use suggested batch number ${batchNumberSuggestion}`}
+                        onPress={() => updateForm('batchNumber', batchNumberSuggestion)}
+                        style={styles.batchSuggestion}>
+                        <Text style={styles.batchSuggestionText}>Use {batchNumberSuggestion}</Text>
+                      </Pressable>
+                    ) : undefined}
+                    value={form.batchNumber}
+                    onChangeText={(value) => updateForm('batchNumber', value)}
+                    onSubmitEditing={() => focusNextBatchField('batchNumber')}
+                    returnKeyType="next"
+                    placeholder="Batch number"
+                    style={styles.halfField}
+                  />
                   <Field ref={(node) => { batchInputRefs.current.packSize = node; }} label="Pack Size" value={form.packSize} onChangeText={(value) => updateForm('packSize', value)} onSubmitEditing={() => focusNextBatchField('packSize')} returnKeyType="next" placeholder="e.g. 10" style={styles.halfField} />
                 </View>
                 <View style={styles.rowFields}>
@@ -1980,6 +2127,7 @@ function ModalHeader({ title, onClose }: { title: string; onClose: () => void })
 
 type FieldProps = {
   label: string;
+  labelAccessory?: ReactNode;
   value: string;
   onChangeText: (value: string) => void;
   onSubmitEditing?: () => void;
@@ -1992,6 +2140,7 @@ type FieldProps = {
 
 const Field = forwardRef<TextInput, FieldProps>(function Field({
   label,
+  labelAccessory,
   value,
   onChangeText,
   onSubmitEditing,
@@ -2003,7 +2152,10 @@ const Field = forwardRef<TextInput, FieldProps>(function Field({
 }, ref) {
   return (
     <View style={[styles.field, style]}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {labelAccessory}
+      </View>
       <TextInput
         ref={ref}
         value={value}
@@ -2089,9 +2241,12 @@ const styles = StyleSheet.create({
   modalContent: { padding: 16, paddingBottom: 40, gap: 12 },
   modalSubtitle: { marginTop: -4, color: '#77857d', fontSize: 12, lineHeight: 17 },
   field: { gap: 5 },
+  fieldLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
   fieldLabel: { color: '#40564a', fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, paddingHorizontal: 11, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 9, backgroundColor: '#fff', color: '#24382e', fontSize: 13 },
   scanButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 9, backgroundColor: '#eef8f2' },
+  batchSuggestion: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#e8f3eb' },
+  batchSuggestionText: { color: '#17664f', fontSize: 10, fontWeight: '800' },
   batchSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   scannerModal: { flex: 1, backgroundColor: '#000' },
   scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },

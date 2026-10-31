@@ -1,15 +1,8 @@
 'use client';
 
-import { Fragment, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Sidebar from "../components/Sidebar";
-import PharmacyProfileMenu from "../components/PharmacyProfileMenu";
-import DashboardLanguageMenu from "../components/DashboardLanguageMenu";
-import PharmacyDashboardBrand, { usePharmacyStoreName } from "../components/PharmacyDashboardBrand";
-import ExcelExportButton from "../components/ExcelExportButton";
-import { supabase } from "@/lib/supabase/client";
-import { getPharmacyDashboardIdentity } from "@/lib/pharmacy-dashboard-identity";
-import { confirmDelete } from "@/lib/confirmDelete";
-import { getProductIdentityKey, type ProductImportCandidate } from "./productImport";
 
 type Product = {
   id: string;
@@ -24,1429 +17,265 @@ type Product = {
   packSize: string;
   unit: string;
   barcode: string;
-  serialNumber?: string;
-  retailPrice?: string;
-  unitPrice?: string;
-  packPrice?: string;
-  usageType?: string;
-  darCode?: string;
-  medicineTypeCategory?: string;
-  registrationInformation?: string;
-  sourceCatalogId?: string;
 };
 
-type CatalogProductRow = {
-  id: string;
-  serial_number: string;
-  pharmaceutical_company: string;
-  brand_name: string;
-  generic_name: string;
-  strength: string;
-  dosage_form_description: string;
-  retail_price: string;
-  pack_size?: string;
-  unit_price?: string;
-  pack_price?: string;
-  usage_type: string;
-  dar_code: string;
-  medicine_type_category: string;
-  registration_information: string;
+type SuggestionField = "dosageForm" | "strength" | "packSize" | "barcode";
+type Suggestions = Record<SuggestionField, string[]>;
+
+const storageKeys = {
+  products: "pharmacy-cluster-products",
+  suggestions: "pharmacy-cluster-product-suggestions",
 };
 
-type PharmacyProductRow = {
-  owner_user_id: string;
-  id: string;
-  source_catalog_id: string | null;
-  serial_number: string;
-  medicine_name: string;
-  brand: string;
-  generic_name: string;
-  manufacturer: string;
-  product_type: string;
-  category: string;
-  dosage_form: string;
-  strength: string;
-  pack_size: string;
-  unit: string;
-  barcode: string;
-  retail_price: string;
-  unit_price?: string;
-  pack_price?: string;
-  usage_type: string;
-  dar_code: string;
-  medicine_type_category: string;
-  registration_information: string;
+const initialSuggestions: Suggestions = {
+  dosageForm: ["Tablet", "Capsule", "Syrup", "Injection"],
+  strength: ["500mg", "5mg/5ml"],
+  packSize: ["10 tablets", "100ml"],
+  barcode: [],
 };
 
-type CatalogCompany = { name: string; count: number };
-const CATALOG_PAGE_SIZE = 1000;
-const IMPORT_BATCH_SIZE = 500;
-const DEFAULT_PRODUCT_PAGE_SIZE = 25;
-const PRODUCT_CATALOG_AUTO_SYNC_KEY = "pharmacy-product-auto-sync-v1";
-
-type NewProductNameFields = {
-  id: string;
-  brandName: string;
-  genericName: string;
-  company: string;
-  strength: string;
-  dosageForm: string;
-  packSize: string;
-  unitPrice: string;
-  packPrice: string;
+const fieldStyle = {
+  width: "100%",
+  boxSizing: "border-box" as const,
+  border: "1px solid #dce5df",
+  borderRadius: 7,
+  padding: "10px 11px",
+  color: "#24372d",
+  background: "#fff",
+  fontSize: 13,
+  outlineColor: "#28a879",
 };
 
-type PriceField = "packSize" | "unitPrice" | "packPrice";
-
-function createNewProductNameFields(): NewProductNameFields {
-  return {
-    id: "",
-    brandName: "",
-    genericName: "",
-    company: "",
-    strength: "",
-    dosageForm: "",
-    packSize: "",
-    unitPrice: "",
-    packPrice: "",
-  };
-}
-
-function parsePrice(value: string): number | null {
-  if (!value.trim()) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function formatCalculatedPrice(value: number) {
-  return String(Number(value.toFixed(4)));
-}
-
-function calculateNewNamePrices(field: PriceField, values: NewProductNameFields): NewProductNameFields {
-  const packSize = parsePrice(values.packSize);
-  const unitPrice = parsePrice(values.unitPrice);
-  const packPrice = parsePrice(values.packPrice);
-  const next = { ...values };
-
-  if (field === "packSize" && packSize !== null) {
-    if (unitPrice !== null) next.packPrice = formatCalculatedPrice(packSize * unitPrice);
-    else if (packPrice !== null && packSize > 0) next.unitPrice = formatCalculatedPrice(packPrice / packSize);
-  } else if (field === "unitPrice" && unitPrice !== null) {
-    if (packSize !== null) next.packPrice = formatCalculatedPrice(packSize * unitPrice);
-    else if (packPrice !== null && unitPrice > 0) next.packSize = formatCalculatedPrice(packPrice / unitPrice);
-  } else if (field === "packPrice" && packPrice !== null) {
-    if (packSize !== null && packSize > 0) next.unitPrice = formatCalculatedPrice(packPrice / packSize);
-    else if (unitPrice !== null && unitPrice > 0) next.packSize = formatCalculatedPrice(packPrice / unitPrice);
-  }
-
-  if (field === "packSize" && packSize !== null) next.packSize = formatCalculatedPrice(packSize);
-  if (field === "unitPrice" && unitPrice !== null) next.unitPrice = formatCalculatedPrice(unitPrice);
-  if (field === "packPrice" && packPrice !== null) next.packPrice = formatCalculatedPrice(packPrice);
-  return next;
-}
-
-function createProductId() {
-  return `MED-${globalThis.crypto.randomUUID().toUpperCase()}`;
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null) {
-    const details = error as Record<string, unknown>;
-    const parts = ["message", "details", "hint", "code"]
-      .map((key) => details[key])
-      .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-    if (parts.length) return parts.join(" · ");
-  }
-  return "Import failed with an unrecognized error. Check the browser console for details.";
-}
-
-function mapPharmacyRowToProduct(row: PharmacyProductRow): Product {
-  return {
-    id: row.id,
-    sourceCatalogId: row.source_catalog_id ?? undefined,
-    serialNumber: row.serial_number,
-    medicineName: row.medicine_name,
-    brand: row.brand,
-    genericName: row.generic_name,
-    manufacturer: row.manufacturer,
-    productType: row.product_type,
-    category: row.category,
-    dosageForm: row.dosage_form,
-    strength: row.strength,
-    packSize: row.pack_size,
-    unit: row.unit,
-    barcode: row.barcode,
-    retailPrice: row.retail_price,
-    unitPrice: row.unit_price ?? row.retail_price,
-    packPrice: row.pack_price ?? "-",
-    usageType: row.usage_type,
-    darCode: row.dar_code,
-    medicineTypeCategory: row.medicine_type_category,
-    registrationInformation: row.registration_information,
-  };
-}
-
-function mapProductToPharmacyRow(product: Product, ownerUserId: string) {
-  return {
-    owner_user_id: ownerUserId,
-    id: product.id,
-    source_catalog_id: product.sourceCatalogId ?? null,
-    serial_number: product.serialNumber ?? "-",
-    medicine_name: product.medicineName,
-    brand: product.brand,
-    generic_name: product.genericName,
-    manufacturer: product.manufacturer,
-    product_type: product.productType,
-    category: product.category,
-    dosage_form: product.dosageForm,
-    strength: product.strength,
-    pack_size: product.packSize,
-    unit: product.unit,
-    barcode: product.barcode,
-    retail_price: product.retailPrice ?? "-",
-    unit_price: product.unitPrice ?? product.retailPrice ?? "-",
-    pack_price: product.packPrice ?? "-",
-    usage_type: product.usageType ?? product.productType,
-    dar_code: product.darCode ?? product.barcode ?? "-",
-    medicine_type_category: product.medicineTypeCategory ?? product.category,
-    registration_information: product.registrationInformation ?? "-",
-  };
-}
-
-function mapCatalogRowToProduct(row: CatalogProductRow): Product {
-  return {
-    id: row.id,
-    sourceCatalogId: row.id,
-    serialNumber: row.serial_number,
-    medicineName: row.brand_name !== "-" ? row.brand_name : row.generic_name,
-    brand: row.brand_name,
-    genericName: row.generic_name,
-    manufacturer: row.pharmaceutical_company,
-    productType: row.usage_type,
-    category: row.medicine_type_category,
-    dosageForm: row.dosage_form_description,
-    strength: row.strength,
-    packSize: row.pack_size ?? "-",
-    unit: "-",
-    barcode: row.dar_code,
-    retailPrice: row.retail_price,
-    unitPrice: row.unit_price ?? row.retail_price,
-    packPrice: row.pack_price ?? "-",
-    usageType: row.usage_type,
-    darCode: row.dar_code,
-    medicineTypeCategory: row.medicine_type_category,
-    registrationInformation: row.registration_information,
-  };
-}
-
-async function loadAllCatalogRows(company?: string, createdAfter?: string) {
-  const rows: CatalogProductRow[] = [];
-  for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-    let query = supabase.from("admin_medicine_catalog").select("*");
-    if (company) query = query.eq("pharmaceutical_company", company);
-    if (createdAfter) query = query.gte("created_at", createdAfter);
-    const { data, error } = await query
-      .order("id", { ascending: true })
-      .range(offset, offset + CATALOG_PAGE_SIZE - 1);
-    if (error) throw error;
-
-    const page = (data ?? []) as CatalogProductRow[];
-    rows.push(...page);
-    if (page.length < CATALOG_PAGE_SIZE) return rows;
-  }
-}
-
-async function loadCatalogCompanies(): Promise<CatalogCompany[]> {
-  const { data, error } = await supabase.rpc("get_admin_catalog_manufacturers");
-  if (error) throw error;
-  return ((data ?? []) as { pharmaceutical_company: string; product_count: number }[])
-    .map((row) => ({ name: row.pharmaceutical_company, count: Number(row.product_count) }))
-    .filter((company) => company.count > 0);
-}
-
-async function loadPharmacyProductPage(ownerUserId: string, page: number, pageSize: number, searchTerm: string) {
-  let query = supabase
-    .from("pharmacy_catalog_products")
-    .select("*", { count: "exact" })
-    .eq("owner_user_id", ownerUserId);
-  const search = searchTerm.trim().replace(/[\\%_,()]/g, (character) => `\\${character}`);
-  if (search) {
-    const columns = [
-      "id", "source_catalog_id", "serial_number", "medicine_name", "brand", "generic_name", "manufacturer",
-      "product_type", "category", "dosage_form", "strength", "pack_size", "unit",
-      "barcode", "retail_price", "unit_price", "pack_price", "usage_type", "dar_code", "medicine_type_category",
-      "registration_information",
-    ];
-    query = query.or(columns.map((column) => `${column}.ilike.%${search}%`).join(","));
-  }
-
-  const { data, count, error } = await query
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .range((page - 1) * pageSize, page * pageSize - 1);
-  if (error) throw error;
-  return {
-    products: ((data ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct),
-    count: count ?? 0,
-  };
-}
-
-async function loadAllPharmacyProducts(ownerUserId: string) {
-  const rows: PharmacyProductRow[] = [];
-  for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from("pharmacy_catalog_products")
-      .select("*")
-      .eq("owner_user_id", ownerUserId)
-      .order("id", { ascending: true })
-      .range(offset, offset + CATALOG_PAGE_SIZE - 1);
-    if (error) throw error;
-    const page = (data ?? []) as PharmacyProductRow[];
-    rows.push(...page);
-    if (page.length < CATALOG_PAGE_SIZE) return rows.map(mapPharmacyRowToProduct);
-  }
-}
-
-async function loadPharmacyCompanyNames(ownerUserId: string) {
-  const companyNames = new Set<string>();
-  for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from("pharmacy_catalog_products")
-      .select("manufacturer")
-      .eq("owner_user_id", ownerUserId)
-      .order("manufacturer", { ascending: true })
-      .range(offset, offset + CATALOG_PAGE_SIZE - 1);
-    if (error) throw error;
-    const page = (data ?? []) as { manufacturer: string }[];
-    page.forEach(({ manufacturer }) => {
-      const companyName = manufacturer.trim();
-      if (companyName && companyName !== "-") companyNames.add(companyName);
-    });
-    if (page.length < CATALOG_PAGE_SIZE) return [...companyNames];
-  }
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label style={{ display: "grid", gap: 6, color: "#405248", fontSize: 12, fontWeight: 600 }}>
+      {label}
+      {children}
+    </label>
+  );
 }
 
 function ProductManagementHeader() {
-  const storeName = usePharmacyStoreName();
-
   return (
-    <header className="dashboard-navbar" style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
-      <PharmacyDashboardBrand />
-      <div className="dashboard-navbar-actions" style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
-        <DashboardLanguageMenu />
-        <span className="dashboard-navbar-store-name">{storeName || "Pharmacy Cluster"}</span>
-        <PharmacyProfileMenu />
+    <header style={{ minHeight: 62, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 24px", background: "#fff", borderBottom: "1px solid #e8e8e6" }}>
+      <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, color: "#202624", textDecoration: "none" }}>
+        <span style={{ width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7, background: "#2ad49a", color: "#07372b", fontSize: 14 }}>✚</span>
+        <span style={{ fontSize: 14, fontWeight: 700 }}>Pharmecy Cluster</span>
+      </Link>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#64716d", fontSize: 12 }}>
+        <span>Green Valley Pharmacy</span>
+        <span style={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", background: "#e4f5ee", color: "#187553", fontWeight: 700 }}>PC</span>
       </div>
     </header>
   );
 }
 
-export default function ProductManagementPage({ adminMode = false }: { adminMode?: boolean } = {}) {
+export default function ProductManagementPage() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [storageReady, setStorageReady] = useState(adminMode);
-  const [isNewNameOpen, setIsNewNameOpen] = useState(false);
-  const [isGeneratingNewNameId, setIsGeneratingNewNameId] = useState(false);
-  const [isSavingNewName, setIsSavingNewName] = useState(false);
-  const [isCompanyInputFocused, setIsCompanyInputFocused] = useState(false);
-  const [newNameFields, setNewNameFields] = useState<NewProductNameFields>(createNewProductNameFields);
-  const [newNameError, setNewNameError] = useState("");
+  const [suggestions, setSuggestions] = useState<Suggestions>(initialSuggestions);
+  const [storageReady, setStorageReady] = useState(false);
+  const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
-  const [savingProductId, setSavingProductId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PRODUCT_PAGE_SIZE);
-  const [totalProductCount, setTotalProductCount] = useState(0);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState({ phase: "", checked: 0, total: 0 });
-  const [importSummary, setImportSummary] = useState({ added: 0, duplicates: 0 });
-  const [importError, setImportError] = useState("");
-  const [availableCompanies, setAvailableCompanies] = useState<CatalogCompany[]>([]);
-  const [pharmacyCompanyNames, setPharmacyCompanyNames] = useState<string[]>([]);
-  const [totalCatalogCount, setTotalCatalogCount] = useState(0);
-  const [pharmacyUserId, setPharmacyUserId] = useState("");
-  const [selectedCompany, setSelectedCompany] = useState("");
-  const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
-  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
-  const [isSavingAutoImport, setIsSavingAutoImport] = useState(false);
-  const initialQueryKey = useRef("");
-  const productQuerySequence = useRef(0);
-  const editRowRef = useRef<HTMLElement | null>(null);
-  const savingProductRef = useRef(false);
-  const importingProductsRef = useRef(false);
-  const autoImportSettingsRef = useRef<{ enabled: boolean; enabledAt: string | null }>({
-    enabled: false,
-    enabledAt: null,
-  });
-  const autoImportPendingRef = useRef(false);
-  const productListViewRef = useRef({ currentPage, pageSize, searchTerm });
-  const importCatalogRef = useRef<(company?: string, createdAfter?: string) => Promise<void>>(async () => {});
-  productListViewRef.current = { currentPage, pageSize, searchTerm };
-  const assignEditRowRef = useCallback((node: HTMLElement | null) => {
-    editRowRef.current = node;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      try {
+        const savedProducts = localStorage.getItem(storageKeys.products);
+        const savedSuggestions = localStorage.getItem(storageKeys.suggestions);
+        if (savedProducts) {
+          const parsedProducts: unknown = JSON.parse(savedProducts);
+          if (Array.isArray(parsedProducts)) setProducts(parsedProducts as Product[]);
+        }
+        if (savedSuggestions) {
+          const parsedSuggestions: Partial<Suggestions> = JSON.parse(savedSuggestions);
+          setSuggestions({
+            dosageForm: [...new Set([...initialSuggestions.dosageForm, ...(parsedSuggestions.dosageForm ?? [])])],
+            strength: [...new Set([...initialSuggestions.strength, ...(parsedSuggestions.strength ?? [])])],
+            packSize: [...new Set([...initialSuggestions.packSize, ...(parsedSuggestions.packSize ?? [])])],
+            barcode: [...new Set(parsedSuggestions.barcode ?? [])],
+          });
+        }
+      } catch {
+        localStorage.removeItem(storageKeys.products);
+        localStorage.removeItem(storageKeys.suggestions);
+      }
+      setStorageReady(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
-    let active = true;
-
-    async function loadPharmacyProducts() {
-      try {
-        const { data: { session }, error: authError } = await supabase.auth.getSession();
-        const user = session?.user ?? null;
-        if (authError || !user) throw authError ?? new Error("Sign in to load your product list.");
-
-        const ownerId = getPharmacyDashboardIdentity(user.id)?.ownerUserId ?? user.id;
-        setPharmacyUserId(ownerId);
-        const autoImportResult = await supabase
-          .from("pharmacy_app_data")
-          .select("payload")
-          .eq("owner_user_id", ownerId)
-          .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
-          .maybeSingle();
-        if (autoImportResult.error) throw autoImportResult.error;
-        const payload = autoImportResult.data?.payload;
-        const storedSettings = payload && typeof payload === "object"
-          ? payload as { enabled?: unknown; enabledAt?: unknown }
-          : null;
-        const autoImportIsEnabled = storedSettings?.enabled === true
-          && typeof storedSettings.enabledAt === "string"
-          && Number.isFinite(Date.parse(storedSettings.enabledAt));
-        autoImportSettingsRef.current = {
-          enabled: autoImportIsEnabled,
-          enabledAt: autoImportIsEnabled ? storedSettings.enabledAt as string : null,
-        };
-        setAutoImportEnabled(autoImportIsEnabled);
-        const firstPage = await loadPharmacyProductPage(ownerId, 1, DEFAULT_PRODUCT_PAGE_SIZE, "");
-        if (!active) return;
-        setProducts(firstPage.products);
-        setTotalProductCount(firstPage.count);
-        setStorageReady(true);
-        initialQueryKey.current = `${ownerId}:1:${DEFAULT_PRODUCT_PAGE_SIZE}:`;
-
-        void loadPharmacyCompanyNames(ownerId)
-          .then((companyNames) => {
-            if (!active) return;
-            setPharmacyCompanyNames(companyNames);
-          })
-          .catch((error: unknown) => {
-            if (!active) return;
-            const message = getErrorMessage(error);
-            setImportError(`Could not load product name suggestions: ${message}`);
-          });
-
-        void loadCatalogCompanies()
-          .then((companies) => {
-            if (!active) return;
-            setAvailableCompanies(companies);
-            setTotalCatalogCount(companies.reduce((total, company) => total + company.count, 0));
-          })
-          .catch((error: unknown) => {
-            if (active) setImportError(getErrorMessage(error));
-          })
-          .finally(() => {
-            if (active) setIsLoadingCompanies(false);
-          });
-      } catch (error) {
-        if (active) {
-          setImportError(getErrorMessage(error));
-          setIsLoadingCompanies(false);
-        }
-      } finally {
-        if (active) setStorageReady(true);
-      }
+    if (!storageReady) return;
+    try {
+      localStorage.setItem(storageKeys.products, JSON.stringify(products));
+      localStorage.setItem(storageKeys.suggestions, JSON.stringify(suggestions));
+    } catch {
+      // The page remains usable if browser storage is unavailable.
     }
-
-    if (!adminMode) void loadPharmacyProducts();
-
-    return () => {
-      active = false;
-    };
-  }, [adminMode]);
+  }, [products, suggestions, storageReady]);
 
   useEffect(() => {
-    if (!pharmacyUserId || !initialQueryKey.current) return;
-    const queryKey = `${pharmacyUserId}:${currentPage}:${pageSize}:${searchTerm.trim()}`;
-    if (queryKey === initialQueryKey.current) return;
-    const sequence = ++productQuerySequence.current;
-    let active = true;
-    const timeout = window.setTimeout(() => {
-      void loadPharmacyProductPage(pharmacyUserId, currentPage, pageSize, searchTerm)
-        .then((result) => {
-          if (!active || sequence !== productQuerySequence.current) return;
-          setProducts(result.products);
-          setTotalProductCount(result.count);
-          const lastPage = Math.max(1, Math.ceil(result.count / pageSize));
-          if (currentPage > lastPage) setCurrentPage(lastPage);
-          initialQueryKey.current = queryKey;
-        })
-        .catch((error: unknown) => {
-          if (active && sequence === productQuerySequence.current) setImportError(getErrorMessage(error));
-        });
-    }, searchTerm ? 250 : 0);
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
-  }, [pharmacyUserId, currentPage, pageSize, searchTerm]);
-
-  useEffect(() => {
-    if (adminMode || !pharmacyUserId) return;
-
-    let active = true;
-    let refreshTimeout: number | undefined;
-    let autoImportTimeout: number | undefined;
-    const refreshAvailableCompanies = () => {
-      if (refreshTimeout !== undefined) window.clearTimeout(refreshTimeout);
-      refreshTimeout = window.setTimeout(() => {
-        void loadCatalogCompanies()
-          .then((companies) => {
-            if (!active) return;
-            setAvailableCompanies(companies);
-            setTotalCatalogCount(companies.reduce((total, company) => total + company.count, 0));
-            setImportError("");
-          })
-          .catch((error: unknown) => {
-            if (active) setImportError(getErrorMessage(error));
-          });
-      }, 250);
-    };
-    const refreshCurrentProductPage = () => {
-      const view = productListViewRef.current;
-      const queryKey = `${pharmacyUserId}:${view.currentPage}:${view.pageSize}:${view.searchTerm.trim()}`;
-      void loadPharmacyProductPage(pharmacyUserId, view.currentPage, view.pageSize, view.searchTerm)
-        .then((result) => {
-          if (!active || queryKey !== `${pharmacyUserId}:${productListViewRef.current.currentPage}:${productListViewRef.current.pageSize}:${productListViewRef.current.searchTerm.trim()}`) return;
-          setProducts(result.products);
-          setTotalProductCount(result.count);
-        })
-        .catch((error: unknown) => {
-          if (active) setImportError(`Could not refresh the product list: ${getErrorMessage(error)}`);
-        });
-    };
-    const scheduleAutoImport = (catalogChanged = false) => {
-      if (autoImportTimeout !== undefined) window.clearTimeout(autoImportTimeout);
-      autoImportTimeout = window.setTimeout(() => {
-        const settings = autoImportSettingsRef.current;
-        if (!settings.enabled || !settings.enabledAt) return;
-        if (importingProductsRef.current) {
-          if (catalogChanged) autoImportPendingRef.current = true;
-          return;
-        }
-        void importCatalogRef.current(undefined, settings.enabledAt);
-      }, 500);
-    };
-    const channel = supabase
-      .channel(`admin-catalog-${pharmacyUserId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "admin_medicine_catalog" },
-        refreshAvailableCompanies,
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "admin_medicine_catalog" },
-        () => {
-          if (autoImportSettingsRef.current.enabled) scheduleAutoImport(true);
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pharmacy_catalog_products", filter: `owner_user_id=eq.${pharmacyUserId}` },
-        () => {
-          refreshAvailableCompanies();
-          refreshCurrentProductPage();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pharmacy_app_data", filter: `owner_user_id=eq.${pharmacyUserId}` },
-        (event) => {
-          const record = event.new as { data_key?: string; payload?: unknown } | null;
-          if (record?.data_key !== PRODUCT_CATALOG_AUTO_SYNC_KEY) return;
-          const payload = record.payload;
-          const nextEnabled = Boolean(
-            payload
-            && typeof payload === "object"
-            && "enabled" in payload
-            && payload.enabled === true
-            && "enabledAt" in payload
-            && typeof payload.enabledAt === "string"
-            && Number.isFinite(Date.parse(payload.enabledAt)),
-          );
-          autoImportSettingsRef.current = {
-            enabled: nextEnabled,
-            enabledAt: nextEnabled && payload && typeof payload === "object" && "enabledAt" in payload
-              ? payload.enabledAt as string
-              : null,
-          };
-          setAutoImportEnabled(nextEnabled);
-          if (nextEnabled) scheduleAutoImport();
-        },
-      )
-      .subscribe((status, error) => {
-        if (!active) return;
-        if (status === "SUBSCRIBED") {
-          refreshAvailableCompanies();
-          if (autoImportSettingsRef.current.enabled) scheduleAutoImport();
-        }
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setImportError(`Live catalog updates are unavailable${error?.message ? `: ${error.message}` : "."}`);
-        }
-      });
-
-    return () => {
-      active = false;
-      if (refreshTimeout !== undefined) window.clearTimeout(refreshTimeout);
-      if (autoImportTimeout !== undefined) window.clearTimeout(autoImportTimeout);
-      void supabase.removeChannel(channel);
-    };
-  }, [adminMode, pharmacyUserId]);
-
-  useEffect(() => {
-    if (!isNewNameOpen && !selectedProduct) return;
+    if (!isAddOpen && !selectedProduct) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (isGeneratingNewNameId || isSavingNewName) return;
-        setIsNewNameOpen(false);
+        setIsAddOpen(false);
         setSelectedProduct(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isGeneratingNewNameId, isNewNameOpen, isSavingNewName, selectedProduct]);
+  }, [isAddOpen, selectedProduct]);
 
-  const saveEditedProduct = useCallback(async () => {
-    if (!editingProduct || !pharmacyUserId || savingProductRef.current) return;
-    savingProductRef.current = true;
-    setSavingProductId(editingProduct.id);
-    setImportError("");
-    try {
-      const { data, error } = await supabase
-        .from("pharmacy_catalog_products")
-        .update({
-          serial_number: editingProduct.serialNumber ?? "-",
-          medicine_name: editingProduct.brand || editingProduct.genericName,
-          brand: editingProduct.brand,
-          generic_name: editingProduct.genericName,
-          manufacturer: editingProduct.manufacturer,
-          strength: editingProduct.strength,
-          dosage_form: editingProduct.dosageForm,
-          pack_size: editingProduct.packSize,
-          retail_price: editingProduct.unitPrice ?? editingProduct.retailPrice ?? "-",
-          unit_price: editingProduct.unitPrice ?? editingProduct.retailPrice ?? "-",
-          pack_price: editingProduct.packPrice ?? "-",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("owner_user_id", pharmacyUserId)
-        .eq("id", editingProduct.id)
-        .select("*")
-        .single();
+  const filteredProducts = products.filter((product) =>
+    [product.id, product.medicineName, product.brand, product.genericName, product.manufacturer, product.barcode]
+      .join(" ")
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase()),
+  );
+  const nextProductId = `MED-${String(products.length + 1).padStart(4, "0")}`;
 
-      if (error) throw error;
-      const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
-      setProducts((current) => current.map((product) => product.id === savedProduct.id ? savedProduct : product));
-      setEditingProduct(null);
-    } catch (error) {
-      setImportError(`Could not save product changes: ${getErrorMessage(error)}`);
-    } finally {
-      savingProductRef.current = false;
-      setSavingProductId("");
-    }
-  }, [editingProduct, pharmacyUserId]);
-
-  useEffect(() => {
-    if (!editingProduct) return;
-
-    function saveWhenClickingOutside(event: PointerEvent) {
-      if (event.target instanceof Node && !editRowRef.current?.contains(event.target)) {
-        void saveEditedProduct();
-      }
-    }
-
-    document.addEventListener("pointerdown", saveWhenClickingOutside, true);
-    return () => document.removeEventListener("pointerdown", saveWhenClickingOutside, true);
-  }, [editingProduct, saveEditedProduct]);
-
-  async function deleteProduct(product: Product) {
-    if (!pharmacyUserId) return;
-    if (!await confirmDelete(`Delete ${product.brand || product.genericName || product.id} from this pharmacy's product list?`)) return;
-    setImportError("");
-    try {
-      const { error } = await supabase
-        .from("pharmacy_catalog_products")
-        .delete()
-        .eq("owner_user_id", pharmacyUserId)
-        .eq("id", product.id);
-      if (error) throw error;
-
-      const targetPage = products.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage;
-      const refreshed = await loadPharmacyProductPage(pharmacyUserId, targetPage, pageSize, searchTerm);
-      initialQueryKey.current = `${pharmacyUserId}:${targetPage}:${pageSize}:${searchTerm.trim()}`;
-      setCurrentPage(targetPage);
-      setProducts(refreshed.products);
-      setTotalProductCount(refreshed.count);
-    } catch (error) {
-      setImportError(`Could not delete or refresh product: ${getErrorMessage(error)}`);
-    }
+  function rememberSuggestion(field: SuggestionField, value: string) {
+    const cleanValue = value.trim();
+    if (!cleanValue) return;
+    setSuggestions((current) => current[field].includes(cleanValue)
+      ? current
+      : { ...current, [field]: [...current[field], cleanValue] });
   }
 
-  const filteredProducts = products;
-  const totalPages = Math.max(1, Math.ceil(totalProductCount / pageSize));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pageStart = (safeCurrentPage - 1) * pageSize;
-  const paginatedProducts = filteredProducts;
-  const firstVisibleProduct = totalProductCount ? pageStart + 1 : 0;
-  const lastVisibleProduct = Math.min(pageStart + filteredProducts.length, totalProductCount);
-  const effectiveSelectedCompany = availableCompanies.some((company) => company.name === selectedCompany)
-    ? selectedCompany
-    : "";
-  const typedCompanyName = newNameFields.company.trimStart();
-  const inlineCompanySuggestion = isCompanyInputFocused && typedCompanyName
-    ? pharmacyCompanyNames.find((name) =>
-        name.toLocaleLowerCase().startsWith(typedCompanyName.toLocaleLowerCase()) &&
-        name.length > typedCompanyName.length,
-      )
-    : undefined;
-  const progressPercentage = importProgress.total
-    ? Math.round((importProgress.checked / importProgress.total) * 100)
-    : 0;
-
-  function updateEditingProduct(field: "manufacturer" | "brand" | "genericName" | "strength" | "dosageForm" | "packSize" | "unitPrice" | "packPrice", value: string) {
-    setEditingProduct((current) => current
-      ? field === "unitPrice"
-        ? { ...current, unitPrice: value, retailPrice: value }
-        : { ...current, [field]: value }
-      : current);
-  }
-
-  async function openNewNameModal() {
-    if (!pharmacyUserId || !storageReady || isImporting) return;
-    setNewNameFields(createNewProductNameFields());
-    setNewNameError("");
-    setIsNewNameOpen(true);
-    setIsGeneratingNewNameId(true);
-    try {
-      const { data, error } = await supabase.rpc("reserve_pharmacy_product_identifiers");
-      if (error) throw error;
-      const reserved = (data ?? [])[0] as { product_id?: string } | undefined;
-      const productId = reserved?.product_id;
-      if (!productId) {
-        throw new Error("The database did not return a product ID. Apply the latest Supabase migration and retry.");
-      }
-      setNewNameFields((current) => ({ ...current, id: productId }));
-    } catch (error) {
-      console.error("Could not reserve a product ID:", error);
-      setNewNameError(getErrorMessage(error));
-    } finally {
-      setIsGeneratingNewNameId(false);
-    }
-  }
-
-  function closeNewNameModal() {
-    if (isGeneratingNewNameId || isSavingNewName) return;
-    setIsNewNameOpen(false);
-    setNewNameError("");
-  }
-
-  function handleNewNamePriceBlur(field: PriceField) {
-    const value = newNameFields[field];
-    if (value.trim() && parsePrice(value) === null) {
-      setNewNameError("Enter a valid non-negative number for pack size and prices.");
-      return;
-    }
-    setNewNameFields((current) => calculateNewNamePrices(field, current));
-    setNewNameError("");
-  }
-
-  async function saveNewName(event: FormEvent<HTMLFormElement>) {
+  function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSavingNewName) return;
-    if (!pharmacyUserId) {
-      setNewNameError("Could not verify the signed-in pharmacy account.");
-      return;
-    }
-
-    const brand = newNameFields.brandName.trim();
-    const genericName = newNameFields.genericName.trim();
-    const manufacturer = newNameFields.company.trim();
-    const strength = newNameFields.strength.trim();
-    const dosageForm = newNameFields.dosageForm.trim();
-    const productId = newNameFields.id.trim();
-    const enteredPrices = [newNameFields.packSize, newNameFields.unitPrice, newNameFields.packPrice];
-    const parsedPrices = enteredPrices.map(parsePrice);
-
-    if (!brand || !manufacturer) {
-      setNewNameError("Brand Name and Company Name are required.");
-      return;
-    }
-    if (!productId) {
-      setNewNameError("A product ID could not be generated. Close and reopen the form to retry.");
-      return;
-    }
-    if (enteredPrices.some((value, index) => value.trim() && parsedPrices[index] === null)) {
-      setNewNameError("Enter valid non-negative numbers for Pack Size, Unit Price, or Pack Price.");
-      return;
-    }
-    const [packSize, unitPrice, packPrice] = parsedPrices;
-    if (packSize !== null && packSize <= 0) {
-      setNewNameError("Pack Size must be greater than zero.");
-      return;
-    }
-
-    const candidate: ProductImportCandidate = {
-      medicineName: brand,
-      brand,
-      genericName: genericName || "-",
-      manufacturer,
-      productType: "Medicine",
-      category: "",
-      dosageForm: dosageForm || "-",
-      strength: strength || "-",
-      packSize: packSize === null ? "-" : formatCalculatedPrice(packSize),
-      unit: "-",
-      barcode: "-",
+    const form = new FormData(event.currentTarget);
+    const value = (name: keyof Omit<Product, "id">) => String(form.get(name) ?? "").trim();
+    const product: Product = {
+      id: nextProductId,
+      medicineName: value("medicineName"),
+      brand: value("brand"),
+      genericName: value("genericName"),
+      manufacturer: value("manufacturer"),
+      productType: value("productType"),
+      category: value("category"),
+      dosageForm: value("dosageForm"),
+      strength: value("strength"),
+      packSize: value("packSize"),
+      unit: value("unit"),
+      barcode: value("barcode"),
     };
-
-    setIsSavingNewName(true);
-    setNewNameError("");
-    try {
-      const { data: matchingRows, error: duplicateCheckError } = await supabase
-        .from("pharmacy_catalog_products")
-        .select("*")
-        .eq("owner_user_id", pharmacyUserId)
-        .ilike("medicine_name", brand);
-      if (duplicateCheckError) throw duplicateCheckError;
-      const matchingProducts = ((matchingRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
-      const identityKey = getProductIdentityKey(candidate);
-      if (identityKey && matchingProducts.some((product) => getProductIdentityKey(product) === identityKey)) {
-        throw new Error("This product already exists with the same name, strength, dosage form, and company.");
-      }
-
-      const product: Product = {
-        ...candidate,
-        id: productId,
-        retailPrice: unitPrice === null ? "-" : formatCalculatedPrice(unitPrice),
-        unitPrice: unitPrice === null ? "-" : formatCalculatedPrice(unitPrice),
-        packPrice: packPrice === null ? "-" : formatCalculatedPrice(packPrice),
-        usageType: "Medicine",
-        darCode: "-",
-        medicineTypeCategory: "",
-        registrationInformation: "-",
-      };
-      const { data, error } = await supabase
-        .from("pharmacy_catalog_products")
-        .insert(mapProductToPharmacyRow(product, pharmacyUserId))
-        .select("*")
-        .single();
-      if (error) throw error;
-
-      const savedProduct = mapPharmacyRowToProduct(data as PharmacyProductRow);
-      initialQueryKey.current = `${pharmacyUserId}:1:${pageSize}:`;
-      setCurrentPage(1);
-      setSearchTerm("");
-      try {
-        const refreshed = await loadPharmacyProductPage(pharmacyUserId, 1, pageSize, "");
-        setProducts(refreshed.products);
-        setTotalProductCount(refreshed.count);
-      } catch (error) {
-        setProducts((current) => [savedProduct, ...current]);
-        setTotalProductCount((count) => count + 1);
-        setImportError(`Product was saved, but the product list could not be refreshed: ${getErrorMessage(error)}`);
-      }
-      setPharmacyCompanyNames((current) => current.includes(manufacturer) ? current : [...current, manufacturer]);
-      setIsNewNameOpen(false);
-    } catch (error) {
-      console.error("Could not save new product name:", error);
-      setNewNameError(getErrorMessage(error));
-    } finally {
-      setIsSavingNewName(false);
-    }
+    setProducts((current) => [product, ...current]);
+    rememberSuggestion("dosageForm", product.dosageForm);
+    rememberSuggestion("strength", product.strength);
+    rememberSuggestion("packSize", product.packSize);
+    rememberSuggestion("barcode", product.barcode);
+    setIsAddOpen(false);
   }
-
-  async function saveAutoImportSetting(enabled: boolean) {
-    if (isSavingAutoImport || !pharmacyUserId) return;
-    setIsSavingAutoImport(true);
-    setImportError("");
-    try {
-      const existing = await supabase
-        .from("pharmacy_app_data")
-        .select("data_key")
-        .eq("owner_user_id", pharmacyUserId)
-        .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
-        .maybeSingle();
-      if (existing.error) throw existing.error;
-
-      const enabledAt = enabled ? new Date().toISOString() : null;
-      const payload = { enabled, enabledAt };
-      const updatedAt = new Date().toISOString();
-      const result = existing.data
-        ? await supabase.from("pharmacy_app_data")
-          .update({ payload, updated_at: updatedAt })
-          .eq("owner_user_id", pharmacyUserId)
-          .eq("data_key", PRODUCT_CATALOG_AUTO_SYNC_KEY)
-          .select("data_key")
-          .maybeSingle()
-        : await supabase.from("pharmacy_app_data")
-          .insert({
-            owner_user_id: pharmacyUserId,
-            data_key: PRODUCT_CATALOG_AUTO_SYNC_KEY,
-            payload,
-            updated_at: updatedAt,
-          })
-          .select("data_key")
-          .maybeSingle();
-      if (result.error) throw result.error;
-      if (!result.data) throw new Error("Could not save Auto Import settings.");
-
-      autoImportSettingsRef.current = { enabled, enabledAt };
-      setAutoImportEnabled(enabled);
-      if (enabled && enabledAt) void importCatalog(undefined, enabledAt);
-    } catch (error) {
-      setImportError(`Could not save Auto Import settings: ${getErrorMessage(error)}`);
-    } finally {
-      setIsSavingAutoImport(false);
-    }
-  }
-
-  async function importCatalog(company?: string, createdAfter?: string) {
-    if (isImporting || importingProductsRef.current || !storageReady || !pharmacyUserId
-      || (!company && !totalCatalogCount && !createdAfter)) return;
-    importingProductsRef.current = true;
-    setIsImporting(true);
-    setImportError("");
-    setImportProgress({ phase: createdAfter ? "Checking new shared products" : "Loading shared products", checked: 0, total: 0 });
-    let addedCount = 0;
-    try {
-      const rows = await loadAllCatalogRows(company, createdAfter);
-      if (rows.length === 0) {
-        if (!createdAfter) throw new Error("No shared catalog products were found to import.");
-        setImportProgress({ phase: "", checked: 0, total: 0 });
-        return;
-      }
-      const knownProducts = await loadAllPharmacyProducts(pharmacyUserId);
-      const importedIds = new Set(knownProducts.map((product) => product.sourceCatalogId).filter((id): id is string => Boolean(id)));
-      const importedKeys = new Set(knownProducts.map(getProductIdentityKey).filter((key): key is string => Boolean(key)));
-      const productsToInsert: Product[] = [];
-      let duplicateCount = 0;
-
-      for (const [index, row] of rows.entries()) {
-        if (importedIds.has(row.id)) {
-          duplicateCount++;
-        } else {
-          const catalogProduct = mapCatalogRowToProduct(row);
-          const identityKey = getProductIdentityKey(catalogProduct);
-          if (identityKey && importedKeys.has(identityKey)) {
-            duplicateCount++;
-          } else {
-            productsToInsert.push({
-              ...catalogProduct,
-              id: createProductId(),
-            });
-            importedIds.add(row.id);
-            if (identityKey) importedKeys.add(identityKey);
-          }
-        }
-
-        if ((index + 1) % 100 === 0 || index + 1 === rows.length) {
-          setImportProgress({ phase: "Checking catalog products", checked: index + 1, total: rows.length });
-          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        }
-      }
-
-      setImportProgress({ phase: "Saving products", checked: 0, total: productsToInsert.length });
-      for (let offset = 0; offset < productsToInsert.length; offset += IMPORT_BATCH_SIZE) {
-        const batch = productsToInsert.slice(offset, offset + IMPORT_BATCH_SIZE);
-        const { data: savedRows, error: saveError } = await supabase
-          .from("pharmacy_catalog_products")
-          .insert(batch.map((product) => mapProductToPharmacyRow(product, pharmacyUserId)))
-          .select("*");
-        if (saveError) throw saveError;
-        const savedProducts = ((savedRows ?? []) as PharmacyProductRow[]).map(mapPharmacyRowToProduct);
-        if (savedProducts.length !== batch.length) {
-          throw new Error(`Only ${savedProducts.length} of ${batch.length} products in this batch were saved.`);
-        }
-        addedCount += savedProducts.length;
-        setTotalProductCount((count) => count + savedProducts.length);
-        setImportProgress({ phase: "Saving products", checked: addedCount, total: productsToInsert.length });
-      }
-
-      setImportSummary({ added: addedCount, duplicates: duplicateCount });
-      setImportProgress({ phase: "Import complete", checked: rows.length, total: rows.length });
-      const currentView = productListViewRef.current;
-      const refreshedPage = createdAfter ? currentView.currentPage : 1;
-      const refreshedSearch = createdAfter ? currentView.searchTerm : "";
-      const refreshedPageSize = currentView.pageSize;
-      const refreshed = await loadPharmacyProductPage(pharmacyUserId, refreshedPage, refreshedPageSize, refreshedSearch);
-      initialQueryKey.current = `${pharmacyUserId}:${refreshedPage}:${refreshedPageSize}:${refreshedSearch.trim()}`;
-      setCurrentPage(refreshedPage);
-      setSearchTerm(refreshedSearch);
-      setProducts(refreshed.products);
-      setTotalProductCount(refreshed.count);
-    } catch (error) {
-      console.error("Product catalog import failed:", error);
-      const message = getErrorMessage(error);
-      setImportError(addedCount
-        ? `${message} ${addedCount} product(s) were saved before the import stopped.`
-        : message);
-      setImportProgress({ phase: "Import failed", checked: addedCount, total: 0 });
-    } finally {
-      importingProductsRef.current = false;
-      setIsImporting(false);
-      if (autoImportPendingRef.current && autoImportSettingsRef.current.enabled) {
-        autoImportPendingRef.current = false;
-        const settings = autoImportSettingsRef.current;
-        if (settings.enabledAt) void importCatalog(undefined, settings.enabledAt);
-      }
-    }
-  }
-  importCatalogRef.current = importCatalog;
 
   function closeModal() {
+    setIsAddOpen(false);
     setSelectedProduct(null);
   }
 
   return (
-    <div className={adminMode ? undefined : "pharmacy-product-management"} style={{ minHeight: adminMode ? "auto" : "100vh", background: adminMode ? "transparent" : "#f8f8f7", color: "#202624", fontFamily: adminMode ? "inherit" : "Inter, Arial, sans-serif" }}>
-      {!adminMode && <ProductManagementHeader />}
-      <div style={{ display: "flex", minHeight: adminMode ? "auto" : "calc(100vh - 62px)" }}>
-        {!adminMode && <Sidebar />}
-        <main style={{ flex: 1, minWidth: 0, width: adminMode ? "100%" : undefined, maxWidth: adminMode ? 1440 : undefined, margin: adminMode ? "0 auto" : undefined, padding: adminMode ? "28px clamp(16px, 3vw, 38px) 44px" : "32px clamp(18px, 4vw, 48px) 48px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: adminMode ? "flex-end" : "flex-start", gap: 20, flexWrap: "wrap", marginBottom: adminMode ? 22 : 24 }}>
+    <div style={{ minHeight: "100vh", background: "#f8f8f7", color: "#202624", fontFamily: "Inter, Arial, sans-serif" }}>
+      <ProductManagementHeader />
+      <div style={{ display: "flex", minHeight: "calc(100vh - 62px)" }}>
+        <Sidebar />
+        <main style={{ flex: 1, minWidth: 0, padding: "32px clamp(18px, 4vw, 48px) 48px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap", marginBottom: 24 }}>
             <div>
-              <div style={{ color: adminMode ? "#78867f" : "#72807b", fontSize: adminMode ? 11 : 12, marginBottom: adminMode ? 6 : 8 }}>{adminMode ? "Admin / Analytics" : "Pharmacy / Product Management"}</div>
-              <h1 style={{ margin: 0, color: adminMode ? "#1d2c25" : "#172622", fontSize: adminMode ? 26 : 30, lineHeight: 1.2, fontWeight: 750 }}>{adminMode ? "Product Data Import" : "Product Management"}</h1>
-              <p style={{ margin: adminMode ? "7px 0 0" : "8px 0 0", color: adminMode ? "#78867f" : "#6a7973", fontSize: adminMode ? 12 : 14 }}>{adminMode ? "Import, validate, search, and manage the shared product catalog." : "Manage your pharmacy catalog, prices, and product availability."}</p>
+              <div style={{ color: "#72807b", fontSize: 12, marginBottom: 8 }}>Pharmacy / Product Management</div>
+              <h1 style={{ margin: 0, color: "#172622", fontSize: 30, lineHeight: 1.2, fontWeight: 750 }}>Product Management</h1>
+              <p style={{ margin: "8px 0 0", color: "#6a7973", fontSize: 14 }}>Manage your pharmacy catalog, prices, and product availability.</p>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {!adminMode && (
-                <button type="button" disabled={isImporting || !storageReady || !pharmacyUserId} onClick={openNewNameModal} style={{ border: "1px solid #179c70", borderRadius: 7, background: "#fff", color: "#16845f", padding: "9px 13px", fontSize: 13, fontWeight: 650, cursor: isImporting || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer", opacity: isImporting || !storageReady || !pharmacyUserId ? 0.6 : 1 }}>
-                  + Add New
-                </button>
-              )}
-            </div>
+            <button type="button" onClick={() => setIsAddOpen(true)} style={{ border: 0, borderRadius: 7, background: "#179c70", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
+              + Add product
+            </button>
           </div>
 
-          <section aria-label="Import products" style={{ marginBottom: 18, border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
-            <div style={{ padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
-              <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Import product data</h2>
-              <p style={{ margin: "5px 0 0", color: "#6a7973", fontSize: 11 }}>Import one manufacturer or add every product from the shared catalog to your pharmacy list.</p>
+          <section style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
+              <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Product list <span style={{ color: "#8a9690", fontSize: 12, fontWeight: 500 }}>({products.length})</span></h2>
+              <input aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
             </div>
-            <div style={{ display: "flex", alignItems: "end", gap: 9, flexWrap: "nowrap", overflowX: "auto", padding: "14px 18px" }}>
-              {!adminMode && (
-                <>
-                  <label style={{ display: "grid", flex: "0 0 auto", gap: 5, color: "#526158", fontSize: 11 }}>
-                    Manufacturer / company
-                    <select aria-label="Select manufacturer or company" value={effectiveSelectedCompany} onChange={(event) => setSelectedCompany(event.target.value)} disabled={isLoadingCompanies || isImporting || !availableCompanies.length} style={{ width: 280, maxWidth: "min(32vw, 560px)", minWidth: 220, border: "1px solid #dce5df", borderRadius: 6, background: "#fff", padding: "9px 10px", color: "#26352f", fontSize: 12 }}>
-                      <option value="">{isLoadingCompanies ? "Loading manufacturers..." : availableCompanies.length ? "Select manufacturer" : "No new products available"}</option>
-                      {availableCompanies.map((company) => <option key={company.name} value={company.name}>{company.name} ({company.count} products)</option>)}
-                    </select>
-                  </label>
-                  <button type="button" disabled={isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany} onClick={() => void importCatalog(effectiveSelectedCompany)} style={{ flex: "0 0 auto", alignSelf: "end", whiteSpace: "nowrap", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || !effectiveSelectedCompany ? "not-allowed" : "pointer" }}>{isImporting ? "Importing..." : "Import company products"}</button>
-                </>
-              )}
-              {!adminMode && (
-                <button
-                  type="button"
-                  style={{ flex: "0 0 auto", alignSelf: "end", whiteSpace: "nowrap", border: 0, borderRadius: 6, background: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "#aab7af" : "#179c70", color: "#fff", padding: "10px 13px", fontSize: 12, fontWeight: 650, cursor: isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0 ? "not-allowed" : "pointer" }}
-                  disabled={isImporting || !storageReady || isLoadingCompanies || totalCatalogCount === 0}
-                  onClick={() => void importCatalog()}
-                >
-                  {isImporting ? "Importing..." : "All Data Import"}
-                </button>
-              )}
-              {!adminMode && (
-                <div style={{ display: "flex", flex: "0 0 auto", alignItems: "center", alignSelf: "end", minWidth: 120, marginLeft: 4 }}>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={autoImportEnabled}
-                    aria-label="Auto Import"
-                    disabled={isSavingAutoImport || !storageReady || !pharmacyUserId}
-                    onClick={() => void saveAutoImportSetting(!autoImportEnabled)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      border: 0,
-                      background: "transparent",
-                      color: "#34453b",
-                      padding: "8px 4px",
-                      fontSize: 12,
-                      fontWeight: 650,
-                      whiteSpace: "nowrap",
-                      cursor: isSavingAutoImport || !storageReady || !pharmacyUserId ? "not-allowed" : "pointer",
-                      opacity: isSavingAutoImport || !storageReady || !pharmacyUserId ? 0.6 : 1,
-                    }}>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        width: 36,
-                        height: 21,
-                        padding: 2,
-                        borderRadius: 12,
-                        background: autoImportEnabled ? "#179c70" : "#c5cec8",
-                        transition: "background 0.15s ease",
-                      }}>
-                      <span style={{
-                        width: 17,
-                        height: 17,
-                        borderRadius: "50%",
-                        background: "#fff",
-                        transform: autoImportEnabled ? "translateX(15px)" : "translateX(0)",
-                        transition: "transform 0.15s ease",
-                      }} />
-                    </span>
-                    {isSavingAutoImport ? "Saving..." : "Auto Import"}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {(isImporting || importProgress.phase) && (
-              <div aria-live="polite" style={{ padding: "0 18px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6, color: "#5f7066", fontSize: 10 }}>
-                  <span>{importProgress.phase || "Preparing import"}</span>
-                  <strong>{progressPercentage}%{importProgress.total ? ` · ${importProgress.checked}/${importProgress.total} rows` : ""}</strong>
-                </div>
-                <div role="progressbar" aria-label="Import progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercentage} style={{ height: 7, overflow: "hidden", borderRadius: 5, background: "#eaf0ec" }}>
-                  <div style={{ width: `${progressPercentage}%`, height: "100%", borderRadius: 5, background: importError ? "#d36b61" : "#27a879", transition: "width 0.15s ease" }} />
-                </div>
-                {importProgress.phase === "Import complete" && <p style={{ margin: "7px 0 0", color: "#64736b", fontSize: 10 }}>Added {importSummary.added} · Duplicates skipped {importSummary.duplicates}</p>}
-              </div>
-            )}
-            {importError && <p role="alert" style={{ margin: "0 18px 14px", color: "#ad4b43", fontSize: 11 }}>{importError}</p>}
-          </section>
-
-          <section className="pharmacy-product-list" style={{ border: "1px solid #e4e9e5", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
-            <div className="pharmacy-product-list-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "16px 18px", borderBottom: "1px solid #edf0ed" }}>
-              <h2 style={{ margin: 0, color: "#26352f", fontSize: 15, fontWeight: 700 }}>Product list <span style={{ color: "#8a9690", fontSize: 12, fontWeight: 500 }}>({totalProductCount})</span></h2>
-              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <ExcelExportButton
-                  fileName="Product_Management"
-                  disabled={adminMode || !storageReady || !pharmacyUserId}
-                  onError={(message) => setImportError(`Excel export failed: ${message}`)}
-                  sheets={[]}
-                  getSheets={async () => {
-                    if (!pharmacyUserId) throw new Error("Sign in to export your product list.");
-                    const allProducts: Product[] = [];
-                    let page = 1;
-                    let expectedCount = 0;
-                    let lastPageLength = 0;
-                    do {
-                      const result = await loadPharmacyProductPage(pharmacyUserId, page, CATALOG_PAGE_SIZE, searchTerm);
-                      allProducts.push(...result.products);
-                      expectedCount = result.count;
-                      lastPageLength = result.products.length;
-                      page += 1;
-                    } while (allProducts.length < expectedCount && lastPageLength > 0);
-
-                    return [{
-                      name: "Product Management",
-                      columns: ["ID Number", "Brand Name", "Generic Name", "Company", "Product Type", "Category", "Strength", "Dosage Form", "Pack Size", "Unit", "Barcode", "Retail Price", "Unit Price", "Pack Price", "Usage Type", "DAR Code", "Medicine Type Category", "Registration Information"],
-                      rows: allProducts.map((product) => [
-                        product.sourceCatalogId ?? product.id,
-                        product.brand,
-                        product.genericName,
-                        product.manufacturer,
-                        product.productType,
-                        product.category,
-                        product.strength,
-                        product.dosageForm,
-                        product.packSize,
-                        product.unit,
-                        product.barcode,
-                        product.retailPrice ?? "",
-                        product.unitPrice ?? "",
-                        product.packPrice ?? "",
-                        product.usageType ?? "",
-                        product.darCode ?? "",
-                        product.medicineTypeCategory ?? "",
-                        product.registrationInformation ?? "",
-                      ]),
-                    }];
-                  }}
-                />
-                <input className="pharmacy-product-search" aria-label="Search products" placeholder="Search products..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setCurrentPage(1); setExpandedProductId(null); }} style={{ width: 240, maxWidth: "100%", border: "1px solid #e0e6e1", borderRadius: 6, padding: "8px 10px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }} />
-              </div>
-            </div>
-            <div className="pharmacy-product-desktop-table" style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1450, textAlign: "left" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980, textAlign: "left" }}>
                 <thead>
                   <tr>
-                    {["ID Number", "Brand Name", "Generic Name", "Company", "Strength", "Dosage Form", "Pack Size", "Unit Price", "Pack Price", "Actions"].map((column) => (
-                      <th key={column} style={{ width: column === "ID Number" ? 150 : undefined, maxWidth: column === "ID Number" ? 150 : undefined, padding: "11px 13px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: column === "ID Number" ? "normal" : "nowrap" }}>{column}</th>
+                    {["Product ID", "Medicine Name", "Brand", "Manufacturer", "Dosage Form", "Strength", "Pack Size", "Unit", "Action"].map((column) => (
+                      <th key={column} style={{ padding: "11px 13px", background: "#f8faf8", borderBottom: "1px solid #edf0ed", color: "#6c7a73", fontSize: 11, fontWeight: 650, whiteSpace: "nowrap" }}>{column}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedProducts.map((product) => (
-                    <tr
-                      key={product.id}
-                      ref={editingProduct?.id === product.id ? assignEditRowRef : undefined}
-                      onBlur={(event) => {
-                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                          void saveEditedProduct();
-                        }
-                      }}
-                    >
-                      <td title={product.sourceCatalogId ?? product.id} style={{ width: 150, maxWidth: 150, padding: "13px", borderBottom: "1px solid #f0f2f0", color: "#26352f", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(product.sourceCatalogId ?? product.id).length > 30 ? `${(product.sourceCatalogId ?? product.id).slice(0, 27)}...` : product.sourceCatalogId ?? product.id}</td>
-                      {([
-                        ["brand", "brand"],
-                        ["genericName", "genericName"],
-                        ["manufacturer", "manufacturer"],
-                        ["strength", "strength"],
-                        ["dosageForm", "dosageForm"],
-                        ["packSize", "packSize"],
-                        ["unitPrice", "unitPrice"],
-                        ["packPrice", "packPrice"],
-                      ] as const).map(([field, key]) => {
-                        const value = editingProduct?.id === product.id
-                          ? editingProduct[field] ?? (field === "unitPrice" ? editingProduct.retailPrice : "")
-                          : product[field] ?? (field === "unitPrice" ? product.retailPrice : "");
-                        return (
-                          <td key={`${product.id}-${key}`} style={{ padding: editingProduct?.id === product.id ? "7px" : "13px", borderBottom: "1px solid #f0f2f0", color: "#687871", fontSize: 12, whiteSpace: "nowrap" }}>
-                            {editingProduct?.id === product.id ? (
-                              <input
-                                aria-label={`Edit ${key} for ${product.id}`}
-                                value={value}
-                                disabled={savingProductId === product.id}
-                                onChange={(event) => updateEditingProduct(field, event.target.value)}
-                                style={{ width: "100%", minWidth: 90, boxSizing: "border-box", border: "1px solid #b9d8c8", borderRadius: 4, padding: "7px", color: "#26352f", fontSize: 12, outlineColor: "#28a879" }}
-                              />
-                            ) : value || "—"}
-                          </td>
-                        );
-                      })}
-                      <td style={{ padding: "10px 13px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <button type="button" disabled={editingProduct?.id === product.id} onClick={() => setSelectedProduct(product)} style={{ border: "1px solid #dce6df", borderRadius: 5, background: "#fff", color: "#227553", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: editingProduct?.id === product.id ? "not-allowed" : "pointer", opacity: editingProduct?.id === product.id ? 0.5 : 1 }}>Details</button>
-                          {editingProduct?.id === product.id ? (
-                            <>
-                              <button type="button" disabled={savingProductId === product.id} onClick={() => void saveEditedProduct()} style={{ border: 0, borderRadius: 5, background: savingProductId === product.id ? "#aab7af" : "#179c70", color: "#fff", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: savingProductId === product.id ? "wait" : "pointer" }}>{savingProductId === product.id ? "Saving..." : "Save"}</button>
-                              <button type="button" disabled={savingProductId === product.id} onClick={() => { setImportError(""); setEditingProduct(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#526158", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: savingProductId === product.id ? "not-allowed" : "pointer" }}>Cancel</button>
-                            </>
-                          ) : (
-                            <>
-                              <button type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => { setImportError(""); setEditingProduct({ ...product }); }} style={{ border: "1px solid #dce6df", borderRadius: 5, background: "#fff", color: "#526158", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: editingProduct || savingProductId ? "not-allowed" : "pointer", opacity: editingProduct || savingProductId ? 0.5 : 1 }}>Edit</button>
-                              <button type="button" disabled={Boolean(savingProductId) || Boolean(editingProduct)} onClick={() => void deleteProduct(product)} style={{ border: "1px solid #f0d7d4", borderRadius: 5, background: "#fff", color: "#b34b43", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: savingProductId || editingProduct ? "not-allowed" : "pointer", opacity: editingProduct ? 0.5 : 1 }}>Delete</button>
-                            </>
-                          )}
-                        </div>
+                  {filteredProducts.map((product) => (
+                    <tr key={product.id}>
+                      {[product.id, product.medicineName, product.brand, product.manufacturer, product.dosageForm, product.strength, product.packSize, product.unit].map((cell, index) => (
+                        <td key={`${product.id}-${index}`} style={{ padding: "13px", borderBottom: "1px solid #f0f2f0", color: index < 2 ? "#26352f" : "#687871", fontSize: 12, fontWeight: index < 2 ? 600 : 400, whiteSpace: "nowrap" }}>{cell || "—"}</td>
+                      ))}
+                      <td style={{ padding: "13px", borderBottom: "1px solid #f0f2f0" }}>
+                        <button type="button" onClick={() => setSelectedProduct(product)} style={{ border: "1px solid #dce6df", borderRadius: 5, background: "#fff", color: "#227553", padding: "6px 9px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Details</button>
                       </td>
                     </tr>
                   ))}
                   {filteredProducts.length === 0 && (
                     <tr>
-                      <td colSpan={10} style={{ padding: "52px 20px", textAlign: "center", color: "#77857d", fontSize: 13 }}>
-                        {!storageReady ? "Loading products..." : searchTerm ? "No products match your search." : "No products yet. Import products from the shared catalog to add them to your pharmacy list."}
+                      <td colSpan={9} style={{ padding: "52px 20px", textAlign: "center", color: "#77857d", fontSize: 13 }}>
+                        {searchTerm ? "No products match your search." : "No products yet. Select Add product to create your first item."}
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div className="pharmacy-product-mobile-list">
-              <table>
-                <thead>
-                  <tr>
-                    {["ID Number", "Brand Name", "Generic Name", "Company"].map((column) => <th key={column}>{column}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedProducts.map((product) => (
-                    <Fragment key={`mobile-${product.id}`}>
-                      <tr
-                        className="pharmacy-product-mobile-row"
-                        tabIndex={0}
-                        aria-expanded={expandedProductId === product.id}
-                        onClick={() => setExpandedProductId((current) => current === product.id ? null : product.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setExpandedProductId((current) => current === product.id ? null : product.id);
-                          }
-                        }}
-                      >
-                        {[product.sourceCatalogId ?? product.id, product.brand || "—", product.genericName || "—", product.manufacturer || "—"].map((value, index) => <td key={`${product.id}-${index}`}>{value}</td>)}
-                      </tr>
-                      {expandedProductId === product.id && (
-                        <tr className="pharmacy-product-expanded-row">
-                          <td colSpan={4}>
-                            <div className="pharmacy-product-expanded-details" ref={editingProduct?.id === product.id ? assignEditRowRef : undefined}>
-                              {([
-                                ["ID Number", "id"],
-                                ["Brand Name", "brand"],
-                                ["Generic Name", "genericName"],
-                                ["Company", "manufacturer"],
-                                ["Strength", "strength"],
-                                ["Dosage Form", "dosageForm"],
-                                ["Pack Size", "packSize"],
-                                ["Unit Price", "unitPrice"],
-                                ["Pack Price", "packPrice"],
-                              ] as const).map(([label, field]) => {
-                                const value = field === "id"
-                                  ? product.sourceCatalogId ?? product.id
-                                  : editingProduct?.id === product.id
-                                    ? editingProduct[field] ?? (field === "unitPrice" ? editingProduct.retailPrice : "")
-                                    : product[field] ?? (field === "unitPrice" ? product.retailPrice : "");
-                                return (
-                                  <div className="pharmacy-product-expanded-value" key={`${product.id}-${field}`}>
-                                    <span>{label}</span>
-                                    {editingProduct?.id === product.id && field !== "id" ? (
-                                      <input
-                                        aria-label={`Edit ${field} for ${product.id}`}
-                                        value={value}
-                                        disabled={savingProductId === product.id}
-                                        onChange={(event) => updateEditingProduct(field, event.target.value)}
-                                      />
-                                    ) : <strong>{value || "—"}</strong>}
-                                  </div>
-                                );
-                              })}
-                              <div className="pharmacy-product-expanded-actions">
-                                {editingProduct?.id === product.id ? (
-                                  <>
-                                    <button className="pharmacy-product-action-save" type="button" disabled={savingProductId === product.id} onClick={() => void saveEditedProduct()}>{savingProductId === product.id ? "Saving..." : "Save"}</button>
-                                    <button className="pharmacy-product-action-cancel" type="button" disabled={savingProductId === product.id} onClick={() => { setImportError(""); setEditingProduct(null); }}>Cancel</button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button className="pharmacy-product-action-details" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => setSelectedProduct(product)}>Details</button>
-                                    <button className="pharmacy-product-action-edit" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => { setImportError(""); setEditingProduct({ ...product }); }}>Edit</button>
-                                    <button className="pharmacy-product-action-delete" type="button" disabled={Boolean(editingProduct) || Boolean(savingProductId)} onClick={() => void deleteProduct(product)}>Delete</button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                  {filteredProducts.length === 0 && (
-                    <tr><td colSpan={4} className="pharmacy-product-mobile-empty">{!storageReady ? "Loading products..." : searchTerm ? "No products match your search." : "No products yet. Import products from the shared catalog to add them to your pharmacy list."}</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="pharmacy-product-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, padding: "12px 16px", borderTop: "1px solid #edf0ed", color: "#687871", fontSize: 11 }}>
-              <span className="pharmacy-product-pagination-count">Showing {firstVisibleProduct}-{lastVisibleProduct} of {totalProductCount} products</span>
-              <div className="pharmacy-product-pagination-options" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  Rows per page
-                  <select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", padding: "6px 8px", color: "#34453b", fontSize: 11 }}>
-                    {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
-                  </select>
-                </label>
-              </div>
-              <div className="pharmacy-product-pagination-nav">
-                <button className="pharmacy-product-pagination-previous" type="button" aria-label="Previous page" disabled={safeCurrentPage <= 1} onClick={() => { setCurrentPage(safeCurrentPage - 1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage <= 1 ? "not-allowed" : "pointer", opacity: safeCurrentPage <= 1 ? 0.5 : 1 }}>Previous</button>
-                <span className="pharmacy-product-pagination-page">Page {safeCurrentPage} of {totalPages}</span>
-                <button className="pharmacy-product-pagination-next" type="button" aria-label="Next page" disabled={safeCurrentPage >= totalPages} onClick={() => { setCurrentPage(safeCurrentPage + 1); setExpandedProductId(null); }} style={{ border: "1px solid #dce5df", borderRadius: 5, background: "#fff", color: "#34453b", padding: "6px 9px", fontSize: 11, cursor: safeCurrentPage >= totalPages ? "not-allowed" : "pointer", opacity: safeCurrentPage >= totalPages ? 0.5 : 1 }}>Next</button>
-              </div>
-            </div>
+            <div style={{ padding: "12px 16px", color: "#87928c", fontSize: 11 }}>Showing {filteredProducts.length} of {products.length} products</div>
           </section>
         </main>
       </div>
 
-      {isNewNameOpen && (
-        <div className="pharmacy-product-name-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNameModal(); }} style={{ position: "fixed", inset: 0, zIndex: 51, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
-          <section className="pharmacy-product-name-card" role="dialog" aria-modal="true" aria-labelledby="new-product-name-title" style={{ width: "min(760px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
-            <div className="pharmacy-product-name-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
+      {isAddOpen && (
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="add-product-title" style={{ width: "min(760px, 100%)", maxHeight: "min(90vh, 820px)", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
+            <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea", background: "#fff" }}>
               <div>
-                <h2 id="new-product-name-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add New Product</h2>
-                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Add product details and pricing to your pharmacy list.</p>
+                <h2 id="add-product-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Add product</h2>
+                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>Enter medicine details to add it to your product list.</p>
               </div>
-              <button className="pharmacy-product-name-close" type="button" aria-label="Close" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>×</button>
+              <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <form onSubmit={(event) => void saveNewName(event)} noValidate>
-              <div className="pharmacy-product-name-form-content" style={{ padding: "8px 24px 18px" }}>
-                <h3 style={{ margin: "8px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Product details</h3>
-                <div className="pharmacy-product-name-field-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
-                  <label style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
-                    ID Number
-                    <input aria-label="ID Number" value={isGeneratingNewNameId ? "Generating ID..." : newNameFields.id} readOnly style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: "#f8faf8", padding: "6px 9px", color: "#26372f", fontSize: 12, fontWeight: 600 }} />
-                  </label>
-                  {([
-                    ["brandName", "Brand Name"],
-                    ["genericName", "Generic Name"],
-                    ["company", "Company Name"],
-                    ["strength", "Strength"],
-                    ["dosageForm", "Dosage Form"],
-                  ] as const).map(([field, label]) => (
-                    <label key={field} style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
-                      <span>{label}{(field === "brandName" || field === "company") && <span aria-hidden="true" style={{ color: "#c4574c" }}> *</span>}</span>
-                      <div style={{ position: "relative" }}>
-                        <input
-                          aria-label={label}
-                          aria-required={field === "brandName" || field === "company"}
-                          required={field === "brandName" || field === "company"}
-                          autoComplete={field === "company" ? "off" : undefined}
-                          value={newNameFields[field]}
-                          onFocus={field === "company" ? () => setIsCompanyInputFocused(true) : undefined}
-                          onBlur={field === "company" ? () => setIsCompanyInputFocused(false) : undefined}
-                          onKeyDown={field === "company" && inlineCompanySuggestion ? (event) => {
-                            const input = event.currentTarget;
-                            if (
-                              (event.key === "Tab" || event.key === "ArrowRight") &&
-                              (event.key === "Tab" || input.selectionStart === input.value.length)
-                            ) {
-                              event.preventDefault();
-                              setNewNameFields((current) => ({ ...current, company: inlineCompanySuggestion }));
-                            }
-                          } : undefined}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setNewNameFields((current) => ({ ...current, [field]: value }));
-                            setNewNameError("");
-                          }}
-                          style={{ position: "relative", zIndex: 1, width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: inlineCompanySuggestion ? "transparent" : "#fff", padding: "6px 9px", color: inlineCompanySuggestion ? "transparent" : "#26372f", caretColor: "#26372f", fontSize: 12 }}
-                        />
-                        {field === "company" && inlineCompanySuggestion && (
-                          <span aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", padding: "7px 10px", color: "#26372f", fontSize: 12, lineHeight: "normal", whiteSpace: "pre", pointerEvents: "none" }}>
-                            <span style={{ color: "transparent" }}>{newNameFields.company}</span>
-                            <span style={{ color: "#9aa79f" }}>{inlineCompanySuggestion.slice(typedCompanyName.length)}</span>
-                          </span>
-                        )}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                <h3 style={{ margin: "14px 0 0", padding: "10px 0", borderBottom: "2px solid #cbd8cf", color: "#526158", fontSize: 12, fontWeight: 700 }}>Pack &amp; pricing</h3>
-                <div className="pharmacy-product-name-field-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", columnGap: 18 }}>
-                  {([
-                    ["packSize", "Pack Size"],
-                    ["unitPrice", "Unit Price"],
-                    ["packPrice", "Pack Price"],
-                  ] as const).map(([field, label]) => (
-                    <label key={field} style={{ display: "grid", alignContent: "start", gap: 6, padding: "10px 10px 10px 0", borderBottom: "1px solid #dce4de", color: "#7a8981", fontSize: 11 }}>
-                      <span>{label}</span>
-                      <input
-                        aria-label={label}
-                        type="text"
-                        inputMode="decimal"
-                        value={newNameFields[field]}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setNewNameFields((current) => ({ ...current, [field]: value }));
-                          setNewNameError("");
-                        }}
-                        onBlur={() => handleNewNamePriceBlur(field)}
-                        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d5dfd8", borderRadius: 5, background: "#fff", padding: "6px 9px", color: "#26372f", fontSize: 12 }}
-                      />
-                    </label>
-                  ))}
-                </div>
+            <form onSubmit={addProduct}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, padding: 24 }}>
+                <FormField label="Product ID (Auto)"><input name="productId" value={nextProductId} readOnly style={{ ...fieldStyle, background: "#f5f8f5", color: "#75847a" }} /></FormField>
+                <FormField label="Medicine Name"><input name="medicineName" required autoFocus placeholder="e.g. Paracetamol 500mg" style={fieldStyle} /></FormField>
+                <FormField label="Brand"><input name="brand" required placeholder="Brand name" style={fieldStyle} /></FormField>
+                <FormField label="Generic Name"><input name="genericName" required placeholder="Generic medicine name" style={fieldStyle} /></FormField>
+                <FormField label="Manufacturer/Company"><input name="manufacturer" required placeholder="Manufacturer or company" style={fieldStyle} /></FormField>
+                <FormField label="Product Type"><input name="productType" required placeholder="e.g. Medicine" style={fieldStyle} /></FormField>
+                <FormField label="Category"><input name="category" required placeholder="e.g. Pain relief" style={fieldStyle} /></FormField>
+                <FormField label="Dosage Form">
+                  <input name="dosageForm" list="dosage-form-options" required placeholder="Choose or enter a dosage form" onBlur={(event) => rememberSuggestion("dosageForm", event.currentTarget.value)} style={fieldStyle} />
+                  <datalist id="dosage-form-options">{suggestions.dosageForm.map((option) => <option key={option} value={option} />)}</datalist>
+                </FormField>
+                <FormField label="Strength">
+                  <input name="strength" list="strength-options" required placeholder="Choose or enter strength" onBlur={(event) => rememberSuggestion("strength", event.currentTarget.value)} style={fieldStyle} />
+                  <datalist id="strength-options">{suggestions.strength.map((option) => <option key={option} value={option} />)}</datalist>
+                </FormField>
+                <FormField label="Pack Size">
+                  <input name="packSize" list="pack-size-options" required placeholder="Choose or enter pack size" onBlur={(event) => rememberSuggestion("packSize", event.currentTarget.value)} style={fieldStyle} />
+                  <datalist id="pack-size-options">{suggestions.packSize.map((option) => <option key={option} value={option} />)}</datalist>
+                </FormField>
+                <FormField label="Unit">
+                  <select name="unit" required defaultValue="" style={fieldStyle}>
+                    <option value="" disabled>Select unit</option>
+                    {["Tablet", "Box", "Bottle", "Strip"].map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Barcode/GTIN">
+                  <input name="barcode" list="barcode-options" placeholder="Choose or enter barcode" onBlur={(event) => rememberSuggestion("barcode", event.currentTarget.value)} style={fieldStyle} />
+                  <datalist id="barcode-options">{suggestions.barcode.map((option) => <option key={option} value={option} />)}</datalist>
+                </FormField>
               </div>
-              <p className="pharmacy-product-name-help" style={{ margin: "-7px 24px 16px", color: "#77857d", fontSize: 11 }}>Price fields calculate the related value when you leave the input. Enter any two values to calculate the third.</p>
-              {newNameError && <p className="pharmacy-product-name-error" role="alert" style={{ margin: "0 24px 16px", color: "#b34b43", fontSize: 12 }}>{newNameError}</p>}
-              <div className="pharmacy-product-name-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
-                <button className="pharmacy-product-name-cancel" type="button" disabled={isGeneratingNewNameId || isSavingNewName} onClick={closeNewNameModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: isGeneratingNewNameId || isSavingNewName ? "not-allowed" : "pointer" }}>Cancel</button>
-                <button className="pharmacy-product-name-save" type="submit" disabled={isGeneratingNewNameId || isSavingNewName || !newNameFields.id} style={{ border: 0, borderRadius: 6, background: isGeneratingNewNameId || isSavingNewName || !newNameFields.id ? "#aab7af" : "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: isSavingNewName ? "wait" : "pointer" }}>{isGeneratingNewNameId ? "Generating ID..." : isSavingNewName ? "Saving..." : "Save"}</button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+                <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                <button type="submit" style={{ border: 0, borderRadius: 6, background: "#179c70", color: "#fff", padding: "9px 14px", fontSize: 12, fontWeight: 650, cursor: "pointer" }}>Save product</button>
               </div>
             </form>
           </section>
@@ -1454,33 +283,37 @@ export default function ProductManagementPage({ adminMode = false }: { adminMode
       )}
 
       {selectedProduct && (
-        <div className="pharmacy-product-details-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
-          <section className="pharmacy-product-details-card" role="dialog" aria-modal="true" aria-labelledby="product-details-title" style={{ width: "min(600px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
-            <div className="pharmacy-product-details-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }} style={{ position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center", padding: 16, background: "rgba(15, 28, 21, 0.48)" }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="product-details-title" style={{ width: "min(600px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 10, background: "#fff", boxShadow: "0 24px 80px rgba(7, 28, 17, 0.24)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, padding: "20px 24px", borderBottom: "1px solid #e9eeea" }}>
               <div>
                 <h2 id="product-details-title" style={{ margin: 0, color: "#20342a", fontSize: 20, fontWeight: 700 }}>Product details</h2>
+                <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>{selectedProduct.id} · {selectedProduct.medicineName}</p>
               </div>
               <button type="button" aria-label="Close" onClick={closeModal} style={{ border: 0, background: "transparent", color: "#718078", fontSize: 24, lineHeight: 1, cursor: "pointer" }}>×</button>
             </div>
-            <dl className="pharmacy-product-details-fields" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 0, margin: 0, padding: "8px 24px 18px" }}>
+            <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 0, margin: 0, padding: "8px 24px 18px" }}>
               {([
-                ["ID Number", selectedProduct.sourceCatalogId ?? selectedProduct.id],
-                ["Brand Name", selectedProduct.brand || "-"],
-                ["Generic Name", selectedProduct.genericName || "-"],
-                ["Company", selectedProduct.manufacturer || "-"],
-                ["Strength", selectedProduct.strength || "-"],
-                ["Dosage Form", selectedProduct.dosageForm || "-"],
-                ["Pack Size", selectedProduct.packSize || "-"],
-                ["Unit Price", selectedProduct.unitPrice || selectedProduct.retailPrice || "-"],
-                ["Pack Price", selectedProduct.packPrice || "-"],
+                ["Product ID", selectedProduct.id],
+                ["Medicine Name", selectedProduct.medicineName],
+                ["Brand", selectedProduct.brand],
+                ["Generic Name", selectedProduct.genericName],
+                ["Manufacturer/Company", selectedProduct.manufacturer],
+                ["Product Type", selectedProduct.productType],
+                ["Category", selectedProduct.category],
+                ["Dosage Form", selectedProduct.dosageForm],
+                ["Strength", selectedProduct.strength],
+                ["Pack Size", selectedProduct.packSize],
+                ["Unit", selectedProduct.unit],
+                ["Barcode/GTIN", selectedProduct.barcode || "Not provided"],
               ] as const).map(([label, value]) => (
-                <div className="pharmacy-product-details-field" key={label} style={{ padding: "13px 10px 13px 0", borderBottom: "1px solid #edf0ed" }}>
+                <div key={label} style={{ padding: "13px 10px 13px 0", borderBottom: "1px solid #edf0ed" }}>
                   <dt style={{ color: "#7a8981", fontSize: 11 }}>{label}</dt>
-                  <dd className="pharmacy-product-details-value" style={{ margin: "5px 0 0", color: "#26372f", fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{value}</dd>
+                  <dd style={{ margin: "5px 0 0", color: "#26372f", fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{value}</dd>
                 </div>
               ))}
             </dl>
-            <div className="pharmacy-product-details-footer" style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 24px", borderTop: "1px solid #e9eeea", background: "#fbfcfb" }}>
               <button type="button" onClick={closeModal} style={{ border: "1px solid #dce5df", borderRadius: 6, background: "#fff", color: "#526158", padding: "9px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Close</button>
             </div>
           </section>
