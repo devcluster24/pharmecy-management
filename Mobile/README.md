@@ -18,7 +18,7 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm start
    ```
 
-`npm start` starts Expo in Expo Go mode. Open Expo Go on a phone connected to the same network and scan the QR code. OCR controls stay disabled in Expo Go because its native ML Kit dependency is not included there. To use OCR, set `EXPO_PUBLIC_ENABLE_OCR=true` in `.env.local` and start a development build with `npm run start:dev-client`.
+`npm start` starts Expo in Expo Go mode. Open Expo Go on a phone connected to the same network and scan the QR code. OCR controls are enabled by default in native Android/iOS builds and remain disabled in Expo Go because its native ML Kit dependency is not included there. Set `EXPO_PUBLIC_ENABLE_OCR=false` to disable OCR in a native build. To use OCR during development, install a development build and run `npm run start:dev-client`.
 
 The Expo server can also open the app in a
 

@@ -38,7 +38,7 @@ const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const PURCHASE_SEARCH_CACHE = 'purchase-search-data';
 const PRODUCT_SEARCH_CACHE = 'purchase-product-catalog';
 const SCAN_FRAME_INTERVAL_MS = 100;
-const SCAN_TIMEOUT_MS = 2000;
+const SCAN_TIMEOUT_MS = 5000;
 
 type ScannedBatchDetails = {
   batchNumber?: string;

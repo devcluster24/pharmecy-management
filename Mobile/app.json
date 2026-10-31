@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Pharma Cluster",
-    "slug": "Mobile",
+    "slug": "pharma-cluster",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/pharma-cluster-icon.png",
@@ -72,10 +72,15 @@
       "reactCompiler": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
       "eas": {
-        "projectId": "4b69a037-4256-4dff-8d74-af2eadfd0b6c"
+        "projectId": "502dc7d5-20cd-439a-aaf1-0d0ef998a0c1"
       }
-    }
+    },
+    "owner": "habib911"
   }
 }
