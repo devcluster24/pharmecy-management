@@ -22,6 +22,7 @@ import { prefetchPharmacySearchData } from '@/lib/pharmacy-search-cache';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useAuth } from '@/providers/AuthProvider';
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
+import pharmacyIcon from '../../../assets/images/pharmacy-icon.png';
 import assignmentReturnIcon from '../../../assets/images/tabIcons/assignment_return.png';
 import assessmentIcon from '../../../assets/images/tabIcons/assessment.png';
 import expensesIcon from '../../../assets/images/tabIcons/expenses.png';
@@ -876,9 +877,10 @@ export default function OwnerHomeScreen() {
             <View style={styles.topBar}>
               <View style={styles.storeIdentity}>
                 <Image
-                  source={require('../../../../public/pharmacy-icon.png')}
+                  source={pharmacyIcon}
                   contentFit="contain"
                   style={styles.storeIcon}
+                  alt="Pharmacy icon"
                   accessibilityLabel={`${getPharmacyDisplayName(storeName)} icon`}
                 />
                 <Text numberOfLines={1} style={styles.storeName}>

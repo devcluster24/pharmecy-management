@@ -1,15 +1,12 @@
 {
   "expo": {
-    "name": "Mobile",
+    "name": "Pharma Cluster",
     "slug": "Mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/pharma-cluster-icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
-    "ios": {
-      "icon": "./assets/expo.icon"
-    },
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "intentFilters": [
@@ -23,17 +20,21 @@
               "pathPrefix": "/staff-signup/"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#F4F8F5",
+        "foregroundImage": "./assets/images/pharma-cluster-adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.Mobile"
+      "package": "com.anonymous.Mobile",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
@@ -72,7 +73,9 @@
     },
     "extra": {
       "router": {},
-      "eas": {}
+      "eas": {
+        "projectId": "4b69a037-4256-4dff-8d74-af2eadfd0b6c"
+      }
     }
   }
 }

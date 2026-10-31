@@ -29,7 +29,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
-import pharmacyIcon from '../../../../public/pharmacy-icon.png';
+import pharmacyIcon from '../../../assets/images/pharmacy-icon.png';
 import assessmentIcon from '../../../assets/images/tabIcons/assessment.png';
 import expensesIcon from '../../../assets/images/tabIcons/expenses.png';
 import inventoryIcon from '../../../assets/images/tabIcons/inventory.png';

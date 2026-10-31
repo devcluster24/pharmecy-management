@@ -1,5 +1,6 @@
 import { Text, TextInput } from '@/providers/LanguageProvider';
 import { Image } from 'expo-image';
+import pharmacyIcon from '../../../assets/images/pharmacy-icon.png';
 import type { ReactNode } from 'react';
 import {
   Pressable,
@@ -10,10 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
-
-// Metro needs a static require for this shared image, which lives outside the Mobile asset tree.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pharmacyIcon = require('../../../../public/pharmacy-icon.png');
 
 type AuthScreenProps = {
   eyebrow: string;
