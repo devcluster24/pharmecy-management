@@ -49,7 +49,7 @@ export function getProductIdentityKey(product: ProductFields) {
 }
 
 export function parseProductCsv(csvText: string) {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
+  const parsed = Papa.parse<Record<string, string>>(csvText.replace(/^\uFEFF/, ""), {
     header: true,
     skipEmptyLines: "greedy",
     transformHeader: (header) => header.trim().toLocaleLowerCase("en-US"),
@@ -87,6 +87,54 @@ export function parseProductCsv(csvText: string) {
 
   const parserWarnings = parsed.errors.map((error) => `CSV row ${error.row === undefined ? "?" : error.row + 2}: ${error.message}`);
   return { rows, warnings: [...warnings, ...parserWarnings] };
+}
+
+export function parseProductJson(jsonText: string) {
+  const parsed: unknown = JSON.parse(jsonText);
+  const records = Array.isArray(parsed)
+    ? parsed
+    : isRecord(parsed) && Array.isArray(parsed.products)
+      ? parsed.products
+      : null;
+  if (!records) {
+    throw new Error("JSON product data must be an array or an object with a products array.");
+  }
+
+  const rows: ProductImportCandidate[] = [];
+  const warnings: string[] = [];
+  records.forEach((value, index) => {
+    if (!isRecord(value)) {
+      warnings.push(`JSON row ${index + 1} is not an object and was skipped.`);
+      return;
+    }
+
+    const normalized = new Map(
+      Object.entries(value).map(([key, fieldValue]) => [
+        normalizeProductValue(key),
+        String(fieldValue ?? "").trim(),
+      ]),
+    );
+    const fields = Object.fromEntries(
+      Object.entries(columnAliases).map(([field, aliases]) => {
+        const entry = aliases
+          .map((alias) => normalized.get(normalizeProductValue(alias)))
+          .find((candidate) => candidate !== undefined);
+        return [field, entry ?? ""];
+      }),
+    ) as ProductFields;
+
+    if (!fields.medicineName) {
+      warnings.push(`JSON row ${index + 1} has no product name and was skipped.`);
+      return;
+    }
+    rows.push({ ...fields, productType: fields.productType || "Medicine" });
+  });
+
+  return { rows, warnings };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function encodePath(path: string) {
