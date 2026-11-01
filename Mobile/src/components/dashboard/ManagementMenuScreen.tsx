@@ -812,6 +812,7 @@ export default function ManagementMenuScreen({
             <Text style={styles.logoutButtonText}>{isSigningOut ? 'Logging out…' : 'Logout'}</Text>
           </Pressable>
         </View>
+        <Text style={styles.versionText}>version: 1.0.0.1</Text>
       </ScrollView>
     </View>
   );
@@ -1150,6 +1151,12 @@ const styles = StyleSheet.create({
     color: '#a63e34',
     fontSize: 14,
     fontWeight: '700',
+  },
+  versionText: {
+    marginTop: 4,
+    paddingHorizontal: 12,
+    color: '#87948c',
+    fontSize: 11,
   },
   eyebrow: {
     color: '#47826b',
