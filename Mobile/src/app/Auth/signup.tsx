@@ -1,5 +1,5 @@
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useRouter, type Href } from 'expo-router';
 import { useState } from 'react';
 import {
   Keyboard,
@@ -67,13 +67,14 @@ export default function SignupScreen() {
             full_name: trimmedName,
             phone: phone.trim(),
             registration_type: 'pharmacy_user',
+            mobile_onboarding_pending: true,
           },
         },
       });
       if (error) throw error;
 
       if (data.session && data.user) {
-        router.replace('/dashboard');
+        router.replace('/shop-setup' as Href);
         return;
       }
 

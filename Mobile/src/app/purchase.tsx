@@ -1,23 +1,17 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import { Camera, CameraView } from 'expo-camera';
-import { SymbolView } from 'expo-symbols';
 import { forwardRef, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Keyboard,
   Modal,
   Pressable,
-  Platform,
   ScrollView,
   StyleSheet,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
-import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
 import { getCurrencySymbol } from '@/lib/currency';
 import { getInventoryUnitPrice } from '@/lib/inventory-pricing';
 import { hasDashboardPageAccess } from '@/lib/dashboard-access';
@@ -37,25 +31,6 @@ const PLACE_ORDER_KEY = 'pharmacy-place-order-list-v1';
 const PAYMENT_METHODS_KEY = 'pharmacy-payment-methods-v1';
 const PURCHASE_SEARCH_CACHE = 'purchase-search-data';
 const PRODUCT_SEARCH_CACHE = 'purchase-product-catalog';
-const SCAN_FRAME_INTERVAL_MS = 100;
-const SCAN_TIMEOUT_MS = 5000;
-
-type ScannedBatchDetails = {
-  batchNumber?: string;
-  suggestedBatchNumber?: string;
-  mfgDate?: string;
-  expDate?: string;
-};
-
-type OcrLine = {
-  text: string;
-  frame?: {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  };
-};
 
 type PurchaseRow = {
   id: string;
@@ -270,141 +245,6 @@ function formatMonthYearInput(value: string, currentValue: string) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
-function parseOcrMonthYear(value: string) {
-  const datePattern = /\b(?:(\d{1,2})\s*[./\s-]\s*(\d{2}|\d{4})|([A-Za-z]{3,9})\.?\s*[./\s-]*\s*(\d{2}|\d{4}))\b/g;
-  const monthNames = [
-    'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-    'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
-  ];
-  for (const match of value.matchAll(datePattern)) {
-    const numericMonth = match[1] ? Number(match[1]) : undefined;
-    const namedMonth = match[3]
-      ? monthNames.findIndex((month) => month === match[3].slice(0, 3).toLocaleLowerCase('en-US')) + 1
-      : undefined;
-    const month = numericMonth ?? namedMonth;
-    const year = match[2] ?? match[4];
-    if (!month || month > 12 || !year) continue;
-    return `${String(month).padStart(2, '0')}/${year.slice(-2)}`;
-  }
-  return undefined;
-}
-
-function parseScannedBatchDetails(text: string, recognizedLines: OcrLine[] = []): ScannedBatchDetails {
-  const lines: OcrLine[] = (recognizedLines.length
-    ? recognizedLines.map(({ text: lineText, frame }) => ({ text: lineText.trim(), frame }))
-    : text.split(/\r?\n/).map((lineText) => ({ text: lineText.trim() })))
-    .filter(({ text: lineText }) => lineText);
-  const batchLabel = /\b(?:batch(?:\s*(?:no|number))?|lot(?:\s*(?:no|number))?|b\.?\s*no\.?)\b\.?\s*[:#.-]?\s*/i;
-  const mfgLabel = /\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)?)(?:\s*\.?\s*date)?\b\.?\s*[:#.-]?\s*/i;
-  const expLabel = /\b(?:exp|expiry|expires?|expiration|use\s*by)(?:\s*\.?\s*date)?\b\.?\s*[:#.-]?\s*/i;
-  const anyFieldLabel = /(?:\b(?:batch(?:\s*(?:no|number))?|lot(?:\s*(?:no|number))?|b\.?\s*no\.?)\b|\b(?:mfg|mfd|mfr|manufactur(?:ed|ing)|exp|expiry|expires?|expiration|use\s*by)\b)/i;
-
-  function getValueAfterLabel(lineText: string, label: RegExp) {
-    const match = label.exec(lineText);
-    if (!match) return undefined;
-    const value = lineText.slice(match.index + match[0].length);
-    const nextLabelIndex = value.search(anyFieldLabel);
-    return (nextLabelIndex >= 0 ? value.slice(0, nextLabelIndex) : value).trim();
-  }
-
-  function nearbyValue(labelIndex: number, labelFrame: OcrLine['frame'], isDate: boolean) {
-    const candidates = lines.flatMap((line, index) => {
-      if (
-        index === labelIndex
-        || anyFieldLabel.test(line.text)
-        || /\b(?:price|mrp|tk|vat|indicative)\b/i.test(line.text)
-      ) return [];
-      const value = isDate ? parseOcrMonthYear(line.text) : normalizeBatchNumber(line.text);
-      if (!value) return [];
-      const indexDistance = Math.abs(index - labelIndex);
-      let score = indexDistance + (index < labelIndex ? 0.5 : 0);
-      if (labelFrame && line.frame) {
-        const labelCenterY = labelFrame.top + labelFrame.height / 2;
-        const lineCenterY = line.frame.top + line.frame.height / 2;
-        const labelCenterX = labelFrame.left + labelFrame.width / 2;
-        const lineCenterX = line.frame.left + line.frame.width / 2;
-        const verticalDistance = Math.abs(labelCenterY - lineCenterY)
-          / Math.max(labelFrame.height, line.frame.height, 1);
-        const horizontalDistance = Math.abs(labelCenterX - lineCenterX)
-          / Math.max(labelFrame.height, line.frame.height, 1);
-        score = verticalDistance + horizontalDistance * 0.15;
-      }
-      if (score > 4) return [];
-      return [{ value, score }];
-    });
-    return candidates.sort((left, right) => left.score - right.score)[0]?.value;
-  }
-
-  function findDate(label: RegExp) {
-    for (const [index, line] of lines.entries()) {
-      if (!label.test(line.text)) continue;
-      const value = getValueAfterLabel(line.text, label);
-      const sameLineDate = value && parseOcrMonthYear(value);
-      if (sameLineDate) return sameLineDate;
-      const nearbyDate = nearbyValue(index, line.frame, true);
-      if (nearbyDate) return nearbyDate;
-    }
-    return undefined;
-  }
-
-  function findBatchNumberAboveMfg() {
-    const mfgIndex = lines.findIndex((line) => mfgLabel.test(line.text));
-    if (mfgIndex < 0) return undefined;
-    const mfgLine = lines[mfgIndex];
-    const candidates = lines.flatMap((line, index) => {
-      if (
-        index === mfgIndex
-        || anyFieldLabel.test(line.text)
-        || /\b(?:price|mrp|tk|vat|indicative)\b/i.test(line.text)
-        || parseOcrMonthYear(line.text)
-      ) return [];
-      if (mfgLine.frame && line.frame) {
-        const mfgCenterY = mfgLine.frame.top + mfgLine.frame.height / 2;
-        const lineCenterY = line.frame.top + line.frame.height / 2;
-        if (lineCenterY >= mfgCenterY) return [];
-      } else if (index >= mfgIndex) {
-        return [];
-      }
-      const value = normalizeBatchNumber(line.text);
-      if (!value || !/\d/.test(value) || parseOcrMonthYear(value)) return [];
-      const distance = mfgLine.frame && line.frame
-        ? mfgLine.frame.top - line.frame.top
-        : mfgIndex - index;
-      return [{ value, distance }];
-    });
-    return candidates.sort((left, right) => left.distance - right.distance)[0]?.value;
-  }
-
-  let batchNumber: string | undefined;
-  for (const [index, line] of lines.entries()) {
-    if (!batchLabel.test(line.text)) continue;
-    const value = getValueAfterLabel(line.text, batchLabel);
-    const sameLineBatch = value && normalizeBatchNumber(value);
-    if (sameLineBatch) {
-      batchNumber = sameLineBatch;
-      break;
-    }
-    batchNumber = nearbyValue(index, line.frame, false);
-    if (batchNumber) break;
-  }
-  const suggestedBatchNumber = batchNumber ? undefined : findBatchNumberAboveMfg();
-  const mfgDate = findDate(mfgLabel);
-  const expDate = findDate(expLabel);
-  return {
-    ...(batchNumber ? { batchNumber } : {}),
-    ...(suggestedBatchNumber ? { suggestedBatchNumber } : {}),
-    ...(mfgDate ? { mfgDate } : {}),
-    ...(expDate ? { expDate } : {}),
-  };
-}
-
-function normalizeBatchNumber(value: string) {
-  const candidate = value.match(/[A-Za-z0-9](?:[\s-]*[A-Za-z0-9])*/)?.[0];
-  if (!candidate || parseOcrMonthYear(candidate)) return undefined;
-  const compact = candidate.replace(/\s+/g, '');
-  return compact.length >= 2 ? compact : undefined;
-}
-
 export default function PurchaseScreen() {
   const alert = useLocalizedAlert();
   const {
@@ -451,12 +291,6 @@ export default function PurchaseScreen() {
   const [focusedSupplierField, setFocusedSupplierField] = useState<SupplierField | null>(null);
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isBatchScannerOpen, setIsBatchScannerOpen] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
-  const [batchScanMessage, setBatchScanMessage] = useState('');
-  const [batchNumberSuggestion, setBatchNumberSuggestion] = useState('');
-  const cameraRef = useRef<CameraView | null>(null);
   const expDateInputRef = useRef<TextInput>(null);
   const batchInputRefs = useRef<Record<BatchField, TextInput | null>>({
     batchNumber: null,
@@ -746,159 +580,6 @@ export default function PurchaseScreen() {
       return !addedBrands.has(addedKey) && matchesBrandQuery;
     }).slice(0, 12);
   }, [form.brandName, form.productId, products, receiveItems]);
-  useEffect(() => {
-    if (!isBatchScannerOpen || !isCameraReady) return;
-    let active = true;
-    let complete = false;
-    let framesScanned = 0;
-    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
-    const scanVotes = {
-      batchNumber: new Map<string, number>(),
-      suggestedBatchNumber: new Map<string, number>(),
-      mfgDate: new Map<string, number>(),
-      expDate: new Map<string, number>(),
-    };
-
-    function bestScan(): ScannedBatchDetails {
-      const mostFrequent = (votes: Map<string, number>) => [...votes.entries()]
-        .sort((left, right) => right[1] - left[1])[0]?.[0];
-      return {
-        batchNumber: mostFrequent(scanVotes.batchNumber),
-        suggestedBatchNumber: mostFrequent(scanVotes.suggestedBatchNumber),
-        mfgDate: mostFrequent(scanVotes.mfgDate),
-        expDate: mostFrequent(scanVotes.expDate),
-      };
-    }
-
-    function recordScan(details: ScannedBatchDetails) {
-      if (details.batchNumber) {
-        scanVotes.batchNumber.set(
-          details.batchNumber,
-          (scanVotes.batchNumber.get(details.batchNumber) ?? 0) + 1,
-        );
-      }
-      if (details.suggestedBatchNumber) {
-        scanVotes.suggestedBatchNumber.set(
-          details.suggestedBatchNumber,
-          (scanVotes.suggestedBatchNumber.get(details.suggestedBatchNumber) ?? 0) + 1,
-        );
-      }
-      if (details.mfgDate) {
-        scanVotes.mfgDate.set(details.mfgDate, (scanVotes.mfgDate.get(details.mfgDate) ?? 0) + 1);
-      }
-      if (details.expDate) {
-        scanVotes.expDate.set(details.expDate, (scanVotes.expDate.get(details.expDate) ?? 0) + 1);
-      }
-    }
-
-    function applyBatchDetails(details: ScannedBatchDetails) {
-      setForm((current) => ({
-        ...current,
-        ...(details.mfgDate ? { mfgDate: details.mfgDate } : {}),
-        ...(details.expDate ? { expDate: details.expDate } : {}),
-      }));
-    }
-
-    function finishScan() {
-      if (!active || complete) return;
-      complete = true;
-      const details = bestScan();
-      const batchVoteCount = details.batchNumber
-        ? scanVotes.batchNumber.get(details.batchNumber) ?? 0
-        : 0;
-      const confirmedBatchNumber = batchVoteCount >= 2 ? details.batchNumber : undefined;
-      applyBatchDetails(details);
-      if (confirmedBatchNumber) {
-        setForm((current) => ({ ...current, batchNumber: confirmedBatchNumber }));
-      }
-      setBatchNumberSuggestion(
-        confirmedBatchNumber ? '' : details.batchNumber ?? details.suggestedBatchNumber ?? '',
-      );
-      setIsRecognizingFrame(false);
-      setBatchScanMessage(
-        confirmedBatchNumber && details.mfgDate && details.expDate
-          ? ''
-          : details.batchNumber || details.mfgDate || details.expDate
-            ? 'Some details were not recognized. Review the fields and enter any missing values.'
-            : 'No batch details recognized. Try again or fill the fields manually.',
-      );
-      setIsBatchScannerOpen(false);
-    }
-
-    const scanTimeout = setTimeout(() => {
-      finishScan();
-    }, SCAN_TIMEOUT_MS);
-
-    async function scanFrame() {
-      if (!active || complete) return;
-      let frameUri: string | undefined;
-      setIsRecognizingFrame(true);
-      try {
-        const frame = await cameraRef.current?.takePictureAsync({
-          quality: 0.4,
-          shutterSound: false,
-        });
-        if (!frame) throw new Error('The camera could not provide a scan frame.');
-        frameUri = frame.uri;
-        if (!active || complete) return;
-
-        const recognized = await recognizeText(frameUri);
-        if (!active || complete) return;
-        framesScanned += 1;
-        recordScan(parseScannedBatchDetails(
-          recognized.text,
-          recognized.blocks.flatMap((block) => block.lines),
-        ));
-        const details = bestScan();
-
-        if (
-          framesScanned >= 2
-          && details.mfgDate
-          && details.expDate
-        ) {
-          finishScan();
-        }
-      } catch (scanError) {
-        if (!active || complete) return;
-        complete = true;
-        alert.alert(
-          'Batch scan failed',
-          scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
-        );
-        setIsBatchScannerOpen(false);
-      } finally {
-        if (frameUri) {
-          try {
-            await FileSystem.deleteAsync(frameUri, { idempotent: true });
-          } catch (cleanupError) {
-            complete = true;
-            if (active) {
-              alert.alert(
-                'Scan cleanup failed',
-                cleanupError instanceof Error
-                  ? cleanupError.message
-                  : 'Could not remove the temporary scan frame.',
-              );
-              setIsBatchScannerOpen(false);
-            }
-          }
-        }
-        if (active) setIsRecognizingFrame(false);
-      }
-
-      if (active && !complete) {
-        frameTimeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
-      }
-    }
-
-    void scanFrame();
-    return () => {
-      active = false;
-      if (frameTimeout) clearTimeout(frameTimeout);
-      clearTimeout(scanTimeout);
-    };
-  }, [alert, isBatchScannerOpen, isCameraReady]);
-
   const matchingPlaceOrderRows = useMemo(() => {
     const brand = form.brandName.trim().toLocaleLowerCase();
     if (!brand) return [];
@@ -986,7 +667,6 @@ export default function PurchaseScreen() {
       }
       return { ...current, [field]: value };
     });
-    if (field === 'batchNumber') setBatchNumberSuggestion('');
     setSaveError('');
   }
 
@@ -1012,44 +692,6 @@ export default function PurchaseScreen() {
       packSize: product.pack_size.trim(),
       price: product.pack_price.trim() === '-' ? '' : product.pack_price.trim(),
     }));
-    setBatchScanMessage('');
-    setBatchNumberSuggestion('');
-  }
-
-  async function startBatchScan() {
-    if (!OCR_ENABLED) return;
-    if (Platform.OS === 'web') {
-      alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
-      return;
-    }
-    if (!form.brandName.trim()) {
-      alert.alert('Brand name required', 'Set a brand name before scanning batch details.');
-      return;
-    }
-
-    setBatchScanMessage('');
-    setBatchNumberSuggestion('');
-    setIsCameraReady(false);
-    try {
-      const permission = await Camera.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        alert.alert('Camera permission required', 'Allow camera access to scan batch details.');
-        return;
-      }
-      Keyboard.dismiss();
-      setIsBatchScannerOpen(true);
-    } catch (permissionError) {
-      alert.alert(
-        'Camera permission failed',
-        permissionError instanceof Error ? permissionError.message : 'Could not request camera access.',
-      );
-    }
-  }
-
-  function closeBatchScanner() {
-    setIsBatchScannerOpen(false);
-    setIsCameraReady(false);
-    setIsRecognizingFrame(false);
   }
 
   function focusSupplierField(field: SupplierField) {
@@ -1106,8 +748,6 @@ export default function PurchaseScreen() {
 
   function closeReceiveForm() {
     setIsReceiveModalOpen(false);
-    setIsBatchScannerOpen(false);
-    setBatchScanMessage('');
     setForm(emptyForm);
     setSelectedSourceId('');
     setReceiveItems([]);
@@ -1252,7 +892,6 @@ export default function PurchaseScreen() {
   function selectSourceOrder(row: PurchaseRow) {
     setSelectedSourceId(row.id);
     setReceiveStep('batch');
-    setBatchScanMessage('');
     setForm((current) => ({
       ...current,
       supplier: row.supplier,
@@ -1695,8 +1334,6 @@ export default function PurchaseScreen() {
                   onChangeText={(value) => {
                     updateForm('brandName', value);
                     setSelectedSourceId('');
-                    setBatchScanMessage('');
-                    setBatchNumberSuggestion('');
                   }}
                   placeholder="Search or type a brand name"
                 />
@@ -1732,21 +1369,7 @@ export default function PurchaseScreen() {
                   <>
                     <View style={styles.batchSectionHeader}>
                       <Text style={styles.sectionLabel}>Add Batch Details</Text>
-                      {OCR_ENABLED ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Scan batch number and dates"
-                          onPress={() => void startBatchScan()}
-                          style={styles.scanButton}>
-                          <SymbolView
-                            name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
-                            size={20}
-                            tintColor="#17664f"
-                          />
-                        </Pressable>
-                      ) : null}
                     </View>
-                    {batchScanMessage ? <Text style={styles.formError}>{batchScanMessage}</Text> : null}
                     {form.productId ? (
                       <Text style={styles.productOptionMeta}>
                         {productDetails(products.find((product) => product.id === form.productId))}
@@ -1756,15 +1379,6 @@ export default function PurchaseScreen() {
                   <Field
                     ref={(node) => { batchInputRefs.current.batchNumber = node; }}
                     label="Batch Number"
-                    labelAccessory={batchNumberSuggestion && batchNumberSuggestion !== form.batchNumber ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Use suggested batch number ${batchNumberSuggestion}`}
-                        onPress={() => updateForm('batchNumber', batchNumberSuggestion)}
-                        style={styles.batchSuggestion}>
-                        <Text style={styles.batchSuggestionText}>Use {batchNumberSuggestion}</Text>
-                      </Pressable>
-                    ) : undefined}
                     value={form.batchNumber}
                     onChangeText={(value) => updateForm('batchNumber', value)}
                     onSubmitEditing={() => focusNextBatchField('batchNumber')}
@@ -2071,44 +1685,6 @@ export default function PurchaseScreen() {
           ) : null}
         </SafeAreaView>
       </Modal>
-      <Modal
-        visible={isBatchScannerOpen}
-        animationType="slide"
-        onRequestClose={closeBatchScanner}
-        statusBarTranslucent>
-        <View style={styles.scannerModal}>
-          <CameraView
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            onCameraReady={() => setIsCameraReady(true)}
-            onMountError={(event) => {
-              alert.alert('Camera unavailable', event.message);
-              closeBatchScanner();
-            }}
-            animateShutter={false}
-          />
-          <View pointerEvents="box-none" style={styles.scannerOverlay}>
-            <View style={styles.scannerHeader}>
-              <Text style={styles.scannerTitle}>Scan batch details</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close scanner"
-                onPress={closeBatchScanner}
-                style={styles.scannerCloseButton}>
-                <Text style={styles.scannerCloseText}>Close</Text>
-              </Pressable>
-            </View>
-            <View style={styles.scannerGuide}>
-              <View style={styles.scannerTarget} />
-              <View style={styles.scannerHint}>
-                {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
-                <Text style={styles.scannerHintText}>Show the batch number, Mfg date, and Exp date</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -2244,20 +1820,7 @@ const styles = StyleSheet.create({
   fieldLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
   fieldLabel: { color: '#40564a', fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, paddingHorizontal: 11, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 9, backgroundColor: '#fff', color: '#24382e', fontSize: 13 },
-  scanButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 9, backgroundColor: '#eef8f2' },
-  batchSuggestion: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#e8f3eb' },
-  batchSuggestionText: { color: '#17664f', fontSize: 10, fontWeight: '800' },
   batchSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  scannerModal: { flex: 1, backgroundColor: '#000' },
-  scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
-  scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
-  scannerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  scannerCloseButton: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.55)' },
-  scannerCloseText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  scannerGuide: { flex: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 24 },
-  scannerTarget: { width: '100%', height: 180, borderWidth: 2, borderColor: '#42e6a3', borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.08)' },
-  scannerHint: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
-  scannerHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sectionLabel: { marginTop: 4, color: '#193c30', fontSize: 14, fontWeight: '800' },
   productOptions: { borderWidth: 1, borderColor: '#e2e9e2', borderRadius: 10, backgroundColor: '#fff' },
   companyOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },

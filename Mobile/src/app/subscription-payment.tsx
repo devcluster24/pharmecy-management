@@ -1,5 +1,5 @@
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -40,14 +40,16 @@ function formatFeeLabel(plan: PharmacySubscriptionPlan) {
 export default function SubscriptionPaymentScreen() {
   const { alert } = useLocalizedAlert();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, storeName } = useAuth();
-  const { planId: planIdParam, billingCycles: billingCyclesParam } = useLocalSearchParams<{
+  const { planId: planIdParam, billingCycles: billingCyclesParam, onboarding: onboardingParam } = useLocalSearchParams<{
     planId?: string | string[];
     billingCycles?: string | string[];
+    onboarding?: string | string[];
   }>();
   const planId = Array.isArray(planIdParam) ? planIdParam[0] : planIdParam;
   const billingCycles = Number(Array.isArray(billingCyclesParam)
     ? billingCyclesParam[0]
     : billingCyclesParam);
+  const onboarding = (Array.isArray(onboardingParam) ? onboardingParam[0] : onboardingParam) === '1';
   const [options, setOptions] = useState<PharmacySubscriptionOptions | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bKash');
   const [isLoading, setIsLoading] = useState(true);
@@ -58,6 +60,10 @@ export default function SubscriptionPaymentScreen() {
     if (isAuthLoading || profileLoading) return;
     if (dashboardRole !== 'owner') {
       router.replace('/dashboard');
+      return;
+    }
+    if (!storeName.trim()) {
+      router.replace('/shop-setup' as Href);
       return;
     }
 
@@ -95,7 +101,7 @@ export default function SubscriptionPaymentScreen() {
     return () => {
       active = false;
     };
-  }, [billingCycles, dashboardRole, isAuthLoading, planId, profileLoading]);
+  }, [billingCycles, dashboardRole, isAuthLoading, planId, profileLoading, storeName]);
 
   const selectedPlan = useMemo(
     () => options
@@ -132,6 +138,10 @@ export default function SubscriptionPaymentScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (paymentError) throw paymentError;
+      if (onboarding) {
+        router.replace('/pharmacy-setup-onboarding' as Href);
+        return;
+      }
       alert(
         'Payment successful',
         'Your subscription plan has been updated.',

@@ -1,5 +1,5 @@
 import { Text, useLocalizedAlert } from '@/providers/LanguageProvider';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,6 +38,8 @@ function formatFeeLabel(plan: PharmacySubscriptionPlan) {
 export default function SubscriptionSetupScreen() {
   const { alert } = useLocalizedAlert();
   const { dashboardRole, isLoading: isAuthLoading, profileLoading, storeName } = useAuth();
+  const { onboarding: onboardingParam } = useLocalSearchParams<{ onboarding?: string | string[] }>();
+  const onboarding = (Array.isArray(onboardingParam) ? onboardingParam[0] : onboardingParam) === '1';
   const [options, setOptions] = useState<PharmacySubscriptionOptions | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [billingCycles, setBillingCycles] = useState(1);
@@ -49,6 +51,10 @@ export default function SubscriptionSetupScreen() {
     if (isAuthLoading || profileLoading) return;
     if (dashboardRole !== 'owner') {
       router.replace('/dashboard');
+      return;
+    }
+    if (!storeName.trim()) {
+      router.replace('/shop-setup' as Href);
       return;
     }
 
@@ -80,7 +86,7 @@ export default function SubscriptionSetupScreen() {
     return () => {
       active = false;
     };
-  }, [dashboardRole, isAuthLoading, profileLoading]);
+  }, [dashboardRole, isAuthLoading, profileLoading, storeName]);
 
   const availablePlans = useMemo(
     () => options ? getAllowedPharmacyPlans(options) : [],
@@ -123,7 +129,7 @@ export default function SubscriptionSetupScreen() {
       if (amountDue > 0) {
         setIsSubmitting(false);
         router.push(
-          `/subscription-payment?planId=${encodeURIComponent(selectedPlan.id)}&billingCycles=${billingCycles}`,
+          `/subscription-payment?planId=${encodeURIComponent(selectedPlan.id)}&billingCycles=${billingCycles}${onboarding ? '&onboarding=1' : ''}`,
         );
         return;
       }
@@ -133,6 +139,10 @@ export default function SubscriptionSetupScreen() {
         requested_billing_cycles: billingCycles,
       });
       if (activationError) throw activationError;
+      if (onboarding) {
+        router.replace('/pharmacy-setup-onboarding' as Href);
+        return;
+      }
       alert(
         'Subscription activated',
         'Your subscription plan has been updated.',

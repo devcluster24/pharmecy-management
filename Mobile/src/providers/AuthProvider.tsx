@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase';
 
 type AuthContextValue = {
   session: Session | null;
+  signupOnboardingPending: boolean;
+  completeSignupOnboarding: () => Promise<void>;
   isLoading: boolean;
   authError: string;
   dashboardRole: DashboardRole | null;
@@ -16,6 +18,7 @@ type AuthContextValue = {
   staffPermissions: Record<string, boolean>;
   profileLoading: boolean;
   profileError: string;
+  refreshStoreName: () => Promise<void>;
 };
 
 export type DashboardRole = 'owner' | 'staff';
@@ -216,10 +219,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [session]);
 
+  async function refreshStoreName() {
+    if (!session) throw new Error('Sign in before refreshing pharmacy details.');
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const { data, error } = await supabase
+      .from('pharmacies')
+      .select('store_name')
+      .eq('owner_user_id', session.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('The saved pharmacy details could not be found.');
+    setStoreName(data.store_name?.trim() ?? '');
+  }
+
   return (
     <AuthContext.Provider
       value={{
         session,
+        signupOnboardingPending: session?.user.user_metadata.mobile_onboarding_pending === true,
+        completeSignupOnboarding: async () => {
+          if (!session) throw new Error('Sign in before completing account setup.');
+          if (!supabase) throw new Error('Supabase is not configured.');
+          const { data, error } = await supabase.auth.updateUser({
+            data: {
+              ...session.user.user_metadata,
+              mobile_onboarding_pending: false,
+            },
+          });
+          if (error) throw error;
+          if (!data.user) throw new Error('Could not update your account setup status.');
+          setSession((current) => current ? { ...current, user: data.user } : current);
+        },
         isLoading,
         authError,
         dashboardRole,
@@ -231,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         staffPermissions,
         profileLoading,
         profileError,
+        refreshStoreName,
       }}>
       {children}
     </AuthContext.Provider>

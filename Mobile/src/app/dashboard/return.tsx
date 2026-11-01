@@ -1,18 +1,26 @@
 import { Text, TextInput, useLocalizedAlert } from '@/providers/LanguageProvider';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { Camera, CameraView } from 'expo-camera';
+import { SymbolView } from 'expo-symbols';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  Modal,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import DashboardSubpageHeader from '@/components/dashboard/DashboardSubpageHeader';
 import { getCurrencySymbol } from '@/lib/currency';
 import { hasDashboardPageAccess } from '@/lib/dashboard-access';
+import { OCR_ENABLED, recognizeText } from '@/lib/ocr';
+import { buildBrandWordIndex, findBrandWordMatches } from '@/lib/medicine-brand-scan';
 import {
   cachePharmacySearchData,
   clearCachedPharmacySearchData,
@@ -28,6 +36,8 @@ const PURCHASE_KEY = 'pharmacy-purchase-list-v1';
 const RETURNS_KEY = 'pharmacy-return-records-v1';
 const RETURN_DEDUCTION_SETTINGS_KEY = 'pharmacy-return-deduction-settings-v1';
 const RETURN_SEARCH_CACHE = 'return-search-data';
+const SCAN_FRAME_INTERVAL_MS = 100;
+const SCAN_TIMEOUT_MS = 5000;
 const WALK_IN_CUSTOMER = 'Walk-in customer';
 type SaleLine = {
   brand: string;
@@ -73,6 +83,13 @@ type SelectedReturnItem = {
   invoice: SaleInvoice;
   line: SaleLine;
   quantity: string;
+};
+
+type ReturnScanCandidate = {
+  key: string;
+  invoice: SaleInvoice;
+  line: SaleLine;
+  index: number;
 };
 
 type PurchaseRow = {
@@ -232,6 +249,10 @@ export default function ReturnScreen() {
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
   const [selectedItems, setSelectedItems] = useState<SelectedReturnItem[]>([]);
   const [searchValue, setSearchValue] = useState('');
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isRecognizingFrame, setIsRecognizingFrame] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [returnMethod, setReturnMethod] = useState<'Cash Return' | 'Product Adjust'>('Cash Return');
   const [defaultReturnDeductionRate, setDefaultReturnDeductionRate] = useState(0);
   const [returnDeductionRate, setReturnDeductionRate] = useState('0');
@@ -240,6 +261,7 @@ export default function ReturnScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const cameraRef = useRef<CameraView | null>(null);
   const quantitiesAlreadyReturned = (invoice: string, line: SaleLine) => returns
     .filter((record) => record.invoice === invoice
       && record.brand.toLocaleLowerCase() === line.brand.toLocaleLowerCase()
@@ -373,6 +395,133 @@ export default function ReturnScreen() {
     })).slice(0, 20);
   }, [invoices, query, returns, selectedItems]);
 
+  const returnScanCandidates = useMemo<ReturnScanCandidate[]>(() => {
+    const returnedQuantities = new Map<string, number>();
+    for (const record of returns) {
+      const key = `${record.invoice}\u0000${record.brand.toLocaleLowerCase()}\u0000${record.batchNumber}`;
+      returnedQuantities.set(key, (returnedQuantities.get(key) ?? 0) + record.quantity);
+    }
+    const selectedKeys = new Set(selectedItems.map((item) => item.key));
+    return invoices.flatMap((invoice) => (invoice.lines ?? []).flatMap((line, index) => {
+      const key = returnKey(invoice, line, index);
+      const returnedKey = `${invoice.invoice}\u0000${line.brand.toLocaleLowerCase()}\u0000${line.batchNumber}`;
+      const alreadyReturned = returnedQuantities.get(returnedKey) ?? 0;
+      if (selectedKeys.has(key) || line.quantity - alreadyReturned < 1) return [];
+      return [{ key, invoice, line, index }];
+    }));
+  }, [invoices, returns, selectedItems]);
+  const returnScanBrandIndex = useMemo(
+    () => buildBrandWordIndex(returnScanCandidates, (candidate) =>
+      `${candidate.line.brand} ${candidate.line.details}`),
+    [returnScanCandidates],
+  );
+
+  useEffect(() => {
+    if (!isCameraOpen || !isCameraReady) return;
+    let active = true;
+    let complete = false;
+    let frameTimeout: ReturnType<typeof setTimeout> | undefined;
+    const votes = new Map<string, { brand: string; count: number; score: number }>();
+
+    function finishScan() {
+      if (!active || complete) return;
+      complete = true;
+      const rankedVotes = [...votes.values()].sort(
+        (left, right) => right.count - left.count || right.score - left.score,
+      );
+      const winner = rankedVotes[0];
+      const runnerUp = rankedVotes[1];
+      if (winner && (!runnerUp
+        || winner.count > runnerUp.count
+        || (winner.count === runnerUp.count && winner.score > runnerUp.score))) {
+        setSearchValue(winner.brand);
+        setError('');
+      } else {
+        setError('No matching sold product recognized. Try again or search manually.');
+      }
+      setIsRecognizingFrame(false);
+      setIsScanning(false);
+      setIsCameraOpen(false);
+    }
+
+    const scanTimeout = setTimeout(finishScan, SCAN_TIMEOUT_MS);
+
+    async function scanFrame() {
+      if (!active || complete) return;
+      let frameUri: string | undefined;
+      setIsRecognizingFrame(true);
+      try {
+        const frame = await cameraRef.current?.takePictureAsync({
+          quality: 0.4,
+          shutterSound: false,
+        });
+        if (!frame) throw new Error('The camera could not provide a scan frame.');
+        frameUri = frame.uri;
+        if (!active || complete) return;
+
+        const recognized = await recognizeText(frameUri);
+        if (!active || complete) return;
+        const brandScores = new Map<string, { brand: string; score: number }>();
+        for (const { item, score } of findBrandWordMatches(returnScanBrandIndex, recognized.text)) {
+          const brandKey = item.line.brand.trim().toLocaleLowerCase();
+          const current = brandScores.get(brandKey);
+          if (!current || score > current.score) {
+            brandScores.set(brandKey, { brand: item.line.brand, score });
+          }
+        }
+        const rankedBrands = [...brandScores.entries()].sort(
+          (left, right) => right[1].score - left[1].score,
+        );
+        const [brandKey, match] = rankedBrands[0] ?? [];
+        const nextBest = rankedBrands[1]?.[1];
+        if (brandKey && match && (!nextBest || match.score > nextBest.score)) {
+          const vote = votes.get(brandKey) ?? { brand: match.brand, count: 0, score: 0 };
+          vote.count += 1;
+          vote.score += match.score;
+          votes.set(brandKey, vote);
+          if (vote.count >= 2) finishScan();
+        }
+      } catch (scanError) {
+        if (!active || complete) return;
+        complete = true;
+        alert.alert(
+          'Return scan failed',
+          scanError instanceof Error ? scanError.message : 'Could not read text from the camera.',
+        );
+        setIsCameraOpen(false);
+      } finally {
+        if (frameUri) {
+          try {
+            await FileSystem.deleteAsync(frameUri, { idempotent: true });
+          } catch (cleanupError) {
+            complete = true;
+            if (active) {
+              alert.alert(
+                'Scan cleanup failed',
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : 'Could not remove the temporary scan frame.',
+              );
+              setIsCameraOpen(false);
+            }
+          }
+        }
+        if (active) setIsRecognizingFrame(false);
+      }
+
+      if (active && !complete) {
+        frameTimeout = setTimeout(() => void scanFrame(), SCAN_FRAME_INTERVAL_MS);
+      }
+    }
+
+    void scanFrame();
+    return () => {
+      active = false;
+      if (frameTimeout) clearTimeout(frameTimeout);
+      clearTimeout(scanTimeout);
+    };
+  }, [alert, isCameraOpen, isCameraReady, returnScanBrandIndex]);
+
   const returnTotal = selectedItems.reduce(
     (total, item) => total + item.line.unitPrice * (Number(item.quantity) || 0),
     0,
@@ -380,6 +529,42 @@ export default function ReturnScreen() {
   const deductionRate = Number(returnDeductionRate) || 0;
   const returnDeductionAmount = Number((returnTotal * deductionRate / 100).toFixed(2));
   const netRefundAmount = Math.max(0, Number((returnTotal - returnTotal * deductionRate / 100).toFixed(2)));
+
+  async function scanReturnProduct() {
+    if (!OCR_ENABLED || isScanning) return;
+    if (Platform.OS === 'web') {
+      alert.alert('Camera scan unavailable', 'Medicine scanning is available in the Android and iOS app.');
+      return;
+    }
+
+    setIsScanning(true);
+    setError('');
+    try {
+      const permission = await Camera.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        alert.alert('Camera permission required', 'Allow camera access to scan a medicine label.');
+        return;
+      }
+      setSearchValue('');
+      setIsCameraReady(false);
+      setIsCameraOpen(true);
+      Keyboard.dismiss();
+    } catch (scanError) {
+      alert.alert(
+        'Return scan failed',
+        scanError instanceof Error ? scanError.message : 'Could not start the camera.',
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  function closeReturnScanner() {
+    setIsCameraOpen(false);
+    setIsCameraReady(false);
+    setIsRecognizingFrame(false);
+    setIsScanning(false);
+  }
 
   function openRecordReturn() {
     setSelectedItems([]);
@@ -590,7 +775,10 @@ export default function ReturnScreen() {
         subtitle={headerTitle}
         onBack={() => {
           if (screen === 'summary') setScreen('record');
-          else if (screen === 'record') setScreen('list');
+          else if (screen === 'record') {
+            closeReturnScanner();
+            setScreen('list');
+          }
           else router.replace('/dashboard');
         }}
       />
@@ -612,7 +800,6 @@ export default function ReturnScreen() {
                 value={searchValue}
                 onChangeText={(value) => {
                   setSearchValue(value);
-                  setScanNotFound(false);
                 }}
                 placeholder="Search return ID, invoice, brand or batch"
                 placeholderTextColor="#87928d"
@@ -678,6 +865,25 @@ export default function ReturnScreen() {
                 placeholderTextColor="#87928d"
                 style={styles.search}
               />
+              {OCR_ENABLED ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Scan medicine for return"
+                  accessibilityState={{ disabled: isScanning }}
+                  disabled={isScanning}
+                  onPress={() => void scanReturnProduct()}
+                  style={[styles.scanButton, isScanning && styles.disabled]}>
+                  {isScanning ? (
+                    <ActivityIndicator color="#17664f" />
+                  ) : (
+                    <SymbolView
+                      name={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+                      size={20}
+                      tintColor="#17664f"
+                    />
+                  )}
+                </Pressable>
+              ) : null}
             </View>
             {matchingItems.map(({ key, invoice, line, index }) => (
               <Pressable key={key} onPress={() => addItem(invoice, line, index)} style={styles.card}>
@@ -798,6 +1004,46 @@ export default function ReturnScreen() {
           </>
         ) : null}
       </ScrollView>
+      <Modal
+        visible={isCameraOpen}
+        animationType="slide"
+        onRequestClose={closeReturnScanner}
+        statusBarTranslucent>
+        <View style={styles.scannerModal}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            onCameraReady={() => setIsCameraReady(true)}
+            onMountError={(event) => {
+              alert.alert('Camera unavailable', event.message);
+              closeReturnScanner();
+            }}
+            animateShutter={false}
+          />
+          <View pointerEvents="box-none" style={styles.scannerOverlay}>
+            <View style={styles.scannerHeader}>
+              <Text style={styles.scannerTitle}>Scan medicine for return</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close scanner"
+                onPress={closeReturnScanner}
+                style={styles.scannerCloseButton}>
+                <Text style={styles.scannerCloseText}>Close</Text>
+              </Pressable>
+            </View>
+            <View style={styles.scannerGuide}>
+              <View style={styles.scannerTarget} />
+              <View style={styles.scannerHint}>
+                {isRecognizingFrame ? <ActivityIndicator color="#fff" /> : null}
+                <Text style={styles.scannerHintText}>
+                  Point the camera at the medicine brand name
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -815,6 +1061,17 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   search: { flex: 1, minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderColor: '#dce4dc', borderRadius: 10, backgroundColor: '#fff', color: '#20342a', fontSize: 13 },
+  scanButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#cfe5d7', borderRadius: 10, backgroundColor: '#eef8f2' },
+  scannerModal: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between', paddingTop: 54, paddingBottom: 38 },
+  scannerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  scannerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  scannerCloseButton: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scannerCloseText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  scannerGuide: { flex: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 24 },
+  scannerTarget: { width: '100%', height: 180, borderWidth: 2, borderColor: '#42e6a3', borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.08)' },
+  scannerHint: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
+  scannerHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   inlineLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 },
   errorCard: { padding: 12, gap: 8, borderRadius: 10, backgroundColor: '#fff0ed' },
   error: { color: '#a63e34', fontSize: 12, lineHeight: 18 },

@@ -1,8 +1,9 @@
 import { Text, useLocalizedAlert, useTranslate } from '@/providers/LanguageProvider';
-import { Redirect } from 'expo-router';
+import { Redirect, useLocalSearchParams, type Href } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   View
@@ -12,6 +13,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { hasDashboardPageAccess } from '@/lib/dashboard-access';
 import { getPharmacyDisplayName } from '@/lib/pharmacy-display-name';
 import { useProductCatalogAutoSync } from '@/components/dashboard/ProductCatalogAutoSync';
+import { loadPharmacySubscriptionOptions } from '@/lib/pharmacy-subscription';
 import { supabase } from '@/lib/supabase';
 import { recordPharmacySessionActivity } from '@/lib/pharmacy-activity';
 import homeIcon from '../../../assets/images/tabIcons/home.png';
@@ -35,10 +37,49 @@ export default function DashboardLayout() {
     profileError,
     storeName,
     staffPermissions,
+    signupOnboardingPending,
   } = useAuth();
+  const { onboarding: onboardingParam } = useLocalSearchParams<{ onboarding?: string | string[] }>();
+  const isOnboardingRoute = (Array.isArray(onboardingParam) ? onboardingParam[0] : onboardingParam) === '1';
   const [signOutError, setSignOutError] = useState('');
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [subscriptionCheck, setSubscriptionCheck] = useState<{
+    key: string;
+    isAssigned?: boolean;
+    error?: string;
+  } | null>(null);
+  const [subscriptionRetry, setSubscriptionRetry] = useState(0);
   useProductCatalogAutoSync();
+
+  const subscriptionCheckKey = session
+    ? `${session.user.id}:${storeName}:${subscriptionRetry}`
+    : '';
+  useEffect(() => {
+    if (
+      isLoading
+      || profileLoading
+      || !session
+      || dashboardRole !== 'owner'
+      || !storeName.trim()
+    ) return;
+    let active = true;
+    const key = `${session.user.id}:${storeName}:${subscriptionRetry}`;
+    void loadPharmacySubscriptionOptions()
+      .then((options) => {
+        if (active) setSubscriptionCheck({ key, isAssigned: options.is_assigned });
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setSubscriptionCheck({
+            key,
+            error: error instanceof Error ? error.message : 'Could not verify the pharmacy subscription.',
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [dashboardRole, isLoading, profileLoading, session, storeName, subscriptionRetry]);
 
   if (isLoading || profileLoading) return null;
   if (!session) return <Redirect href="/Auth/login" />;
@@ -96,6 +137,53 @@ export default function DashboardLayout() {
         </View>
       </View>
     );
+  }
+
+  if (dashboardRole === 'owner') {
+    if (!storeName.trim()) {
+      return (
+        <Redirect
+          href={(signupOnboardingPending
+            ? '/shop-setup?onboarding=1'
+            : '/shop-setup') as Href}
+        />
+      );
+    }
+    if (subscriptionCheck?.key !== subscriptionCheckKey) {
+      return (
+        <View style={styles.accessPage}>
+          <ActivityIndicator size="large" color="#16845d" />
+        </View>
+      );
+    }
+    if (subscriptionCheck.error) {
+      return (
+        <View style={styles.accessPage}>
+          <View style={styles.accessCard}>
+            <Text style={styles.accessTitle}>Subscription status unavailable</Text>
+            <Text style={styles.accessMessage}>{subscriptionCheck.error}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setSubscriptionRetry((value) => value + 1)}
+              style={styles.signOutButton}>
+              <Text style={styles.signOutButtonText}>Try again</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+    if (!subscriptionCheck.isAssigned) {
+      return (
+        <Redirect
+          href={signupOnboardingPending
+            ? '/subscription-setup?onboarding=1'
+            : '/subscription-setup'}
+        />
+      );
+    }
+    if (signupOnboardingPending && !isOnboardingRoute) {
+      return <Redirect href={'/pharmacy-setup-onboarding' as Href} />;
+    }
   }
 
   return (

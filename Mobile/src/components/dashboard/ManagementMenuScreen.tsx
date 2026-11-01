@@ -4,7 +4,7 @@ import {
   useLanguage,
   useLocalizedAlert,
 } from '@/providers/LanguageProvider';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useState, type ComponentProps } from 'react';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -183,6 +183,8 @@ export default function ManagementMenuScreen({
   pageTitle?: string;
 }) {
   const alert = useLocalizedAlert();
+  const { onboarding: onboardingParam } = useLocalSearchParams<{ onboarding?: string | string[] }>();
+  const isOnboardingSetup = (Array.isArray(onboardingParam) ? onboardingParam[0] : onboardingParam) === '1';
   const activeParent = menuEntries.find((entry) =>
     entry.children?.some((child) => child.slug === activeSlug),
   )?.slug;
@@ -293,7 +295,18 @@ export default function ManagementMenuScreen({
       router.push('/dashboard/menu/product-management');
       return;
     }
-    router.push({ pathname: '/dashboard/menu/[slug]', params: { slug } });
+    router.push({
+      pathname: '/dashboard/menu/[slug]',
+      params: { slug, ...(isOnboardingSetup ? { onboarding: '1' } : {}) },
+    });
+  }
+
+  function returnToMenu() {
+    if (isOnboardingSetup) {
+      router.replace('/pharmacy-setup-onboarding' as Href);
+      return;
+    }
+    router.replace('/dashboard/menu');
   }
 
   async function chooseLanguage(nextLanguage: 'en' | 'bn') {
@@ -380,7 +393,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <ScrollView style={styles.pageContent} contentContainerStyle={styles.settingShortcuts}>
             {visibleSettingChildren.map((entry) => (
@@ -441,7 +454,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <PaymentMethodsSettingsScreen />
         </SafeAreaView>
@@ -452,7 +465,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <ReturnDeductionSettingsScreen />
         </SafeAreaView>
@@ -463,7 +476,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <VatTaxSettingsScreen />
         </SafeAreaView>
@@ -474,7 +487,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <InventorySettingsScreen />
         </SafeAreaView>
@@ -485,7 +498,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <BackupSettingsScreen />
         </SafeAreaView>
@@ -496,7 +509,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <ScrollView
             style={styles.pageContent}
@@ -570,7 +583,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <SubscriptionBillingScreen />
         </SafeAreaView>
@@ -581,7 +594,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <InvoiceSetupScreen />
         </SafeAreaView>
@@ -592,7 +605,7 @@ export default function ManagementMenuScreen({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
           <DashboardSubpageHeader
             subtitle={pageTitle}
-            onBack={() => router.replace('/dashboard/menu')}
+            onBack={returnToMenu}
           />
           <ProfileScreen />
         </SafeAreaView>
@@ -602,7 +615,7 @@ export default function ManagementMenuScreen({
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.fullPage}>
         <DashboardSubpageHeader
           subtitle={pageTitle}
-          onBack={() => router.replace('/dashboard/menu')}
+          onBack={returnToMenu}
         />
         <ScrollView style={styles.pageContent} contentContainerStyle={styles.fullPageContent}>
           <Text style={styles.eyebrow}>{getPharmacyDisplayName(storeName).toLocaleUpperCase()}</Text>

@@ -1,4 +1,4 @@
-import { router, usePathname, type Href } from 'expo-router';
+import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +41,8 @@ const staffItems: FooterItem[] = [
 export default function DashboardFooter() {
   const { session, dashboardRole, approvalStatus, profileLoading, staffPermissions } = useAuth();
   const pathname = usePathname();
+  const { onboarding: onboardingParam } = useLocalSearchParams<{ onboarding?: string | string[] }>();
+  const onboarding = (Array.isArray(onboardingParam) ? onboardingParam[0] : onboardingParam) === '1';
   const insets = useSafeAreaInsets();
   const t = useTranslate();
 
@@ -50,6 +52,9 @@ export default function DashboardFooter() {
     || approvalStatus !== 'approved'
     || !dashboardRole
     || pathname.startsWith('/dashboard')
+    || pathname.startsWith('/shop-setup')
+    || pathname.startsWith('/pharmacy-setup-onboarding')
+    || onboarding
   ) {
     return null;
   }
