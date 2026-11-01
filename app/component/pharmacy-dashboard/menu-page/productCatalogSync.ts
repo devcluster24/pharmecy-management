@@ -1,6 +1,28 @@
 import { supabase } from "@/lib/supabase/client";
 
 export const PRODUCT_CATALOG_AUTO_SYNC_KEY = "pharmacy-product-auto-sync-v1";
+export const PRODUCT_CATALOG_INITIAL_IMPORT_KEY = "pharmacy-product-catalog-initial-import-v1";
+
+export type InitialCatalogImportState = {
+  status: "running" | "completed" | "failed";
+  total: number;
+  processed: number;
+  imported: number;
+  duplicates: number;
+  skipped: number;
+  cursor: string | null;
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+};
+
+export type CatalogImportProgress = {
+  processed: number;
+  imported: number;
+  duplicates: number;
+  skipped: number;
+  cursor: string | null;
+};
 
 export type ProductAutoSyncSettings = {
   enabled: boolean;
@@ -135,8 +157,57 @@ export async function saveProductAutoSyncSettings(ownerId: string, enabled: bool
   return payload;
 }
 
-function normalizeIdentityPart(value: string) {
-  return value.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[\s\p{P}\p{S}]+/gu, "");
+export async function loadInitialCatalogImportState(ownerId: string): Promise<InitialCatalogImportState | null> {
+  const { data, error } = await supabase
+    .from("pharmacy_app_data")
+    .select("payload")
+    .eq("owner_user_id", ownerId)
+    .eq("data_key", PRODUCT_CATALOG_INITIAL_IMPORT_KEY)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.payload === null || data?.payload === undefined) return null;
+  const payload = data.payload as Partial<InitialCatalogImportState>;
+  if (
+    (payload.status !== "running" && payload.status !== "completed" && payload.status !== "failed")
+    || !Number.isFinite(payload.total)
+    || !Number.isFinite(payload.processed)
+    || !Number.isFinite(payload.imported)
+    || !Number.isFinite(payload.duplicates)
+    || !Number.isFinite(payload.skipped)
+    || typeof payload.startedAt !== "string"
+  ) {
+    throw new Error("Saved initial product catalog import progress has an invalid format.");
+  }
+  return {
+    status: payload.status,
+    total: payload.total as number,
+    processed: payload.processed as number,
+    imported: payload.imported as number,
+    duplicates: payload.duplicates as number,
+    skipped: payload.skipped as number,
+    cursor: typeof payload.cursor === "string" ? payload.cursor : null,
+    startedAt: payload.startedAt,
+    updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : payload.startedAt,
+    ...(typeof payload.error === "string" ? { error: payload.error } : {}),
+  };
+}
+
+export async function saveInitialCatalogImportState(ownerId: string, state: InitialCatalogImportState) {
+  const { error } = await supabase
+    .from("pharmacy_app_data")
+    .upsert({
+      owner_user_id: ownerId,
+      data_key: PRODUCT_CATALOG_INITIAL_IMPORT_KEY,
+      payload: state,
+      updated_at: state.updatedAt,
+    }, { onConflict: "owner_user_id,data_key" });
+  if (error) throw error;
+}
+
+function normalizeIdentityPart(value: string | null | undefined) {
+  return typeof value === "string"
+    ? value.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[\s\p{P}\p{S}]+/gu, "")
+    : "";
 }
 
 function getIdentityKey(product: Pick<ExistingProduct, "medicine_name" | "strength" | "dosage_form" | "manufacturer">) {
@@ -182,35 +253,27 @@ function mapCatalogProduct(row: CatalogProduct, ownerId: string): PharmacyProduc
 
 export async function importCatalogProducts(
   ownerId: string,
-  options: { company?: string; createdSince?: string } = {},
+  options: {
+    company?: string;
+    createdSince?: string;
+    afterId?: string | null;
+    pageSize?: number;
+    onProgress?: (progress: CatalogImportProgress) => Promise<void>;
+  } = {},
 ) {
-  const catalogRows: CatalogProduct[] = [];
-  const pageSize = 1000;
-  for (let offset = 0; ; offset += pageSize) {
-    let query = supabase.from("admin_medicine_catalog").select("*");
-    if (options.company) query = query.eq("pharmaceutical_company", options.company);
-    if (options.createdSince) query = query.gte("created_at", options.createdSince);
-    const { data, error } = await query
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (error) throw error;
-    const page = (data ?? []) as CatalogProduct[];
-    catalogRows.push(...page);
-    if (page.length < pageSize) break;
-  }
-
   const existingProducts: ExistingProduct[] = [];
-  for (let offset = 0; ; offset += pageSize) {
+  const existingPageSize = 1000;
+  for (let offset = 0; ; offset += existingPageSize) {
     const { data, error } = await supabase
       .from("pharmacy_catalog_products")
       .select("source_catalog_id, medicine_name, strength, dosage_form, manufacturer")
       .eq("owner_user_id", ownerId)
       .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
+      .range(offset, offset + existingPageSize - 1);
     if (error) throw error;
     const page = (data ?? []) as ExistingProduct[];
     existingProducts.push(...page);
-    if (page.length < pageSize) break;
+    if (page.length < existingPageSize) break;
   }
 
   const importedIds = new Set(existingProducts
@@ -219,40 +282,97 @@ export async function importCatalogProducts(
   const importedKeys = new Set(existingProducts
     .map(getIdentityKey)
     .filter((key): key is string => Boolean(key)));
-  const productsToSave: PharmacyProduct[] = [];
-  let duplicateCount = 0;
-  for (const row of catalogRows) {
-    if (importedIds.has(row.id)) {
-      duplicateCount += 1;
-      continue;
-    }
-    const product = mapCatalogProduct(row, ownerId);
-    const identity = getIdentityKey(product);
-    if (identity && importedKeys.has(identity)) {
-      duplicateCount += 1;
-      continue;
-    }
-    productsToSave.push(product);
-    importedIds.add(row.id);
-    if (identity) importedKeys.add(identity);
-  }
-
+  let processed = 0;
   let added = 0;
-  for (let offset = 0; offset < productsToSave.length; offset += 100) {
-    const { data, error } = await supabase
-      .from("pharmacy_catalog_products")
-      .upsert(productsToSave.slice(offset, offset + 100), {
-        onConflict: "owner_user_id,source_catalog_id",
-        ignoreDuplicates: true,
-      })
-      .select("id");
+  let duplicates = 0;
+  let skipped = 0;
+  let cursor = options.afterId ?? null;
+  const catalogPageSize = Math.max(1, options.pageSize ?? 500);
+
+  while (true) {
+    let query = supabase.from("admin_medicine_catalog").select("*");
+    if (options.company) query = query.eq("pharmaceutical_company", options.company);
+    if (options.createdSince) query = query.gte("created_at", options.createdSince);
+    if (cursor) query = query.gt("id", cursor);
+    const { data, error } = await query
+      .order("id", { ascending: true })
+      .limit(catalogPageSize);
     if (error) throw error;
-    added += data?.length ?? 0;
+    const page = (data ?? []) as CatalogProduct[];
+    if (page.length === 0) break;
+
+    const productsToSave: PharmacyProduct[] = [];
+    for (const row of page) {
+      processed += 1;
+      cursor = row.id;
+      try {
+        if (importedIds.has(row.id)) {
+          duplicates += 1;
+          continue;
+        }
+        const product = mapCatalogProduct(row, ownerId);
+        const identity = getIdentityKey(product);
+        if (identity && importedKeys.has(identity)) {
+          duplicates += 1;
+          continue;
+        }
+        productsToSave.push(product);
+        importedIds.add(row.id);
+        if (identity) importedKeys.add(identity);
+      } catch (productError) {
+        skipped += 1;
+        console.warn(`Skipping shared catalog product ${row.id}:`, productError);
+      }
+    }
+
+    for (let offset = 0; offset < productsToSave.length; offset += 100) {
+      const batch = productsToSave.slice(offset, offset + 100);
+      try {
+        const { data: saved, error: saveError } = await supabase
+          .from("pharmacy_catalog_products")
+          .upsert(batch, {
+            onConflict: "owner_user_id,source_catalog_id",
+            ignoreDuplicates: true,
+          })
+          .select("id");
+        if (saveError) throw saveError;
+        added += saved?.length ?? 0;
+        continue;
+      } catch (batchError) {
+        console.warn("Could not import a product batch; retrying its products individually:", batchError);
+      }
+
+      for (const product of batch) {
+        try {
+          const singleResult = await supabase
+            .from("pharmacy_catalog_products")
+            .upsert(product, {
+              onConflict: "owner_user_id,source_catalog_id",
+              ignoreDuplicates: true,
+            })
+            .select("id")
+            .maybeSingle();
+          if (singleResult.error) throw singleResult.error;
+          if (singleResult.data) added += 1;
+        } catch (productError) {
+          skipped += 1;
+          console.warn(`Skipping shared catalog product ${product.source_catalog_id}:`, productError);
+        }
+      }
+    }
+
+    duplicates = processed - added - skipped;
+    if (options.onProgress && cursor) {
+      await options.onProgress({ processed, imported: added, duplicates, skipped, cursor });
+    }
+    if (page.length < catalogPageSize) break;
   }
 
   return {
     added,
-    duplicates: duplicateCount + productsToSave.length - added,
-    available: catalogRows.length,
+    duplicates,
+    available: processed,
+    skipped,
+    cursor,
   };
 }
