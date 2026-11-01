@@ -23,7 +23,6 @@ import {
   subscribeToPurchaseList,
   type PurchaseListRow,
 } from "./purchaseStorage";
-import { parseScannedBatchDetails } from "@/lib/pharmacy-batch-ocr";
 import {
   emptyPaymentMethodsSnapshot,
   getPaymentMethodsSnapshot,
@@ -295,18 +294,9 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [pendingBatchEntry, setPendingBatchEntry] = useState<PendingBatchEntry | null>(null);
-  const [batchNumberSuggestion, setBatchNumberSuggestion] = useState("");
-  const [isScanningBatch, setIsScanningBatch] = useState(false);
-  const [batchScanProgress, setBatchScanProgress] = useState("");
-  const [batchCameraStream, setBatchCameraStream] = useState<MediaStream | null>(null);
   const [batchPurchasePriceMode, setBatchPurchasePriceMode] = useState<"flat" | "percent">("flat");
   const [batchPurchasePriceRate, setBatchPurchasePriceRate] = useState("");
   const expDateInputRef = useRef<HTMLInputElement>(null);
-  const batchImageInputRef = useRef<HTMLInputElement>(null);
-  const batchCameraVideoRef = useRef<HTMLVideoElement>(null);
-  const batchCameraStreamRef = useRef<MediaStream | null>(null);
-  const batchCameraRequestRef = useRef(0);
-  const batchScanRequestRef = useRef(0);
   const mrpInputRef = useRef<HTMLInputElement>(null);
   const focusedBatchFieldRef = useRef<{ field: EditableBatchField; originalValue: string } | null>(null);
   const [pendingOrderReceipts, setPendingOrderReceipts] = useState<PendingOrderReceipt[]>([]);
@@ -771,10 +761,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     batches: BatchDetails[] = [],
   ) {
     const product = products.find((item) => item.id === brand.productId);
-    batchScanRequestRef.current += 1;
-    setIsScanningBatch(false);
-    setBatchNumberSuggestion("");
-    setBatchScanProgress("");
     setBatchPurchasePriceMode("flat");
     setBatchPurchasePriceRate("");
     setPendingBatchEntry({
@@ -801,10 +787,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
         (item.brand.trim() || item.medicine_name.trim()) === row.brand &&
         item.strength === row.strength,
       );
-    batchScanRequestRef.current += 1;
-    setIsScanningBatch(false);
-    setBatchNumberSuggestion("");
-    setBatchScanProgress("");
     setBatchPurchasePriceMode("flat");
     setBatchPurchasePriceRate("");
     setPendingBatchEntry({
@@ -828,9 +810,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
   }
 
   function cancelBatchEntry() {
-    batchScanRequestRef.current += 1;
-    stopBatchCameraScan();
-    setIsScanningBatch(false);
     if (pendingBatchEntry?.brandDraft) {
       updateBrandSelection(pendingBatchEntry.companySelectionId, pendingBatchEntry.brandSelectionId, {
         isAddingBrand: true,
@@ -838,8 +817,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
       });
     }
     setPendingBatchEntry(null);
-    setBatchNumberSuggestion("");
-    setBatchScanProgress("");
     setBatchEntryError("");
   }
 
@@ -848,7 +825,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     value: string,
   ) {
     if (!pendingBatchEntry) return;
-    if (field === "batchNumber") setBatchNumberSuggestion("");
     setPendingBatchEntry((current) => {
       if (!current) return current;
       if (field === "mrp" && batchPurchasePriceMode === "percent") {
@@ -866,310 +842,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
       return { ...current, [field]: value };
     });
     setBatchEntryError("");
-  }
-
-  function stopBatchCameraScan() {
-    batchCameraRequestRef.current += 1;
-    batchCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-    batchCameraStreamRef.current = null;
-    setBatchCameraStream(null);
-    setIsScanningBatch(false);
-    setBatchScanProgress("");
-  }
-
-  async function startBatchCameraScan() {
-    if (!pendingBatchEntry || isScanningBatch) return;
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      setBatchEntryError("Camera scanning requires HTTPS and a browser that supports camera access. You can upload a batch label photo instead.");
-      return;
-    }
-
-    const requestId = ++batchCameraRequestRef.current;
-    setIsScanningBatch(true);
-    setBatchEntryError("");
-    setBatchScanProgress("Requesting camera permission...");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: "environment" } },
-      });
-      if (requestId !== batchCameraRequestRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      batchCameraStreamRef.current = stream;
-      setBatchCameraStream(stream);
-    } catch (error) {
-      if (requestId !== batchCameraRequestRef.current) return;
-      setIsScanningBatch(false);
-      setBatchScanProgress("");
-      setBatchEntryError(error instanceof Error
-        ? `Could not start the camera: ${error.message}`
-        : "Could not start the camera. Check browser camera permissions or upload a batch label photo.");
-    }
-  }
-
-  useEffect(() => {
-    if (!batchCameraStream) return;
-    const video = batchCameraVideoRef.current;
-    let active = true;
-    let complete = false;
-    let framesScanned = 0;
-    let scanTimeout: number | undefined;
-    let worker: Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>> | undefined;
-    let workerTerminated = false;
-    const scanVotes = {
-      batchNumber: new Map<string, number>(),
-      suggestedBatchNumber: new Map<string, number>(),
-      mfgDate: new Map<string, number>(),
-      expDate: new Map<string, number>(),
-    };
-
-    function bestScan() {
-      const mostFrequent = (votes: Map<string, number>) => [...votes.entries()]
-        .sort((left, right) => right[1] - left[1])[0]?.[0];
-      return {
-        batchNumber: mostFrequent(scanVotes.batchNumber),
-        suggestedBatchNumber: mostFrequent(scanVotes.suggestedBatchNumber),
-        mfgDate: mostFrequent(scanVotes.mfgDate),
-        expDate: mostFrequent(scanVotes.expDate),
-      };
-    }
-
-    function recordScan(details: ReturnType<typeof parseScannedBatchDetails>) {
-      if (details.batchNumber) {
-        scanVotes.batchNumber.set(
-          details.batchNumber,
-          (scanVotes.batchNumber.get(details.batchNumber) ?? 0) + 1,
-        );
-      }
-      if (details.suggestedBatchNumber) {
-        scanVotes.suggestedBatchNumber.set(
-          details.suggestedBatchNumber,
-          (scanVotes.suggestedBatchNumber.get(details.suggestedBatchNumber) ?? 0) + 1,
-        );
-      }
-      if (details.mfgDate) {
-        scanVotes.mfgDate.set(details.mfgDate, (scanVotes.mfgDate.get(details.mfgDate) ?? 0) + 1);
-      }
-      if (details.expDate) {
-        scanVotes.expDate.set(details.expDate, (scanVotes.expDate.get(details.expDate) ?? 0) + 1);
-      }
-    }
-
-    async function terminateWorker() {
-      if (!worker || workerTerminated) return;
-      workerTerminated = true;
-      try {
-        await worker.terminate();
-      } catch (error) {
-        if (active) {
-          setBatchEntryError((current) => current || (
-            error instanceof Error
-              ? `Could not close the batch scanner: ${error.message}`
-              : "Could not close the batch scanner."
-          ));
-        }
-      }
-    }
-
-    function finishScan() {
-      if (!active || complete) return;
-      complete = true;
-      const details = bestScan();
-      const batchVoteCount = details.batchNumber
-        ? scanVotes.batchNumber.get(details.batchNumber) ?? 0
-        : 0;
-      const confirmedBatchNumber = batchVoteCount >= 2 ? details.batchNumber : undefined;
-      setPendingBatchEntry((current) => current ? {
-        ...current,
-        ...(details.mfgDate ? { mfgDate: details.mfgDate } : {}),
-        ...(details.expDate ? { expDate: details.expDate } : {}),
-        ...(confirmedBatchNumber ? { batchNumber: confirmedBatchNumber } : {}),
-      } : current);
-      setBatchNumberSuggestion(
-        confirmedBatchNumber ? "" : details.batchNumber ?? details.suggestedBatchNumber ?? "",
-      );
-      setBatchEntryError(
-        confirmedBatchNumber && details.mfgDate && details.expDate
-          ? ""
-          : details.batchNumber || details.mfgDate || details.expDate
-            ? "Some details were not recognized. Review the fields and enter any missing values."
-            : "No batch details recognized. Try again or fill the fields manually.",
-      );
-      stopBatchCameraScan();
-    }
-
-    async function scanFrames() {
-      try {
-        if (!video) throw new Error("The camera preview could not be opened.");
-        video.srcObject = batchCameraStream;
-        await video.play();
-
-        const { createWorker } = await import("tesseract.js");
-        worker = await createWorker("eng", undefined, {
-          logger: ({ status, progress }) => {
-            if (!active) return;
-            setBatchScanProgress(progress > 0
-              ? `${status} ${Math.round(progress * 100)}%`
-              : status);
-          },
-        });
-        if (!active || complete) {
-          await terminateWorker();
-          return;
-        }
-
-        setBatchScanProgress("Scanning batch label...");
-        scanTimeout = window.setTimeout(finishScan, 5000);
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("Could not prepare a camera frame for scanning.");
-
-        while (active && !complete) {
-          if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
-            await new Promise((resolve) => window.setTimeout(resolve, 100));
-            continue;
-          }
-          const scale = Math.min(1, 1600 / video.videoWidth);
-          canvas.width = Math.round(video.videoWidth * scale);
-          canvas.height = Math.round(video.videoHeight * scale);
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const frame = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob((blob) => {
-              if (blob) resolve(blob);
-              else reject(new Error("Could not capture a camera frame."));
-            }, "image/jpeg", 0.88);
-          });
-          const { data } = await worker.recognize(frame, {}, { blocks: true });
-          if (!active || complete) break;
-          framesScanned += 1;
-          const lines = data.blocks?.flatMap((block) =>
-            block.paragraphs.flatMap((paragraph) =>
-              paragraph.lines.map((line) => ({
-                text: line.text,
-                frame: {
-                  left: line.bbox.x0,
-                  top: line.bbox.y0,
-                  width: line.bbox.x1 - line.bbox.x0,
-                  height: line.bbox.y1 - line.bbox.y0,
-                },
-              })),
-            ),
-          ) ?? [];
-          recordScan(parseScannedBatchDetails(data.text, lines));
-          const details = bestScan();
-          setBatchScanProgress(`Scanning batch label... ${framesScanned} frame${framesScanned === 1 ? "" : "s"}`);
-          if (framesScanned >= 2 && details.mfgDate && details.expDate) finishScan();
-        }
-      } catch (error) {
-        if (active && !complete) {
-          complete = true;
-          setBatchEntryError(error instanceof Error
-            ? `Batch camera scan failed: ${error.message}`
-            : "Batch camera scan failed. Try again or upload a batch label photo.");
-          stopBatchCameraScan();
-        }
-      } finally {
-        await terminateWorker();
-      }
-    }
-
-    void scanFrames();
-    return () => {
-      active = false;
-      if (scanTimeout !== undefined) window.clearTimeout(scanTimeout);
-      batchCameraStream.getTracks().forEach((track) => track.stop());
-      if (batchCameraStreamRef.current === batchCameraStream) {
-        batchCameraStreamRef.current = null;
-      }
-      if (video?.srcObject === batchCameraStream) {
-        video.srcObject = null;
-      }
-      void terminateWorker();
-    };
-  }, [batchCameraStream]);
-
-  useEffect(() => () => {
-    batchCameraRequestRef.current += 1;
-    batchCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-    batchCameraStreamRef.current = null;
-  }, []);
-
-  async function scanBatchImage(file: File) {
-    if (!pendingBatchEntry || isScanningBatch) return;
-    const requestId = ++batchScanRequestRef.current;
-    setIsScanningBatch(true);
-    setBatchEntryError("");
-    setBatchScanProgress("Preparing scanner...");
-    let worker: Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>> | undefined;
-    try {
-      const { createWorker } = await import("tesseract.js");
-      worker = await createWorker("eng", undefined, {
-        logger: ({ status, progress }) => {
-          setBatchScanProgress(
-            progress > 0
-              ? `${status} ${Math.round(progress * 100)}%`
-              : status,
-          );
-        },
-      });
-      const { data } = await worker.recognize(file, {}, { blocks: true });
-      if (requestId !== batchScanRequestRef.current) return;
-      const lines = data.blocks?.flatMap((block) =>
-        block.paragraphs.flatMap((paragraph) =>
-          paragraph.lines.map((line) => ({
-            text: line.text,
-            frame: {
-              left: line.bbox.x0,
-              top: line.bbox.y0,
-              width: line.bbox.x1 - line.bbox.x0,
-              height: line.bbox.y1 - line.bbox.y0,
-            },
-          })),
-        ),
-      ) ?? [];
-      const details = parseScannedBatchDetails(data.text, lines);
-      if (!details.batchNumber && !details.suggestedBatchNumber && !details.mfgDate && !details.expDate) {
-        setBatchEntryError("No batch details recognized. Try a clearer photo or fill the fields manually.");
-        return;
-      }
-
-      setPendingBatchEntry((current) => current ? {
-        ...current,
-        ...(details.batchNumber ? { batchNumber: details.batchNumber } : {}),
-        ...(details.mfgDate ? { mfgDate: details.mfgDate } : {}),
-        ...(details.expDate ? { expDate: details.expDate } : {}),
-      } : current);
-      setBatchNumberSuggestion(details.batchNumber ? "" : details.suggestedBatchNumber ?? "");
-      if (!details.mfgDate || !details.expDate || (!details.batchNumber && !details.suggestedBatchNumber)) {
-        setBatchEntryError("Some details were not recognized. Review the fields and enter any missing values.");
-      }
-    } catch (error) {
-      if (requestId === batchScanRequestRef.current) {
-        setBatchEntryError(error instanceof Error
-          ? `Batch scan failed: ${error.message}`
-          : "Batch scan failed. Fill the fields manually.");
-      }
-    } finally {
-      if (worker) {
-        try {
-          await worker.terminate();
-        } catch (error) {
-          if (requestId === batchScanRequestRef.current) {
-            setBatchEntryError((current) => current || (
-              error instanceof Error
-                ? `Could not close the batch scanner: ${error.message}`
-                : "Could not close the batch scanner."
-            ));
-          }
-        }
-      }
-      if (requestId === batchScanRequestRef.current) {
-        setIsScanningBatch(false);
-        setBatchScanProgress("");
-      }
-    }
   }
 
   function getPurchasePriceFromRate(mrpValue: string, rateValue: string) {
@@ -1248,7 +920,6 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (pendingBatchEntry) {
-        stopBatchCameraScan();
         if (pendingBatchEntry.brandDraft) {
           setCompanySelections((current) => current.map((companySelection) =>
             companySelection.id === pendingBatchEntry.companySelectionId
@@ -2405,130 +2076,12 @@ export default function PurchaseCreateAction({ standalone = false }: { standalon
                       <p style={{ margin: "5px 0 0", color: "#77857d", fontSize: 12 }}>
                         {pendingBatchEntry.customBrand || products.find((product) => product.id === pendingBatchEntry.productId)?.brand || "Selected product"}
                       </p>
-                      {isScanningBatch ? (
-                        <p role="status" style={{ margin: "5px 0 0", color: "#17704e", fontSize: 11 }}>
-                          Scanning image: {batchScanProgress}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div style={{ display: "flex", flex: "0 0 auto", alignItems: "center", justifyContent: "flex-end" }}>
-                      <input
-                        ref={batchImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        aria-label="Take or choose a batch label photo"
-                        disabled={isScanningBatch}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          event.currentTarget.value = "";
-                          if (file) void scanBatchImage(file);
-                        }}
-                        style={{ display: "none" }}
-                      />
-                      <button
-                        type="button"
-                        aria-label="Scan batch number and dates"
-                        title="Scan batch number and dates with the camera"
-                        disabled={isScanningBatch}
-                        onClick={() => void startBatchCameraScan()}
-                        style={{
-                          width: 36,
-                          height: 36,
-                          display: "grid",
-                          placeItems: "center",
-                          border: "1px solid #dce5df",
-                          borderRadius: 8,
-                          background: isScanningBatch ? "#f1f5f2" : "#fff",
-                          color: isScanningBatch ? "#8b9991" : "#17664f",
-                          cursor: isScanningBatch ? "wait" : "pointer",
-                        }}>
-                        <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 4h-4L8 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3l-2-2Z" />
-                          <circle cx="12" cy="13" r="3.2" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isScanningBatch}
-                        onClick={() => batchImageInputRef.current?.click()}
-                        style={{
-                          height: 36,
-                          marginLeft: 6,
-                          padding: "0 9px",
-                          border: "1px solid #dce5df",
-                          borderRadius: 8,
-                          background: "#fff",
-                          color: "#17664f",
-                          fontSize: 11,
-                          fontWeight: 650,
-                          cursor: isScanningBatch ? "wait" : "pointer",
-                        }}
-                      >
-                        Upload photo
-                      </button>
                     </div>
                   </div>
-                  {batchCameraStream ? (
-                    <div
-                      role="dialog"
-                      aria-modal="true"
-                      aria-labelledby="purchase-batch-camera-title"
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 70,
-                        display: "grid",
-                        placeItems: "center",
-                        padding: 16,
-                        background: "rgba(8, 18, 12, 0.82)",
-                      }}
-                    >
-                      <div style={{ width: "min(560px, 100%)", overflow: "hidden", borderRadius: 12, background: "#fff", boxShadow: "0 24px 80px rgba(0, 0, 0, 0.35)" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px" }}>
-                          <div>
-                            <h3 id="purchase-batch-camera-title" style={{ margin: 0, color: "#20342a", fontSize: 16 }}>Scan batch label</h3>
-                            <p role="status" style={{ margin: "4px 0 0", color: "#526158", fontSize: 12 }}>
-                              {batchScanProgress || "Keep the batch number and dates in view."}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={stopBatchCameraScan}
-                            style={{ border: "1px solid #dce5df", borderRadius: 7, background: "#fff", color: "#34453b", padding: "8px 11px", cursor: "pointer" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        <video
-                          ref={batchCameraVideoRef}
-                          autoPlay
-                          muted
-                          playsInline
-                          aria-label="Live camera view of the batch label"
-                          style={{ display: "block", width: "100%", maxHeight: "65vh", minHeight: 220, background: "#101814", objectFit: "contain" }}
-                        />
-                        <p style={{ margin: 0, padding: "10px 16px 14px", color: "#77857d", fontSize: 11 }}>
-                          Hold the label steady. The scan will stop when both dates are found or after a few seconds.
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
                   <form className="purchase-batch-details-form" onSubmit={saveBatchEntry} noValidate style={{ minHeight: 0, overflowY: "auto" }}>
                     <div className="purchase-batch-details-fields" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, padding: "18px 24px" }}>
                       <div style={{ display: "grid", gap: 6, color: "#526158", fontSize: 12, fontWeight: 600 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                          <label htmlFor="receive-batch-number">Batch Number</label>
-                          {batchNumberSuggestion && batchNumberSuggestion !== pendingBatchEntry.batchNumber ? (
-                            <button
-                              type="button"
-                              aria-label={`Use suggested batch number ${batchNumberSuggestion}`}
-                              onClick={() => updatePendingBatchField("batchNumber", batchNumberSuggestion)}
-                              style={{ border: 0, borderRadius: 5, background: "#e8f4ec", color: "#17664f", padding: "4px 7px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
-                              Use {batchNumberSuggestion}
-                            </button>
-                          ) : null}
-                        </div>
+                        <label htmlFor="receive-batch-number">Batch Number</label>
                         <input
                           id="receive-batch-number"
                           aria-label="Batch Number"
